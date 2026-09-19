@@ -29,7 +29,9 @@ needs a server-computed count; see `PENDING.md`.
 **Reference:** a position in `$all` is a pair, commit and prepare.
 
 **Nightingale:** a single signed 64-bit number, the store's global sequence.
-The client type keeps the name `Position` but holds one value.
+The client type keeps the name `Position` but holds one value. The head of
+`$all` is the high-water mark, the position up to which every event is
+committed; 0 means no events yet.
 
 **Why:** the store has one sequence; a pair would carry the same number twice.
 
@@ -62,6 +64,18 @@ guarantee with `ANY`. That part is not a variance.
 **Why:** bytes keep the client's exact text, which a typed map of doubles
 cannot, and the store keeps headers as a JSON object already.
 
+## Subscription start positions are inclusive
+
+**Reference:** a subscription starts after a position: `FromStream.After(x)`
+and `FromAll.After(p)` are exclusive, `Start` and `End` are the two ends.
+
+**Nightingale:** a subscription starts at a position, inclusive, exactly as a
+read does; `End` means after now. A client that wants everything after `x`
+subscribes from `x + 1`.
+
+**Why:** one rule for reads and subscriptions; the client type is the same
+`StreamPosition` for both.
+
 ## The client hands back events, not resolved links
 
 **Reference:** a read yields a `ResolvedEvent` wrapping the event and, when
@@ -91,14 +105,16 @@ afterwards the name reads as not found and may be appended to again.
 **Nightingale:** sequence numbers are assigned before a transaction commits, so
 a lower number can become visible after a higher one. Every forward read and
 subscription over `$all` and the virtual streams is therefore bounded by the
-store's high-water mark, which advances by polling. An append followed
-immediately by a read of `$all` may not show the event for roughly the polling
-interval. Per-stream reads are unaffected: versions are dense under the stream
-lock.
+store's high-water mark: the position up to which every number is committed.
+A bounded read, and a subscription from the end, bring the mark up to date
+first, so an append that has returned is in what they see, with one exception:
+while a lower number's transaction is still open, the mark stops before it and
+every higher event waits, until that transaction commits or the poller gives
+the gap up as abandoned after the store's threshold. A subscription's live
+phase follows the poller, at most its interval behind an append. Per-stream
+reads are unaffected: versions are dense under the stream lock.
 
-**Why:** reading past the high-water mark can skip an event forever. The
-gateway shortens the window by waking the high-water detector after its own
-appends.
+**Why:** reading past the high-water mark can skip an event forever.
 
 ## Stream name case sensitivity follows the database collation
 

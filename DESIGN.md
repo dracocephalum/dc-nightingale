@@ -29,8 +29,8 @@ twenty terabytes, about a hundred services connected over gRPC.
 |---|---|---|
 | `core` | the wire contract (`Protocol/*.proto`) and the domain types both sides share: positions, expected states, event data and records, exceptions | any store, any transport detail |
 | `client` | `NightingaleClient` over the generated stub, and the mapping from wire failure reasons to the shared exceptions | the server's internals |
-| `server` | the service implementations and the port a backend implements, `IStreamStore` | any particular store |
-| `server` (Polecat backend) | `PolecatStreamStore`, the schema additions, the initializer that owns the database, and the default host | the wire |
+| `server` | the service implementations, the port a backend implements, `IStreamStore`, and the tail every subscription waits on, `IStoreTail` | any particular store |
+| `server` (Polecat backend) | `PolecatStreamStore`, the tailer over the store's high-water agent, the schema additions, the initializer that owns the database, and the default host | the wire |
 
 The port is deliberately small: append with an expected state, read a bounded
 slice. Everything the contract adds, paging, the head-first read order, error
@@ -133,6 +133,19 @@ dense under the stream lock. Under tenant partitioning there is no global
 sequence, each tenant has its own, so the wildcard read across tenants is
 refused there and everything else still works.
 
+`IStoreTail` is the seam for liveness. One tailer per process runs the store's
+own high-water agent, the part of its async daemon that finds that mark, and
+publishes every advance; each subscription waits on it instead of polling the
+store, so a thousand subscribers cost the store one poll per interval. A
+subscription confirms with the head, catches up in pages, says so, then
+delivers whatever each advance brings: a stream subscription re-reads its own
+stream from where it left off, an `$all` subscription reads the advanced range.
+Where now matters, a subscription from the end or a bounded read of `$all`,
+the tail refreshes itself first with one query through the committed rows that
+follow the mark without a gap, so an append that has returned is never on the
+wrong side of "now". It never passes a gap; giving up an abandoned gap is the
+poller's call, after the store's threshold.
+
 ## Conventions the code relies on
 
 - **Expected states** are the reference client's: any, no stream, stream
@@ -152,8 +165,8 @@ refused there and everything else still works.
 ## How it is tested
 
 - `*.Tests` projects are unit tests and need nothing running: the service
-  against a strict fake of the port, the client against an in-process fake
-  server, the conversions, the marker comparison.
+  against a strict fake of the port and a tail a test moves by hand, the
+  client against a scripted call, the conversions, the marker comparison.
 - `*.Tests.Integration` projects need the local SQL Server and run only with
   `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
   path, and the two guards above. Each creates its databases and drops them.

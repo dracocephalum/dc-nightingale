@@ -3,6 +3,7 @@ using System.Text.Json;
 using JasperFx.Events;
 using Polecat;
 using Polecat.Exceptions;
+using Polecat.Linq;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
@@ -130,6 +131,26 @@ internal sealed class PolecatStreamStore(IDocumentStore store) : IStreamStore
         }
 
         return new StreamSlice(head, records);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        // The store's query hides archived events and scopes to the session's tenant on its own.
+        await using var session = store.QuerySession();
+        var query = session.Events.QueryAllRawEvents();
+        var stored = direction == Direction.Forwards
+            ? await PolecatQueryableExtensions.ToListAsync(query.Where(stored => stored.Sequence >= from && stored.Sequence <= head).OrderBy(stored => stored.Sequence).Take(count), cancellationToken).ConfigureAwait(false)
+            : await PolecatQueryableExtensions.ToListAsync(query.Where(stored => stored.Sequence <= from).OrderByDescending(stored => stored.Sequence).Take(count), cancellationToken).ConfigureAwait(false);
+        var records = new EventRecord[stored.Count];
+        for (var i = 0; i < stored.Count; i++)
+        {
+            records[i] = ToRecord(stored[i]);
+        }
+
+        return records;
     }
 
     private static EventRecord ToRecord(IEvent stored) =>

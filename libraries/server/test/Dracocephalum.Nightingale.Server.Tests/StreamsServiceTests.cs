@@ -20,6 +20,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     private static readonly DateTimeOffset Created = new(2026, 9, 17, 8, 0, 0, TimeSpan.Zero);
 
     private readonly IStreamStore _store = A.Fake<IStreamStore>(options => options.Strict());
+    private readonly FakeTail _tail = new();
     private WebApplication? _app;
     private GrpcChannel? _channel;
 
@@ -29,6 +30,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
         builder.Services.AddSingleton(_store);
+        builder.Services.AddSingleton<IStoreTail>(_tail);
         _app = builder.Build();
         _app.MapNightingaleServer();
         await _app.StartAsync();
@@ -119,6 +121,22 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Append_WhenStreamIsReserved_ShouldRejectTheName()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        using var call = client.Append(cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = "$all", ExpectedRevision = -2 } }, TestContext.Current.CancellationToken);
+        await call.RequestStream.CompleteAsync();
+        var exception = await Should.ThrowAsync<RpcException>(async () => await call.ResponseAsync);
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
+    }
+
+    [Fact]
     public async Task Read_WhenStreamHasNoEvents_ShouldSendStreamNotFoundAndNothingElse()
     {
         // Arrange
@@ -195,14 +213,183 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Read_WhenSubscribing_ShouldAnswerUnimplemented()
+    public async Task Read_WhenFilteringAll_ShouldAnswerUnimplemented()
     {
         // Arrange
         var client = new Streams.StreamsClient(_channel);
-        var request = new ReadRequest { Stream = "orders-1", Start = new(), Subscription = new SubscriptionOptions() };
+        var request = new ReadRequest { Stream = "$all", Start = new(), Count = 1, Filter = new Filter { EventType = new Expression { Prefix = { "order" } } } };
 
         // Act
         var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.Unimplemented);
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingAllForwards_ShouldSendTheHeadThenEventsNeverPastIt()
+    {
+        // Arrange: the head is taken once; the store is asked for one page bounded by it.
+        _tail.Advance(20);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 20, 3, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 5, "a"), Record("orders-2", 0, 7, "b"), Record("orders-1", 1, 9, "c")]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$all", Start = new(), Count = 3 });
+
+        // Assert
+        messages[0].Head.ShouldSatisfyAllConditions(head => head.First.ShouldBe(0), head => head.Last.ShouldBe(20));
+        messages.Skip(1).Select(message => message.Event.Position).ShouldBe([5, 7, 9]);
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingAllBackwardsFromEnd_ShouldStartAtTheHead()
+    {
+        // Arrange
+        _tail.Advance(20);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Backwards, 20, 20, 2, A<CancellationToken>._))
+            .Returns([Record("orders-3", 0, 20, "z"), Record("orders-1", 4, 18, "y")]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$all", Direction = ReadDirection.Backwards, End = new(), Count = 2 });
+
+        // Assert
+        messages.Skip(1).Select(message => message.Event.Position).ShouldBe([20, 18]);
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingAllOfAnEmptyStore_ShouldSendOnlyTheHead()
+    {
+        // Arrange: head 0 means no events; the store is never asked.
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$all", Start = new(), Count = 10 });
+
+        // Assert
+        messages.ShouldHaveSingleItem().Head.Last.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingToAStream_ShouldConfirmCatchUpThenDeliverWhatTheTailBrings()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 0, 10, "a"), Record("orders-1", 1, 11, "b")]));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 2, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 2, 15, "c")]));
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "orders-1", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var catchUp = await Next(call, 4);
+        _tail.Advance(15);
+        var live = await Next(call, 2);
+
+        // Assert
+        catchUp[0].Confirmed.Head.ShouldBe(1);
+        catchUp[0].Confirmed.SubscriptionId.ShouldNotBeNullOrEmpty();
+        catchUp[1].Event.Revision.ShouldBe(0);
+        catchUp[2].Event.Revision.ShouldBe(1);
+        catchUp[3].CaughtUp.Head.ShouldBe(1);
+        live[0].Event.Revision.ShouldBe(2);
+        live[1].CaughtUp.Head.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingToAStreamThatDoesNotExistYet_ShouldConfirmWithMinusOneAndWaitForIt()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns((StreamSlice?)null).Once()
+            .Then.Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10, "a")]));
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "orders-1", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var confirmed = await Next(call, 2);
+        _tail.Advance(10);
+        var live = await Next(call, 2);
+
+        // Assert
+        confirmed[0].Confirmed.Head.ShouldBe(-1);
+        confirmed[1].CaughtUp.Head.ShouldBe(-1);
+        live[0].Event.Revision.ShouldBe(0);
+        live[1].CaughtUp.Head.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingToAStreamFromEnd_ShouldDeliverOnlyWhatComesAfter()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, long.MaxValue, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 4), []));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 5, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 5), [Record("orders-1", 5, 30, "f")]));
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "orders-1", End = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var confirmed = await Next(call, 2);
+        _tail.Advance(30);
+        var live = await Next(call, 2);
+
+        // Assert
+        confirmed[0].Confirmed.Head.ShouldBe(4);
+        confirmed[1].CaughtUp.Head.ShouldBe(4);
+        live[0].Event.Revision.ShouldBe(5);
+        live[1].CaughtUp.Head.ShouldBe(5);
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingToAll_ShouldCatchUpToTheTailThenFollowIt()
+    {
+        // Arrange
+        _tail.Advance(2);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 2, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 1, "a"), Record("orders-2", 0, 2, "b")]);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 3, 3, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([Record("orders-1", 1, 3, "c")]);
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "$all", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var catchUp = await Next(call, 4);
+        _tail.Advance(3);
+        var live = await Next(call, 2);
+
+        // Assert
+        catchUp[0].Confirmed.Head.ShouldBe(2);
+        catchUp.Skip(1).Take(2).Select(message => message.Event.Position).ShouldBe([1, 2]);
+        catchUp[3].CaughtUp.Head.ShouldBe(2);
+        live[0].Event.Position.ShouldBe(3);
+        live[1].CaughtUp.Head.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingBackwards_ShouldReject()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+        var request = new ReadRequest { Stream = "orders-1", Direction = ReadDirection.Backwards, End = new(), Subscription = new SubscriptionOptions() };
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingAVirtualStream_ShouldAnswerUnimplemented()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 1 }));
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.Unimplemented);
@@ -229,6 +416,18 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         await foreach (var message in call.ResponseStream.ReadAllAsync(TestContext.Current.CancellationToken))
         {
             messages.Add(message);
+        }
+
+        return messages;
+    }
+
+    /// <summary>Reads the next messages of a subscription, which never completes on its own.</summary>
+    private static async Task<List<ReadResponse>> Next(AsyncServerStreamingCall<ReadResponse> call, int count)
+    {
+        var messages = new List<ReadResponse>();
+        while (messages.Count < count && await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken))
+        {
+            messages.Add(call.ResponseStream.Current);
         }
 
         return messages;

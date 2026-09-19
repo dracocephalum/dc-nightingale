@@ -7,7 +7,8 @@ namespace Dracocephalum.Nightingale.Server;
 /// zero-based revisions and global positions, so a backend does every conversion once, at its own
 /// boundary. Reads are paged: the server asks for a page at a time and streams what it gets. A
 /// backend reports expected failures as the domain exceptions in <c>Dracocephalum.Nightingale</c>
-/// and never lets its own exception types cross this interface.
+/// and never lets its own exception types cross this interface. Liveness is the
+/// <see cref="IStoreTail"/>'s business, registered beside the store.
 /// </summary>
 public interface IStreamStore
 {
@@ -36,4 +37,18 @@ public interface IStreamStore
     /// <returns>The head and the events of the page, or <see langword="null"/>.</returns>
     /// <exception cref="StreamDeletedException">The stream was soft-deleted.</exception>
     Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads one page of <c>$all</c>: every live event in position order. Forwards, the page holds the
+    /// events at positions from <paramref name="from"/> up to <paramref name="head"/>, both inclusive,
+    /// so a caller that took the head from the tail never reads past what is committed. Backwards,
+    /// the page descends from <paramref name="from"/> and <paramref name="head"/> is not used.
+    /// </summary>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
+    /// <param name="head">The highest position a forwards page may hold.</param>
+    /// <param name="count">The most events to return. Positive.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events of the page, in the reading direction; fewer than asked means the end was reached.</returns>
+    Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken);
 }
