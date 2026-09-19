@@ -1,0 +1,15 @@
+// Persistent subscriptions: server-side checkpoints, acknowledgements, parking.
+//
+// PLACEHOLDER: the service exists so that the area, its generated client stub
+// and its service base are in place from the first build. The RPCs follow the
+// reference persistent-subscriptions protocol - unary Create, Update, Delete
+// and a bidirectional Read whose request stream carries Ack and Nack - and
+// arrive with the contract; see TODO.md.
+
+syntax = "proto3";
+
+package dracocephalum.nightingale.v1;
+
+option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+
+service PersistentSubscriptions {}

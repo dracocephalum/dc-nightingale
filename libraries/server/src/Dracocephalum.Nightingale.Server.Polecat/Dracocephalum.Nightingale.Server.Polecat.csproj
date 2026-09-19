@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- The Polecat backend of the server: a package other hosts mount, and a runnable default host. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Polecat" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
+  </ItemGroup>
+
+  <!-- TEMPORARY: cross-component project reference. Components reference each
+       other as packages (agentics/rules/layout.md); this stands in until a
+       package feed exists. Listed in TODO.md. -->
+  <ItemGroup>
+    <ProjectReference Include="../../../core/src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
+  </ItemGroup>
+
+</Project>

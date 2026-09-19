@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.Net.Client" />
+    <!-- Rich error statuses: the ErrorInfo detail the server attaches to every failure. -->
+    <PackageReference Include="Grpc.StatusProto" />
+    <PackageReference Include="Google.Api.CommonProtos" />
+  </ItemGroup>
+
+  <!-- TEMPORARY: cross-component project reference. Components reference each
+       other as packages (agentics/rules/layout.md); this stands in until a
+       package feed exists. Listed in TODO.md. -->
+  <ItemGroup>
+    <ProjectReference Include="../../../core/src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
+    <Project Path="src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration.csproj" />
+    <Project Path="test/Dracocephalum.Nightingale.Server.Polecat.Tests/Dracocephalum.Nightingale.Server.Polecat.Tests.csproj" />
+    <Project Path="test/Dracocephalum.Nightingale.Server.Tests/Dracocephalum.Nightingale.Server.Tests.csproj" />
+  </Folder>
+  <Project Path="../core/src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
+</Solution>

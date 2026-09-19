@@ -1,0 +1,20 @@
+# markdownlint-cli2 configuration. Everything not listed keeps its default.
+# Rules disabled here are stylistic and add nothing for agent-facing docs;
+# everything that remains points at a real defect - fix it, do not argue.
+
+# Prose wraps at ~80 by convention but URLs, table rows and code exceed it.
+MD013:
+  line_length: 120
+  code_blocks: false
+  tables: false
+
+# Table column alignment style - cosmetic.
+MD060: false
+
+# Skill shims and templates start with YAML front matter or an HTML comment,
+# not an H1; the file name is the title.
+MD041: false
+
+# HTML comments are how PR templates and skill templates carry instructions.
+MD033:
+  allowed_elements: []

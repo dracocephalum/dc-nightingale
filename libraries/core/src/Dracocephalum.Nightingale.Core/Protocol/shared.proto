@@ -1,0 +1,143 @@
+// Messages shared by more than one service, and the conventions that apply to
+// every call.
+//
+// Numbers on the wire
+//   revision  0-based index of an event within its stream. The store counts
+//             from 1; the server converts at the boundary.
+//   position  the store's global sequence number. It is the position of every
+//             event in $all and the "revision" of the virtual streams ($all,
+//             $ce-<category>, $et-<type>): monotonic within the stream, sparse
+//             because other streams' events occupy the numbers in between.
+//   Every read and subscription reports the head of the stream it reads, and
+//   a virtual stream's head is its own last event, never the global head.
+//
+// Stream names
+//   Any string up to 250 characters. The category of a stream is everything
+//   before the first hyphen: orders-42 is in category orders. Names starting
+//   with $ are reserved: $all, $ce-<category>, $et-<event type>. Case
+//   sensitivity follows the database collation; use one spelling.
+//
+// Event ids
+//   Client-supplied UUIDs. The server does not enforce uniqueness; the id is
+//   the retry key, the same rule as the reference store. An append with an
+//   explicit expected revision that finds the stream already ahead compares
+//   the ids of the events from that revision onward with the batch: all
+//   equal means the append already happened and it succeeds with the
+//   original result; anything else is REVISION_CONFLICT. With ANY there is no
+//   revision to compare from, so a retry may write the events again.
+//
+// Event bodies and metadata
+//   data is UTF-8 JSON. metadata is a UTF-8 JSON object of user-supplied
+//   properties, or empty; it travels as bytes exactly like the body, so what
+//   a client sends is what every reader gets back, insignificant whitespace
+//   aside. The system's own properties (id, stream, revision, position, type,
+//   created) are fields of RecordedEvent, never keys. Keys starting with $
+//   are reserved. Two are understood and stored in their own columns:
+//   $correlationId and $causationId, both strings; they come back last in
+//   the object. Every other key is stored as-is and returned as-is.
+//
+// Call metadata (gRPC headers)
+//   Authentication and tenancy are pending features; two headers are
+//   reserved for them.
+//   authorization       the standard header, Basic or Bearer scheme, as the
+//                       reference client sends it and as proxies and log
+//                       redaction expect it. A credential is bound to
+//                       exactly one tenant, or carries the admin role.
+//   nightingale-tenant  for a tenant-bound credential: optional, and
+//                       refused unless equal to the credential's tenant.
+//                       For an admin credential: required on every data
+//                       operation, so nothing lands in a tenant or spans
+//                       tenants by omission. The value "*" spans all
+//                       tenants, admin only, reads only, and only while the
+//                       store keeps one shared sequence across tenants; a
+//                       server whose store does not advertises that through
+//                       ServerFeatures and refuses the wildcard.
+//                       Management operations take no tenant.
+//   Every stream name, $all included, is read within the resolved tenant.
+//
+// Errors
+//   A failed call carries a google.rpc.Status whose details hold one
+//   google.rpc.ErrorInfo: domain "nightingale", reason = a name from
+//   errors.proto, metadata = the fields that reason documents.
+
+syntax = "proto3";
+
+package dracocephalum.nightingale.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+
+// An event as the store holds it.
+message RecordedEvent {
+  // UUID in canonical string form; see "Event ids" above.
+  string id = 1;
+  // The stream it was appended to. In a read of $all or a virtual stream this
+  // is the originating stream, never the virtual name.
+  string stream = 2;
+  // 0-based within the stream.
+  sint64 revision = 3;
+  // Global position; the same number in every stream the event appears in.
+  sint64 position = 4;
+  // Stored verbatim as the client sent it.
+  string event_type = 5;
+  // Server clock at commit.
+  google.protobuf.Timestamp created = 6;
+  // JSON.
+  bytes data = 7;
+  // A JSON object of user-supplied properties, or empty; see "Event bodies
+  // and metadata" above.
+  bytes metadata = 8;
+}
+
+// An event as a client proposes it.
+message ProposedEvent {
+  // UUID in canonical string form. Required; the server does not invent one,
+  // because the id is what makes a retry safe.
+  string id = 1;
+  string event_type = 2;
+  // JSON.
+  bytes data = 3;
+  // A JSON object of user-supplied properties, or empty; see "Event bodies
+  // and metadata" above.
+  bytes metadata = 4;
+}
+
+// What a caller asserts about a stream before writing to it. Any non-negative
+// value is a revision: the stream's last event must be at exactly that
+// revision. The negative values are the named states. -3 is deliberately
+// unused so the numbers match the reference client's internal constants.
+enum ExpectedRevision {
+  // The stream's only event is at revision 0 (this is the number 0, listed so
+  // the enum has a zero value; any other non-negative number is also valid).
+  EXPECTED_REVISION_FIRST_EVENT = 0;
+  // The stream must not exist yet.
+  EXPECTED_REVISION_NO_STREAM = -1;
+  // No check.
+  EXPECTED_REVISION_ANY = -2;
+  // The stream must exist, at any revision. -3 is left unused on purpose, as
+  // in the reference protocol, where it was the server's internal marker.
+  EXPECTED_REVISION_STREAM_EXISTS = -4;
+}
+
+// Narrows a read of $all. A filter on any other stream name is rejected with
+// FILTER_NOT_ALLOWED; $ce- and $et- are themselves filters over $all.
+message Filter {
+  // Exactly one of the two.
+  oneof kind {
+    Expression stream_name = 1;
+    Expression event_type = 2;
+  }
+  // Subscriptions only: after this many events were read and filtered out
+  // without a match, the server sends a Checkpoint so the client's position
+  // still advances over a quiet stretch. 0 means the server's default.
+  uint32 checkpoint_interval = 3;
+}
+
+// Exactly one of the two is populated. Prefixes are matched in the index;
+// a regular expression is applied to each page after it is read, which costs
+// more on a large store.
+message Expression {
+  repeated string prefix = 1;
+  string regex = 2;
+}

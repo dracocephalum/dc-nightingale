@@ -1,0 +1,152 @@
+<Project>
+
+  <!--
+    Repository-wide build defaults.
+
+    MSBuild imports this file automatically, searching upward from each project
+    directory and stopping at the FIRST file found - it does not merge across
+    levels. If a subdirectory ever gains its own Directory.Build.props, it
+    replaces this file for that subtree and everything below stops inheriting
+    these settings, silently and with a green build. Chain explicitly in that
+    case:
+
+      <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+    Properties here are DEFAULTS - an individual .csproj can override them.
+    Anything that must win regardless belongs in Directory.Build.targets, which
+    is imported after the project body.
+  -->
+
+  <Import Project="$(MSBuildThisFileDirectory)StyleCop.props" />
+
+  <!--
+    Tests.props is imported from Directory.Build.targets, not here: its
+    condition reads the project's own ManagePackageVersionsCentrally, which is
+    set in the project body and so is not visible yet at this point.
+  -->
+
+  <!--
+    Namespace convention: a `.Core` segment names the assembly, not the
+    namespace, so it is dropped from the default namespace.
+
+        Contoso.Core        -> namespace Contoso
+        Contoso.Core.Tests  -> namespace Contoso.Tests
+
+    Assembly names are untouched; only RootNamespace changes. A .csproj can
+    override this - the project body is evaluated after this file.
+
+    EndsWith is deliberate rather than a substring replace: `Contoso.CoreBanking`
+    must NOT become `ContosoBanking`.
+  -->
+  <PropertyGroup>
+    <RootNamespace Condition="$(MSBuildProjectName.EndsWith('.Core.Tests'))">$(MSBuildProjectName.Substring(0, $([MSBuild]::Subtract($(MSBuildProjectName.Length), 11)))).Tests</RootNamespace>
+    <RootNamespace Condition="$(MSBuildProjectName.EndsWith('.Core'))">$(MSBuildProjectName.Substring(0, $([MSBuild]::Subtract($(MSBuildProjectName.Length), 5))))</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!--
+      .NET's built-in code-quality analyzers (CAxxxx) at the Recommended level -
+      security, reliability and correctness rules that ship with the SDK. No
+      package to install. Verified to build clean on the toolkit's own stack.
+      "All" is the next step up and is noisier; raise it deliberately.
+    -->
+    <AnalysisMode>Recommended</AnalysisMode>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Lock files. Each project gets a packages.lock.json recording the exact
+      resolved graph, transitive packages included. COMMIT THEM. They make
+      restores reproducible, and they are what GitHub's dependency graph reads
+      to see transitive NuGet packages (the licence gate in CI depends on it).
+
+      In CI add -p:RestoreLockedMode=true so a restore that would change the
+      lock file fails instead of silently drifting.
+    -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Warnings are errors. Safe to enable from day one on a NEW repository -
+      there is no accumulated warning debt. Do not switch this on for an
+      existing codebase without budgeting for the cleanup first.
+
+      This escalates StyleCop diagnostics too: an SA rule set to Warning in
+      stylecop.ruleset now fails the build. Rules left at Info (SA1201-SA1204,
+      SA1512) are unaffected - Info never surfaces at build time.
+    -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      NuGet audit advisories stay warnings.
+
+      NU1901-NU1904 are vulnerability reports about referenced packages. They
+      appear when an advisory is PUBLISHED, not when code changes - so treating
+      them as errors turns a third-party disclosure into an overnight CI
+      failure on an untouched branch, at restore time, before compilation.
+      They remain visible as warnings and should be acted on promptly.
+
+      Remove this line if the repository's policy is that a known vulnerability
+      must block the build.
+    -->
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Emit $(AssemblyName).xml next to every non-test assembly. This is what
+      gives consumers IntelliSense and what NuGet packs alongside a library.
+
+      Turning this on makes the compiler raise CS1591 for undocumented public
+      members; stylecop.ruleset sets CS1591 (and SA1600) to None, so missing
+      comments are a review concern, not a build failure. Reverse that in the
+      ruleset if the policy changes.
+
+      No DocumentationFile path is set: the default is already
+      $(OutputPath)$(AssemblyName).xml, beside the binary.
+    -->
+    <GenerateDocumentationFile Condition="!$(MSBuildProjectName.EndsWith('.Tests'))">true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    Banned APIs. BannedSymbols.txt at the repository root lists symbols that
+    must not be used; each use is diagnostic RS0030, an error under
+    warnings-as-errors. The file ships with every entry commented out (relaxed
+    mode) - strict mode uncomments them. See the toolkit's repo/stylecop.md.
+
+    Not attached to *.Tests projects: tests may use DateTimeOffset.UtcNow for
+    test data, and the analyzer never loads there at all.
+  -->
+  <ItemGroup Condition="!$(MSBuildProjectName.EndsWith('.Tests'))">
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">5.6.0</Version>
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" Link="BannedSymbols.txt" />
+  </ItemGroup>
+
+  <!--
+    Internals visible to the project's own tests. Every non-test project grants
+    InternalsVisibleTo to <Project>.Tests and <Project>.Tests.Integration, so a
+    test reaches an internal type without the author adding the attribute by
+    hand. Granting it to an assembly that does not exist is harmless. Assemblies
+    are not strong-named here; a signed assembly would need the public key.
+  -->
+  <ItemGroup Condition="!$(MSBuildProjectName.EndsWith('.Tests')) and !$(MSBuildProjectName.EndsWith('.Tests.Integration'))">
+    <InternalsVisibleTo Include="$(MSBuildProjectName).Tests" />
+    <InternalsVisibleTo Include="$(MSBuildProjectName).Tests.Integration" />
+  </ItemGroup>
+
+  <!--
+    Deliberately NOT set here:
+
+    TargetFramework - varies per project; set it in each .csproj.
+  -->
+
+</Project>

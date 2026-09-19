@@ -1,0 +1,6 @@
+[
+  { "Id": "Fare",                        "Version": "2.1.1", "License": "MIT" },
+  { "Id": "Microsoft.NETCore.Platforms", "Version": "1.1.0", "License": "MIT" },
+  { "Id": "NETStandard.Library",         "Version": "1.6.1", "License": "MIT" },
+  { "Id": "xunit.abstractions",          "Version": "2.0.3", "License": "Apache-2.0" }
+]

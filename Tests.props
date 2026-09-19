@@ -1,0 +1,130 @@
+<Project>
+
+  <!--
+    Test-project defaults.
+
+    Imported from Directory.Build.targets - after the project body - ONLY for
+    projects whose name ends in `.Tests` and have not opted out of central
+    package management, so nothing here reaches shipping code. A test project
+    that sets ManagePackageVersionsCentrally=false is left alone entirely and
+    carries its own stack (csharp-new-project.md, step 4). Test projects are
+    never published, so a redundant reference costs a restore entry and nothing
+    more - the bar for adding one here is deliberately low.
+
+    Versions live in Directory.Packages.props like everything else.
+  -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      CA1707 (no underscores in member names) is right for production code and
+      wrong for tests, whose naming convention is Method_WhenCondition_ShouldResult.
+      $(NoWarn); keeps whatever was already suppressed. This is the only
+      AnalysisMode=Recommended rule that conflicts with the toolkit's own rules;
+      if another appears, add it here rather than lowering AnalysisMode.
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+
+    <!--
+      xunit v3 runs on Microsoft.Testing.Platform: every test project is an
+      executable that runs its own tests, and on .NET 10 SDK the old VSTest path
+      is refused outright. These three make `dotnet test` use the platform;
+      global.json at the root opts the command itself in. Coverage is the
+      platform's own extension (referenced below), configured by coverage.config
+      at the root and passed on the command line - the unit-test rules say how.
+    -->
+    <OutputType>Exe</OutputType>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <!--
+    The xunit template writes this global using into the project it generates,
+    inside the same ItemGroup as the PackageReferences that csharp-new-project.md
+    has us delete. Supplying it here keeps [Fact] and [Theory] resolving without
+    a using directive in every test file, and makes that deletion safe.
+  -->
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    Framework, platform and coverage. xunit.v3 brings the platform with it;
+    there is no separate test host package and no VSTest adapter any more.
+  -->
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+
+    <!-- [CombinatorialData] / [PairwiseData] theories; 2.x is the xunit v3 line. -->
+    <PackageReference Include="Xunit.Combinatorial" />
+  </ItemGroup>
+
+  <!--
+    In-process integration testing of ASP.NET Core apps (WebApplicationFactory).
+
+    Pulls the Microsoft.AspNetCore.App framework reference into every test
+    project, including those testing plain class libraries. Verified harmless
+    there, and cheaper than making every web component opt in by hand.
+
+    Its version tracks the TFM's ASP.NET Core major, unlike everything else
+    here. If components in this repository target different frameworks, move
+    this to the per-project level instead of leaving it global.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+  <!-- Faking. FakeItEasy.Analyzer.CSharp catches misuse at compile time. -->
+  <ItemGroup>
+    <PackageReference Include="FakeItEasy" />
+    <PackageReference Include="FakeItEasy.Analyzer.CSharp">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!--
+    Convenience libraries. On by default; remove any the team does not want.
+    Confirm with the user at initialization rather than assuming.
+  -->
+  <ItemGroup>
+    <PackageReference Include="AutoFixture" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="DeepEqual" />
+  </ItemGroup>
+
+  <!--
+    FakeTimeProvider. Not optional: the unit-test rules forbid real clocks and
+    delays, and the coding rules require time-dependent code to accept a
+    TimeProvider. This package is the other half of that contract.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+
+  <!--
+    Conditional on what the application itself uses. Uncomment only when the
+    corresponding library is actually referenced by production code - otherwise
+    they are dead weight that still has to resolve.
+  -->
+  <ItemGroup>
+    <!-- <PackageReference Include="FluentValidation" /> -->
+    <!-- <PackageReference Include="Serilog.Sinks.TestCorrelator" /> -->
+    <!-- EF Core in-memory provider, for query/read-model handler tests. -->
+    <!-- <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" /> -->
+  </ItemGroup>
+
+  <!--
+    Integration tests live in a project named *.Tests.Integration. They get the same stack, but a
+    plain `dotnet test` runs none of them: the project is only a test project when the run asks for
+    it with -p:RunIntegrationTests=true, so a live dependency is never hit by accident.
+  -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests.Integration')) and '$(RunIntegrationTests)' != 'true'">
+    <IsTestProject>false</IsTestProject>
+    <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
+    <TestingPlatformDotnetTestSupport>false</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+</Project>

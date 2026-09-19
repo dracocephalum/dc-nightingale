@@ -1,0 +1,44 @@
+// The reasons a call can fail with, beyond what gRPC status codes say.
+//
+// A failed call returns a google.rpc.Status whose details hold one
+// google.rpc.ErrorInfo with domain "nightingale" and reason = the enum value
+// name below without its ERROR_REASON_ prefix (REVISION_CONFLICT, not
+// ERROR_REASON_REVISION_CONFLICT). The metadata map carries the fields each
+// reason lists. The status code is the one noted; a client maps the reason,
+// not the code, to its exceptions.
+
+syntax = "proto3";
+
+package dracocephalum.nightingale.v1;
+
+option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+
+enum ErrorReason {
+  ERROR_REASON_UNSPECIFIED = 0;
+
+  // NOT_FOUND. metadata: stream.
+  ERROR_REASON_STREAM_NOT_FOUND = 1;
+
+  // FAILED_PRECONDITION. The stream was soft-deleted. metadata: stream.
+  ERROR_REASON_STREAM_DELETED = 2;
+
+  // FAILED_PRECONDITION. The expected revision did not match. metadata:
+  // stream, expected, actual (actual is -1 when the stream does not exist).
+  ERROR_REASON_REVISION_CONFLICT = 3;
+
+  // INVALID_ARGUMENT. Empty, too long, or a reserved name used where a plain
+  // stream is required. metadata: stream.
+  ERROR_REASON_INVALID_STREAM_NAME = 4;
+
+  // INVALID_ARGUMENT. A filter was sent for a stream other than $all.
+  // metadata: stream.
+  ERROR_REASON_FILTER_NOT_ALLOWED = 5;
+
+  // INVALID_ARGUMENT. The append exceeds the server's size limit. metadata:
+  // limit (bytes).
+  ERROR_REASON_APPEND_SIZE_EXCEEDED = 6;
+
+  // INVALID_ARGUMENT. Anything else wrong with a request; the status message
+  // says what. No metadata.
+  ERROR_REASON_INVALID_ARGUMENT = 7;
+}

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  This ruleset exists to keep the codebase agentically efficient.
+
+  A rule fails the build only when the toolchain can fix the violation
+  automatically or an agent follows it without being told. A rule that would
+  cost a manual round-trip for a cosmetic outcome is visible in the editor
+  and never blocks. Every severity below was set against that test, and the
+  comment on each says which case it is.
+
+  `dotnet format analyzers` is in the loop - the repair when a build fails on
+  a fixable rule, and a step before every commit - so a Warning on a rule that
+  has a code fix costs one command, never an edit. That is what makes the
+  spacing rules safe to enforce and the ordering rules not. Measured, not
+  assumed: StyleCop ships no fix for SA1201-SA1204, and `dotnet format`
+  reports "no associated code fix" for each of them.
+
+  Why making this stricter has consequences
+
+  Every rule raised to Warning that has no code fix becomes a loop paid on
+  every violation: build fails, someone moves or rewrites the code, build
+  again. When most of the code is written by an agent, that someone is the
+  agent, and the loop costs a full build each time. The ordering rules also
+  move a private helper away from the public method that calls it, which
+  makes the code harder to read for exactly the reader they were meant to
+  help. `this.` on every member access and documentation on every member are
+  a token tax on every file, forever, with no fix and nothing that `_camelCase`
+  fields and PascalCase properties do not already provide.
+
+  So before raising a severity, ask two questions: does `dotnet format` fix
+  it, and would an agent write it that way unprompted? If neither, the cost is
+  paid per file by whoever writes the most code, and the gain is cosmetic.
+
+  Rules not listed here take the analyzer package's default severity. Change
+  a severity by editing the Action attribute; never comment a Rule element
+  out, because the description comment on the same line does not nest.
+-->
+<RuleSet Name="dc-agentics" Description="StyleCop.Analyzers severities, set for agentic efficiency" ToolsVersion="16.0">
+
+  <!-- ==================== Compiler Warnings (not StyleCop.Analyzers rules) ==================== -->
+  <Rules AnalyzerId="Microsoft.CodeAnalysis.CSharp.Compilers" RuleNamespace="Microsoft.CodeAnalysis.CSharp">
+    <Rule Id="CS0618" Action="None" /> <!-- CS0618: Member is obsolete. Off: review judges an [Obsolete] call, not the build -->
+    <Rule Id="CS1591" Action="None" /> <!-- CS1591: Missing XML comment on a public member. Off: documentation is not mandatory here, see SA1600 -->
+  </Rules>
+
+  <!-- ==================== DocumentationRules (SA1600-SA1652) ==================== -->
+  <!-- Off. Mandatory documentation on every member is a token tax with no code fix; write docs where they earn their place. -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.DocumentationRules">
+    <Rule Id="SA1600" Action="None" /> <!-- SA1600: Elements should be documented with an XML comment -->
+    <Rule Id="SA1602" Action="None" /> <!-- SA1602: Enumeration items should be documented -->
+    <Rule Id="SA1623" Action="None" /> <!-- SA1623: Property summary documentation should match accessors (Gets/Sets wording) -->
+    <Rule Id="SA1624" Action="None" /> <!-- SA1624: Property summary should omit 'or sets' when set accessor is non-public -->
+    <Rule Id="SA1633" Action="None" /> <!-- SA1633: File should have a standard header with copyright info -->
+    <Rule Id="SA1642" Action="None" /> <!-- SA1642: Constructor summary documentation should begin with standard text -->
+    <Rule Id="SA1649" Action="Warning" /> <!-- SA1649: File name should match first type name. Warning: the other half of one-type-per-file - the name on disk is the name in code, so nothing needs a search -->
+  </Rules>
+
+  <!-- ==================== LayoutRules (SA1500-SA1520) ==================== -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.LayoutRules">
+    <Rule Id="SA1512" Action="Info" /> <!-- SA1512: Single-line comments should not be followed by a blank line. Info: fix not verified -->
+    <Rule Id="SA1518" Action="Warning" /> <!-- SA1518: File must end with exactly one newline. Fixable. Paired with stylecop.json newlineAtEndOfFile = "require" and .editorconfig insert_final_newline = true -->
+  </Rules>
+
+  <!-- ==================== MaintainabilityRules (SA1400-SA1414) ==================== -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.MaintainabilityRules">
+    <Rule Id="SA1402" Action="Warning" /> <!-- SA1402: File may only contain a single top-level type. Warning: structural, not cosmetic - one type per file is what makes a file findable by name. Nested types are not counted; the feature-file pattern in csharp-coding-rules.md relies on that -->
+    <Rule Id="SA1414" Action="Error" /> <!-- SA1414: Tuple types in signatures should have element names. Error: also the analyzer probe at initialization -->
+  </Rules>
+
+  <!-- ==================== NamingRules (SA1300-SA1316) ==================== -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.NamingRules">
+    <Rule Id="SA1309" Action="None" /> <!-- SA1309: Field names should not begin with an underscore. Off by design: _camelCase private fields are the convention here, as in dotnet/runtime; this rule is the older StyleCop opinion -->
+  </Rules>
+
+  <!-- ==================== OrderingRules (SA1200-SA1217) ==================== -->
+  <!-- Info, not Warning: none of SA1201-SA1204 has a code fix, and an agent adding a helper puts it beside its caller, not in access order. Visible in the editor for a person to tidy; never a build failure. -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.OrderingRules">
+    <Rule Id="SA1200" Action="None" /> <!-- SA1200: Using directives should be placed correctly (inside/outside namespace per config) -->
+    <Rule Id="SA1201" Action="Info" /> <!-- SA1201: Elements should appear in the correct type-member order -->
+    <Rule Id="SA1202" Action="Info" /> <!-- SA1202: Elements should be ordered by access modifier (public before private, etc.) -->
+    <Rule Id="SA1203" Action="Info" /> <!-- SA1203: Constant fields should appear before non-constant fields -->
+    <Rule Id="SA1204" Action="Info" /> <!-- SA1204: Static elements should appear before instance elements -->
+  </Rules>
+
+  <!-- ==================== ReadabilityRules (SA1100-SA1139) ==================== -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.ReadabilityRules">
+    <Rule Id="SA1101" Action="None" /> <!-- SA1101: Prefix local calls with 'this.'. Off by design: a token on every member access with no fix, and nothing _camelCase fields and PascalCase properties do not already disambiguate. Turning it on also requires the four dotnet_style_qualification_for_* settings in .editorconfig set to true, or the IDE fights the build -->
+    <Rule Id="SA1111" Action="Warning" /> <!-- SA1111: Closing parenthesis should be on the line of the last parameter. Fixable -->
+    <Rule Id="SA1117" Action="None" /> <!-- SA1117: Parameters should all be on the same line, or each on a separate line. Off: fix not verified, and the outcome is cosmetic -->
+    <Rule Id="SA1118" Action="None" /> <!-- SA1118: Parameter should not span multiple lines. Off: same -->
+  </Rules>
+
+  <!-- ==================== SpacingRules (SA1000-SA1028) ==================== -->
+  <!-- Warning: every one of these has a code fix, so with dotnet format in the loop they cost nothing and buy consistency. -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.SpacingRules">
+    <Rule Id="SA1009" Action="Warning" /> <!-- SA1009: Closing parenthesis should be spaced correctly. Fixable -->
+    <Rule Id="SA1011" Action="Warning" /> <!-- SA1011: Closing square bracket should be spaced correctly. Fixable -->
+    <Rule Id="SA1028" Action="Warning" /> <!-- SA1028: Code should not contain trailing whitespace. Fixable; listed so the intent is explicit -->
+  </Rules>
+
+  <!-- ==================== SpecialRules ==================== -->
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers.SpecialRules">
+    <Rule Id="SA0001" Action="None" /> <!-- SA0001: XML comment analysis is disabled due to project configuration. Off: consistent with documentation being optional -->
+  </Rules>
+
+</RuleSet>

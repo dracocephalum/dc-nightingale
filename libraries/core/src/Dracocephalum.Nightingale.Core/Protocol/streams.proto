@@ -1,0 +1,184 @@
+// Streams: read, subscribe, append, delete.
+//
+// The shape follows the reference protocol: one server-streaming Read that is
+// a subscription when the request says so, one client-streaming Append that
+// sends its options first, and two unary deletes. Message order on a Read is
+// part of the contract; each response message documents when it may appear.
+// Numbers, names, bodies, headers and errors are defined in shared.proto.
+
+syntax = "proto3";
+
+package dracocephalum.nightingale.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "shared.proto";
+
+option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+
+service Streams {
+  // A bounded read, or a subscription, over a stream, $all, or a virtual
+  // stream. Errors: STREAM_DELETED, INVALID_STREAM_NAME, FILTER_NOT_ALLOWED,
+  // INVALID_ARGUMENT. A stream with no events is not an error: the first and
+  // only response is stream_not_found.
+  rpc Read (ReadRequest) returns (stream ReadResponse);
+
+  // Appends events to one stream atomically: all of them, or none, under one
+  // expected revision. The first request carries the options, every following
+  // request one event. Errors: REVISION_CONFLICT, STREAM_DELETED,
+  // INVALID_STREAM_NAME, APPEND_SIZE_EXCEEDED, INVALID_ARGUMENT. A retry
+  // with an explicit expected revision is safe; see "Event ids" in
+  // shared.proto.
+  rpc Append (stream AppendRequest) returns (AppendResponse);
+
+  // Soft-deletes a stream: its events leave every read, including $all, and
+  // appends to it fail with STREAM_DELETED. Errors: REVISION_CONFLICT,
+  // STREAM_NOT_FOUND, STREAM_DELETED.
+  rpc Delete (DeleteRequest) returns (DeleteResponse);
+
+  // Removes a stream and its events permanently. Afterwards the name reads as
+  // a stream that never existed. Errors: REVISION_CONFLICT, STREAM_NOT_FOUND.
+  rpc Tombstone (TombstoneRequest) returns (TombstoneResponse);
+}
+
+message ReadRequest {
+  // A stream name, $all, $ce-<category> or $et-<event type>.
+  string stream = 1;
+
+  ReadDirection direction = 2;
+
+  // Where to begin, inclusive, in the reading direction. For a stream the
+  // number is a revision; for $all and the virtual streams it is a position.
+  // A subscription with `end` delivers only events appended after it was
+  // confirmed; a client that wants "everything after X" sends X + 1.
+  oneof from {
+    sint64 position = 3;
+    google.protobuf.Empty start = 4;
+    google.protobuf.Empty end = 5;
+  }
+
+  // The only difference between a read and a subscription.
+  oneof mode {
+    // At most this many events, then the call completes. Must be positive.
+    uint64 count = 6;
+    // Read to the head, report caught_up, then stay live until the client
+    // cancels the call. Direction must be forwards.
+    SubscriptionOptions subscription = 7;
+  }
+
+  // $all only. See shared.proto.
+  Filter filter = 8;
+}
+
+enum ReadDirection {
+  // Treated as forwards.
+  READ_DIRECTION_UNSPECIFIED = 0;
+  READ_DIRECTION_FORWARDS = 1;
+  READ_DIRECTION_BACKWARDS = 2;
+}
+
+// Empty for now; the place for per-subscription settings later.
+message SubscriptionOptions {}
+
+message ReadResponse {
+  oneof content {
+    // Bounded read of an existing stream: always the first message, so a
+    // client learns the stream's bounds and its head before any event.
+    StreamBounds head = 1;
+
+    // Bounded read or subscription to a stream with no events: the only
+    // message, then the call completes. Never sent for $all or a virtual
+    // stream, which read as empty instead.
+    StreamNotFound stream_not_found = 2;
+
+    // Subscription: always the first message.
+    SubscriptionConfirmed confirmed = 3;
+
+    RecordedEvent event = 4;
+
+    // Subscription: the position the server has read to without an event to
+    // deliver, so the client's checkpoint can advance. Sent per the filter's
+    // checkpoint_interval, and after a quiet stretch on an unfiltered
+    // subscription.
+    Checkpoint checkpoint = 5;
+
+    // Subscription: every event up to the head at that moment has been sent.
+    // Sent once when the live phase begins, and again whenever the server
+    // catches up after a fell_behind.
+    CaughtUp caught_up = 6;
+
+    // Subscription: the client is consuming slower than the stream grows.
+    // Carries the head and the number of events between the client and it,
+    // so a consumer can alert on a count rather than on sparse positions.
+    FellBehind fell_behind = 7;
+  }
+}
+
+// Revisions for a stream; positions for $all and the virtual streams.
+message StreamBounds {
+  sint64 first = 1;
+  sint64 last = 2;
+}
+
+message StreamNotFound {
+  string stream = 1;
+}
+
+message SubscriptionConfirmed {
+  string subscription_id = 1;
+  // The head at the moment the subscription was confirmed, or -1 for a stream
+  // that has no events yet.
+  sint64 head = 2;
+}
+
+message Checkpoint {
+  sint64 position = 1;
+  google.protobuf.Timestamp at = 2;
+}
+
+message CaughtUp {
+  sint64 head = 1;
+  google.protobuf.Timestamp at = 2;
+}
+
+message FellBehind {
+  sint64 head = 1;
+  sint64 events_behind = 2;
+  google.protobuf.Timestamp at = 3;
+}
+
+message AppendRequest {
+  oneof content {
+    AppendOptions options = 1;
+    ProposedEvent event = 2;
+  }
+}
+
+message AppendOptions {
+  string stream = 1;
+  // A revision, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+}
+
+message AppendResponse {
+  // Revision and position of the last event written. A client's next append
+  // to this stream expects `revision`.
+  sint64 revision = 1;
+  sint64 position = 2;
+}
+
+message DeleteRequest {
+  string stream = 1;
+  // A revision, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+}
+
+message DeleteResponse {}
+
+message TombstoneRequest {
+  string stream = 1;
+  // A revision, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+}
+
+message TombstoneResponse {}

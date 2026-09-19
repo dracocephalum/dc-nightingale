@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Core.Api" />
+    <PackageReference Include="Grpc.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- The wire contract. Grpc.Tools generates messages, the client stub and the service base into obj/ at build. -->
+  <ItemGroup>
+    <Protobuf Include="Protocol/*.proto" ProtoRoot="Protocol" GrpcServices="Both" />
+    <!-- Message-only files: a service-less proto still emits an empty *Grpc.cs, and StyleCop rejects an empty file (SA1518). -->
+    <Protobuf Update="Protocol/shared.proto;Protocol/errors.proto" GrpcServices="None" />
+  </ItemGroup>
+
+</Project>

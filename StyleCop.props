@@ -1,0 +1,57 @@
+<Project>
+
+  <!--
+    StyleCop.Analyzers configuration.
+
+    Place this file at the repository root alongside stylecop.ruleset and
+    stylecop.json. It is NOT auto-imported by MSBuild - import it explicitly
+    from Directory.Build.props at the repository root:
+
+      <Import Project="$(MSBuildThisFileDirectory)StyleCop.props" />
+
+    All paths below use $(MSBuildThisFileDirectory) - the directory of THIS
+    file. CodeAnalysisRuleSet resolves relative to the project directory, not
+    to the file that sets it, so a bare filename would break for any project
+    in a subdirectory.
+  -->
+
+  <PropertyGroup>
+    <!-- Verify against the current release before relying on this. -->
+    <StyleCopAnalyzersVersion Condition="'$(StyleCopAnalyzersVersion)' == ''">1.2.0-beta.556</StyleCopAnalyzersVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <CodeAnalysisRuleSet>$(MSBuildThisFileDirectory)stylecop.ruleset</CodeAnalysisRuleSet>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StyleCop.Analyzers">
+      <!--
+        Version is omitted when central package management is active; the
+        version then comes from Directory.Packages.props instead. Supplying
+        both raises NU1008.
+      -->
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(StyleCopAnalyzersVersion)</Version>
+
+      <!--
+        PrivateAssets=all       - do not flow to consumers of this project.
+                                  Without it, every downstream package would
+                                  inherit StyleCop as a dependency.
+        IncludeAssets           - analyzer packages ship no runtime library;
+                                  this is the standard analyzer asset set.
+      -->
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      stylecop.json is only read when registered as an AdditionalFiles item.
+      Link keeps it displayed at the project root in the IDE rather than as a
+      path climbing out of the project directory.
+    -->
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)stylecop.json" Link="stylecop.json" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,59 @@
+# Settings that agents read before acting in this repository. Written once at
+# initialization, edited by hand after. Every value says what it changes and
+# which document holds the rule; the rule is the authority, this file only
+# picks between the choices it offers.
+
+toolkit:
+  url: https://github.com/dracocephalum/dc-agentics
+  commit: "0af3842716be"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
+  payload-path: "repo/payload"         # where the payload lived AT that commit - the toolkit restructures, and an upgrade diffing the wrong root sees every file as new. Fixed value, not a placeholder
+  initialized: "2026-09-14"            # yyyy-mm-dd
+  by: "Claude Code / claude-fable-5-1" # e.g. Claude Code / claude-fable-5-1
+
+repository:
+  framework: dotnet                    # the only value supported today
+  layout: "monorepo"                   # standalone | monorepo - AGENTS.md describes the chosen one; agentics/rules/layout.md describes both
+  namespace: "Dracocephalum"           # PascalCase prefix of every assembly and namespace
+  # publish-safe - agentics/rules/security-reminders.md, "Names that are not yours to publish".
+  #   true   everything written here is fit to publish: other repositories, projects, customers,
+  #          systems and people are referred to by role, never by name, unless the name is already
+  #          in this repository's tracked files. Names only - credentials, local paths and personal
+  #          data are never allowed either way.
+  #   false  this repository will never be public, and may name internal things.
+  # One-way: true can become false at any time; false becomes true only for a new repository,
+  # because the history already holds what it holds.
+  publish-safe: true
+  host: github                         # where the remote lives - agentics/rules/source-control/<host>.md
+  licence: "Apache-2.0"                # none | Apache-2.0 | MIT | <SPDX id>; matches the LICENSE file
+  copyright-holder: "Chris Har"        # the legal owner named in LICENSE or NOTICE; empty when licence is none
+
+coverage:
+  # Line coverage per test run - agentics/rules/coding/csharp/csharp-unit-tests-rules.md, "Coverage".
+  # Nothing enforces these yet: the coverage extension measures, the agent reports the line rate against
+  # them, and a pipeline can read them later. Below minimum is a failure; at or above target is green;
+  # between the two is a warning.
+  minimum: 85                          # percent - the hard limit
+  target: 90                           # percent - green
+
+change-tracking:
+  # agentics/rules/change-tracking/change-tracking.md - including the one exception, initialization,
+  # and why a Projects board is not recorded here.
+  tracker: none                        # github-issues | none - none means branch names and PR titles carry no ticket
+
+source-control:
+  # What the agent may do without asking - agentics/rules/source-control/source-control.md, "For an agent".
+  #   auto    ticket, branch, commit, push, and draft pull request without asking; each is reported after
+  #   local   edits and local commits without asking; stops and asks before anything reaches the host
+  #           (creating the ticket, pushing, opening the pull request)
+  #   manual  asks before every state change, local commits included
+  # Absent or unrecognised means manual. "auto for this one", said in conversation, overrides the
+  # value for that session and is never written back here.
+  mode: local
+
+guidelines:
+  # The model line the rules in agentics/ were written and verified against, carried
+  # over from the toolkit at initialization. Not a requirement: another model
+  # works, but rules it does not infer by default are the ones it will miss.
+  # Fixed values, not placeholders - they describe the toolkit, not this repo.
+  model-baseline: "claude-opus-5, claude-fable-5-1"
+  verified: "2026-09-07"               # last end-to-end initialization trial on that line

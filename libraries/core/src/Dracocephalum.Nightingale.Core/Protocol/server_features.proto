@@ -1,0 +1,25 @@
+// Liveness and capability discovery: the first call a client makes.
+//
+// The wire contract is split by area the way the reference protocol is:
+// server_features.proto, streams.proto, persistent_subscriptions.proto. The
+// package name is part of every method path and is chosen once; the C#
+// namespace is not on the wire and says "generated wire types, not the client
+// API". No generated type may share a name with a segment of the enclosing C#
+// namespace, and a service is named after its area, never after the product.
+
+syntax = "proto3";
+
+package dracocephalum.nightingale.v1;
+
+option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+
+service ServerFeatures {
+  // Liveness, and the server's version.
+  rpc Ping (PingRequest) returns (PingResponse);
+}
+
+message PingRequest {}
+
+message PingResponse {
+  string version = 1;
+}
