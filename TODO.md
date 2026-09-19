@@ -41,6 +41,23 @@ undecided adds it here rather than mentioning it once in a conversation.
   `PersistentSubscriptions` area, which is still an empty service. Close by:
   the subscriptions slice next, since it brings the tailer everything else
   builds on.
+- **Live delivery waits out a polling interval.** The tailer runs the store's
+  high-water agent, which polls on the store's cadence, so an event reaches a
+  live subscriber up to a quarter of a second after its append. The store's
+  daemon settings carry a wake-up hook the store never sets, and the gateway
+  is the writer, so it could wake the agent after its own appends. Close by:
+  implementing the hook once its surface is confirmed on the pinned store
+  version, and a test that a live event arrives well inside the interval.
+- **One query per stream subscription per advance.** A subscription to a plain
+  stream wakes on every advance of the global head and re-reads its own
+  stream, which is one cheap query per subscription per interval and scales
+  with the number of subscriptions, not the number of events. Close by: a
+  router that reads each advanced range of `$all` once and hands events to
+  the subscriptions by stream, when the subscription count demands it.
+- **Subscriptions under tenant partitioning follow the wrong mark.** The
+  tailer follows the store's single high-water mark; with a sequence per
+  tenant the store keeps a mark per tenant, and the tail would need one too.
+  Close by: with the multi-tenancy work in `PENDING.md`.
 - **Range partitioning of the events table is not a store feature.** The
   store partitions events by tenant or by the archived flag only, and adds
   the partition column to its unique stream-and-version index when it does.

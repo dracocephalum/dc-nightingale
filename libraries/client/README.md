@@ -12,8 +12,10 @@ What an application uses to talk to a Nightingale server.
 ## What it does
 
 The client-side package: `NightingaleClient` over the generated stub, with
-append and bounded reads of a plain stream today, the mapping from the wire's
-failure reasons to the shared exceptions, and the connection options. It
+append, bounded reads of a plain stream and of `$all`, and catch-up
+subscriptions to either, delivered through a one-slot channel so a slow
+consumer holds the server back; the mapping from the wire's failure reasons
+to the shared exceptions; and the connection options. It
 carries Core and the client transport and nothing else - no server, no backend.
 
 ## Run it

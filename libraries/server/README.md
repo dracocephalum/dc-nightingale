@@ -13,8 +13,9 @@ the default host.
 ## What it does
 
 `Dracocephalum.Nightingale.Server` holds the service implementations of the
-wire contract, the port a backend implements (`IStreamStore`), and the two
-extension methods a host calls: `AddNightingaleServer()` to register and
+wire contract, the two ports a backend implements, `IStreamStore` for reads
+and appends and `IStoreTail` for the head every subscription waits on, and
+the two extension methods a host calls: `AddNightingaleServer()` to register and
 `MapNightingaleServer()` to map. It has no entry point and no backend of its
 own.
 

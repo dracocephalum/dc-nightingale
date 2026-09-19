@@ -7,7 +7,7 @@ namespace Dracocephalum.Nightingale.Client;
 
 /// <summary>
 /// The client of a Nightingale server, shaped after the reference event-store client: append to a
-/// stream under an expected state, read a stream in either direction. A failed call surfaces as a
+/// stream under an expected state, read a stream or $all in either direction, subscribe to either. A failed call surfaces as a
 /// domain exception when the server gave a reason, an argument exception when the request was at
 /// fault, and the raw call exception otherwise. Thread-safe; one instance per server address.
 /// </summary>
@@ -94,6 +94,12 @@ public sealed class NightingaleClient : IAsyncDisposable
             Direction = direction == Direction.Backwards ? ReadDirection.Backwards : ReadDirection.Forwards,
             Count = (ulong)maxCount,
         };
+        SetFrom(request, from);
+        return new ReadStreamResult(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
+    }
+
+    private static void SetFrom(ReadRequest request, StreamPosition from)
+    {
         if (from.IsEnd)
         {
             request.End = new Google.Protobuf.WellKnownTypes.Empty();
@@ -106,9 +112,48 @@ public sealed class NightingaleClient : IAsyncDisposable
         {
             request.Position = from.Value;
         }
-
-        return new ReadStreamResult(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
+
+    private StreamSubscription Subscribe(string stream, StreamPosition from, CancellationToken cancellationToken)
+    {
+        var request = new ReadRequest { Stream = stream, Direction = ReadDirection.Forwards, Subscription = new SubscriptionOptions() };
+        SetFrom(request, from);
+        return new StreamSubscription(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads <c>$all</c>, every event in position order. The head the result reports is the
+    /// high-water mark, 0 when there are no events; the result never reports a missing stream.
+    /// </summary>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
+    /// <param name="maxCount">The most events to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The read in progress.</returns>
+    public ReadStreamResult ReadAllAsync(Direction direction, StreamPosition from, long maxCount = long.MaxValue, CancellationToken cancellationToken = default) =>
+        ReadStreamAsync(direction, StreamNames.All, from, maxCount, cancellationToken);
+
+    /// <summary>
+    /// Subscribes to a stream: every event from <paramref name="from"/> to the head, a caught-up
+    /// note, then every event as it is appended, until the subscription is disposed. A stream
+    /// that does not exist yet is waited for.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="from">Where to begin, inclusive; <see cref="StreamPosition.End"/> for only what comes after.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The subscription in progress.</returns>
+    public StreamSubscription SubscribeToStreamAsync(string stream, StreamPosition from, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        return Subscribe(stream, from, cancellationToken);
+    }
+
+    /// <summary>Subscribes to <c>$all</c>; see <see cref="SubscribeToStreamAsync"/>.</summary>
+    /// <param name="from">Where to begin, inclusive; <see cref="StreamPosition.End"/> for only what comes after.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The subscription in progress.</returns>
+    public StreamSubscription SubscribeToAllAsync(StreamPosition from, CancellationToken cancellationToken = default) =>
+        Subscribe(StreamNames.All, from, cancellationToken);
 
     /// <inheritdoc/>
     public ValueTask DisposeAsync()

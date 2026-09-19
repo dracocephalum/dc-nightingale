@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Dracocephalum.Nightingale.Server;
 
@@ -15,6 +16,7 @@ public static class NightingaleServerExtensions
     public static IServiceCollection AddNightingaleServer(this IServiceCollection services)
     {
         services.AddGrpc();
+        services.TryAddSingleton(TimeProvider.System);
         return services;
     }
 

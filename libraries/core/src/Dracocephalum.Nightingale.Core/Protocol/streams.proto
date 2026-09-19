@@ -86,9 +86,10 @@ message ReadResponse {
     // client learns the stream's bounds and its head before any event.
     StreamBounds head = 1;
 
-    // Bounded read or subscription to a stream with no events: the only
-    // message, then the call completes. Never sent for $all or a virtual
-    // stream, which read as empty instead.
+    // Bounded read of a stream with no events: the only message, then the
+    // call completes. Never sent for $all or a virtual stream, which read as
+    // empty instead, nor for a subscription, which is confirmed with head -1
+    // and waits for the stream's first event.
     StreamNotFound stream_not_found = 2;
 
     // Subscription: always the first message.
@@ -114,7 +115,9 @@ message ReadResponse {
   }
 }
 
-// Revisions for a stream; positions for $all and the virtual streams.
+// Revisions for a stream; positions for $all and the virtual streams. For
+// $all, `first` is 0 and `last` is the position every event up to which has
+// been committed, the high-water mark; 0 means there are no events yet.
 message StreamBounds {
   sint64 first = 1;
   sint64 last = 2;
@@ -126,8 +129,9 @@ message StreamNotFound {
 
 message SubscriptionConfirmed {
   string subscription_id = 1;
-  // The head at the moment the subscription was confirmed, or -1 for a stream
-  // that has no events yet.
+  // The head at the moment the subscription was confirmed: the last revision
+  // of a stream, or -1 when it has no events yet; the high-water mark of
+  // $all, 0 when there are no events yet.
   sint64 head = 2;
 }
 

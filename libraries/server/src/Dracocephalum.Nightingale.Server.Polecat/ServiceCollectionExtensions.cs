@@ -62,7 +62,8 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// The store is configured with string stream identity, conjoined tenancy with the default
     /// tenant, the partitioning the settings ask for, the metadata columns the contract maps, and
-    /// its own schema management off; the initializer applies the schema instead.
+    /// its own schema management off; the initializer applies the schema instead, and the tailer
+    /// starts after it, once the progression table it writes to exists.
     /// </summary>
     private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options)
     {
@@ -83,12 +84,15 @@ public static class ServiceCollectionExtensions
         }).UseLightweightSessions();
 
         services.AddSingleton<IStreamStore, PolecatStreamStore>();
+        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
+        services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddSingleton<IHostedService>(provider => new StoreInitializer(
             provider.GetRequiredService<IDocumentStore>(),
             connectionString,
             options,
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetRequiredService<ILogger<StoreInitializer>>()));
+        services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
         return services;
     }
 }
