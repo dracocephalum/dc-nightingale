@@ -1,6 +1,4 @@
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -89,7 +87,7 @@ public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
         var record = slice.ShouldNotBeNull().Events.ShouldHaveSingleItem();
         record.Type.ShouldBe("OrderPlaced");
         Encoding.UTF8.GetString(record.Data.Span).ShouldBe(body);
-        record.Metadata.ToJsonString(new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }).ShouldBe(metadata);
+        record.Metadata.ToJsonString(NightingaleJson.Options).ShouldBe(metadata);
     }
 
     [Fact]

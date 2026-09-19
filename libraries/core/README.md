@@ -12,8 +12,9 @@ The abstractions and the wire contract every other component builds on.
 ## What it does
 
 The value types and exceptions every other component shares — `StreamPosition`,
-`StreamState`, `EventData`, `EventRecord`, `StreamHead`, `AppendResult` and
-the three stream exceptions — and the wire contract: `Protocol/*.proto`,
+`StreamState`, `EventData`, `EventRecord`, `StreamHead`, `AppendResult`, the
+three stream exceptions and `NightingaleJson`, the one set of serializer
+options for JSON that passes through — and the wire contract: `Protocol/*.proto`,
 from which `Grpc.Tools` generates the messages, the client stub and the service
 base at build time, so the client and the server components agree by
 construction. Its root namespace is `Dracocephalum.Nightingale`: the `.Core`

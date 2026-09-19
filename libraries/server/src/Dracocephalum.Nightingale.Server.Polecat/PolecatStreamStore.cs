@@ -18,11 +18,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="store">The store.</param>
 internal sealed class PolecatStreamStore(IDocumentStore store) : IStreamStore
 {
-    // The body goes back to the client as the client sent it. The default encoder escapes every
-    // non-ASCII character as \uXXXX, which is equivalent JSON but not the same bytes; the relaxed
-    // encoder writes them verbatim and still escapes what JSON requires.
-    private static readonly JsonSerializerOptions BodyOptions = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-
     /// <inheritdoc/>
     public async Task<AppendResult> AppendAsync(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken)
     {
@@ -145,7 +140,7 @@ internal sealed class PolecatStreamStore(IDocumentStore store) : IStreamStore
             stored.Sequence,
             stored.EventTypeName,
             stored.Timestamp,
-            stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, BodyOptions) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, BodyOptions),
+            stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, NightingaleJson.Options) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, NightingaleJson.Options),
             JsonEvent.MetadataOf(stored));
 
     /// <summary>
