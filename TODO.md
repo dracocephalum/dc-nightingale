@@ -9,10 +9,6 @@ undecided adds it here rather than mentioning it once in a conversation.
 
 ## Initialization
 
-- **No remote, so no host settings.** The merge behaviour and the default
-  branch ruleset the pull-request rules assume are not applied. Close by:
-  after the first push, `/source-control setup`, which runs the three
-  commands in `agentics/rules/source-control/github.md`, *Repository settings*.
 - **Change tracking is `none`.** `.agentics.yaml` records no tracker, so
   branch names and pull-request titles carry no ticket. Close by: when the
   repository has a tracker, set `change-tracking.tracker: github-issues`.
