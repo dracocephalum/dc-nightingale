@@ -49,6 +49,7 @@ A virtual stream's positions are the store's global positions, sparse, and its
 head is its own last event: the category read reports bounds 1 to 4 while the
 store's head is also 4 only by coincidence of order, and after the shipments
 append the subscription's head stays where the category's last event is. The
-sample references the client and the Polecat components as projects, the
-recorded workaround while no package feed exists; a real application would
-reference the two packages.
+sample references the shared example library as a project, which in turn
+references the client and the Polecat components as projects, the recorded
+workaround while no package feed exists; a real application would reference
+the two packages.

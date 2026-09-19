@@ -1,4 +1,5 @@
 using Dracocephalum.Nightingale.Client;
+using Dracocephalum.Nightingale.Examples.Common;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Examples.AppendAndRead.Tests;
@@ -14,7 +15,7 @@ public sealed class ScenarioTests
     public async Task RunAsync_ShouldCompleteEveryStepEndToEnd()
     {
         // Arrange
-        var master = Scenario.ResolveMasterConnectionString();
+        var master = ExampleEnvironment.ResolveMasterConnectionString();
 
         // Act
         var report = await Scenario.RunAsync(master, TextWriter.Null, TestContext.Current.CancellationToken);

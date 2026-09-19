@@ -19,8 +19,9 @@ undecided adds it here rather than mentioning it once in a conversation.
   `agentics/rules/layout.md`, *Components reference each other as packages*,
   allows this as a recorded workaround while no package feed exists; each
   such reference carries the standard comment in its project file: the
-  server's two projects and the client reference `core`, and the example
-  references the client and the server's backend. Close by: publish `core`,
+  server's two projects and the client reference `core`, the samples' shared
+  library references the client and the server's backend, and every sample
+  references that library. Close by: publish `core`,
   `client` and the server's two packages to a feed and replace every
   `ProjectReference` that crosses a component folder with a
   `PackageReference` at a version. Until then the coverage number of a

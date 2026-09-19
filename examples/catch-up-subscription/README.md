@@ -47,6 +47,6 @@ is dropped at the end, whether the run passed or failed.
 Live delivery waits on the server's tailer, which polls the store's high-water
 mark on the store's own cadence, a quarter of a second while events flow, so a
 live event arrives within that interval of its append. The sample references
-the client and the Polecat components as projects, the recorded workaround
-while no package feed exists; a real application would reference the two
-packages.
+the shared example library as a project, which in turn references the client
+and the Polecat components as projects, the recorded workaround while no
+package feed exists; a real application would reference the two packages.

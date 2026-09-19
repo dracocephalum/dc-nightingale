@@ -7,17 +7,11 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
-  <!-- The sample hosts the server in-process, so it needs the web framework the service library builds on. -->
-  <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
   <!-- TEMPORARY: cross-component project reference. Components reference each
        other as packages (agentics/rules/layout.md); this stands in until a
        package feed exists. Listed in TODO.md. -->
   <ItemGroup>
-    <ProjectReference Include="../../../../libraries/client/src/Dracocephalum.Nightingale.Client/Dracocephalum.Nightingale.Client.csproj" />
-    <ProjectReference Include="../../../../libraries/server/src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
+    <ProjectReference Include="../../../common/src/Dracocephalum.Nightingale.Examples.Common/Dracocephalum.Nightingale.Examples.Common.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,4 @@
+using Dracocephalum.Nightingale.Examples.Common;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Examples.CatchUpSubscription.Tests;
@@ -13,7 +14,7 @@ public sealed class ScenarioTests
     public async Task RunAsync_ShouldCatchUpThenDeliverLiveOnBothSubscriptions()
     {
         // Arrange
-        var master = Scenario.ResolveMasterConnectionString();
+        var master = ExampleEnvironment.ResolveMasterConnectionString();
 
         // Act
         var report = await Scenario.RunAsync(master, TextWriter.Null, TestContext.Current.CancellationToken);

@@ -48,6 +48,7 @@ is dropped at the end, whether the run passed or failed.
 Deletion is a server-side decision: the host enables delete and tombstone
 separately under `Nightingale:Deletion`, and both are off unless it does. The
 sample's own server turns them on to show what they do; its second server
-shows the default. The sample references the client and the Polecat components
-as projects, the recorded workaround while no package feed exists; a real
-application would reference the two packages.
+shows the default. The sample references the shared example library as a project,
+which in turn references the client and the Polecat components as projects,
+the recorded workaround while no package feed exists; a real application
+would reference the two packages.

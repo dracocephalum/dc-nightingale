@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 
 using Dracocephalum.Nightingale.Client;
-using Grpc.Net.Client;
+using Dracocephalum.Nightingale.Examples.Common;
 
 namespace Dracocephalum.Nightingale.Examples.AppendAndRead;
 
@@ -14,11 +14,6 @@ namespace Dracocephalum.Nightingale.Examples.AppendAndRead;
 /// </summary>
 public static class Scenario
 {
-    private const string MasterEnvironmentVariable = "NIGHTINGALE_SQLSERVER";
-
-    /// <summary>The connection string used when the environment does not name one: a local server, trusted login.</summary>
-    public const string DefaultMasterConnectionString = "Server=localhost;Database=master;Trusted_Connection=True;TrustServerCertificate=True;Command Timeout=300";
-
     /// <summary>What the run observed, in the order the steps happened.</summary>
     /// <param name="Stream">The stream the run used.</param>
     /// <param name="AppendedRevision">The revision the first append reported.</param>
@@ -40,11 +35,6 @@ public static class Scenario
         long RetriedRevision,
         ReadState MissingStreamState);
 
-    /// <summary>The master connection string: the environment's, or the local default.</summary>
-    /// <returns>The connection string.</returns>
-    public static string ResolveMasterConnectionString() =>
-        Environment.GetEnvironmentVariable(MasterEnvironmentVariable) ?? DefaultMasterConnectionString;
-
     /// <summary>Runs the scenario.</summary>
     /// <param name="masterConnectionString">A connection string to the server's master database.</param>
     /// <param name="output">Where the steps are narrated.</param>
@@ -60,10 +50,8 @@ public static class Scenario
         await using var server = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"2. Server listening at {server.Address}; database created, store initialized.").ConfigureAwait(false);
 
-        // The server is in this process on a loopback port, so the machine's HTTP proxy, if the
-        // environment names one, must not sit in the middle: a proxy cannot carry cleartext HTTP/2.
-        using var channel = GrpcChannel.ForAddress(server.Address, new GrpcChannelOptions { HttpHandler = new SocketsHttpHandler { UseProxy = false } });
-        await using var client = new NightingaleClient(channel.CreateCallInvoker());
+        await using var connection = server.Connect();
+        var client = connection.Client;
         var stream = "orders-" + Guid.NewGuid().ToString("N")[..8];
 
         var placed = Event("order_placed", "{\"orderId\":1,\"total\":42.5}", new JsonObject { ["$correlationId"] = "checkout-1" });

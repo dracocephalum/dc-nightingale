@@ -844,12 +844,6 @@
           "Grpc.Core.Api": "[2.83.0, )"
         }
       },
-      "dracocephalum.nightingale.examples.catchupsubscription": {
-        "type": "Project",
-        "dependencies": {
-          "Dracocephalum.Nightingale.Examples.Common": "[1.0.0, )"
-        }
-      },
       "dracocephalum.nightingale.examples.common": {
         "type": "Project",
         "dependencies": {

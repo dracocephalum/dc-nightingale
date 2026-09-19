@@ -44,6 +44,7 @@ is dropped at the end, whether the run passed or failed.
 
 ## Notes
 
-The sample references the client and the Polecat components as projects, the
-recorded workaround while no package feed exists; a real application would
-reference the two packages.
+The sample references the shared example library as a project, which in turn
+references the client and the Polecat components as projects, the recorded
+workaround while no package feed exists; a real application would reference
+the two packages.
