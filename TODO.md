@@ -9,10 +9,15 @@ undecided adds it here rather than mentioning it once in a conversation.
 
 ## Initialization
 
-- **No remote, so no host settings.** The merge behaviour and the default
-  branch ruleset the pull-request rules assume are not applied. Close by:
-  after the first push, `/source-control setup`, which runs the three
-  commands in `agentics/rules/source-control/github.md`, *Repository settings*.
+- **The default branch is unprotected.** The remote exists, private, with
+  squash as the only merge method, branch deletion on merge, and the
+  pull-request title and body as the squash commit message. The shipped
+  ruleset was refused: GitHub Free allows no rulesets on a private
+  repository, so nothing on the host stops a direct push to `main`; the rule
+  and the agent guardrails are the protection. Close by: making the
+  repository public, or a paid plan, then applying
+  `.github/rulesets/protect-main.json` as `agentics/rules/source-control/github.md`,
+  *Repository settings*, says.
 - **Change tracking is `none`.** `.agentics.yaml` records no tracker, so
   branch names and pull-request titles carry no ticket. Close by: when the
   repository has a tracker, set `change-tracking.tracker: github-issues`.
