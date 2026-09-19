@@ -5,7 +5,7 @@
 
 toolkit:
   url: https://github.com/dracocephalum/dc-agentics
-  commit: "0af3842716be"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
+  commit: "445d950a8419"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
   payload-path: "repo/payload"         # where the payload lived AT that commit - the toolkit restructures, and an upgrade diffing the wrong root sees every file as new. Fixed value, not a placeholder
   initialized: "2026-09-14"            # yyyy-mm-dd
   by: "Claude Code / claude-fable-5-1" # e.g. Claude Code / claude-fable-5-1
