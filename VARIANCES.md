@@ -65,6 +65,25 @@ guarantee with `ANY`. That part is not a variance.
 **Why:** bytes keep the client's exact text, which a typed map of doubles
 cannot, and the store keeps headers as a JSON object already.
 
+## Parked messages are replayed one at a time
+
+**Reference:** a parked message goes to a stream per group, and replay puts
+back all of them, or the first so many; one cannot be picked out.
+
+**Nightingale:** parked messages are rows, one per group and event, and
+replay puts back all of them or the one at a position; a replayed message
+keeps its retry count.
+
+**Why:** rows have keys; a log does not. Nothing is lost by the difference.
+
+## A persistent subscription serves one consumer
+
+**Reference:** a group dispatches to several consumers at once, round-robin
+or pinned.
+
+**Nightingale:** one consumer per group for now; a second is refused with
+`CONSUMER_LIMIT_REACHED`. Competing consumers are in `PENDING.md`.
+
 ## Subscription start positions are inclusive
 
 **Reference:** a subscription starts after a position: `FromStream.After(x)`

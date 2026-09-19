@@ -58,17 +58,34 @@ credentials, not a schema migration; the category and type indexes lead with
 the tenant column. Database-per-tenant is not planned: there is no coherent
 cross-tenant position across databases.
 
-## Dense positions for category and event-type streams
+## Ordinals for category and event-type streams
 
-The reference model: an internal projection walks `$all` in order and writes
-one link row per event into a table per virtual stream kind, `(key, position,
-sequence)`, with `position` the running count per key. Catch-up and persistent
-subscriptions read whichever feed the stream name resolves to: the event table
-by stream and version, a link table by position, or the event table by
-sequence for `$all`. Costs: a second write per event, and a category's head
-then lags the linker, so the linker needs its own lag alert. Built only if a
-consumer needs dense numbering; the sparse global sequence covers lag
-monitoring as long as the head is reported per stream.
+An ordinal is an event's place within its virtual stream: dense, so a
+consumer subtracts two of them and gets a count. The reference gets the same
+from link events with their own numbers; ours are two nullable columns on the
+events table, the category ordinal and the type ordinal, declared through the
+same patched schema as the category column, each with a filtered index that
+holds only numbered rows, so a read of a virtual stream by ordinal is one seek
+and can never return an unnumbered row. A linker, one per cluster on the same
+lease persistent-subscription groups use, walks `$all` behind the high-water
+mark in batches and numbers each batch from the last numbered entry per key;
+the append path is untouched, because numbering at append time would
+serialize every append to a category. The linker's lag is the virtual
+streams' visibility lag under this numbering, as the high-water mark's lag is
+`$all`'s. A removed event leaves a numbered hole the reader skips, which is
+what the reference does with a link whose event is gone.
+
+The numbering is the caller's explicit choice per read or subscription,
+`Global` by default, `Ordinal` only for `$ce-` and `$et-`, and refused with
+`ORDINALS_NOT_ENABLED` when the store was not initialized with the feature,
+before anything is delivered. In ordinal mode every number in the
+conversation, the start position, the head, the caught-up and fell-behind
+notes, is an ordinal, and each recorded event carries its ordinal beside the
+global position it always carries; under global numbering the ordinal is
+absent. A consumer stores the numbering with its checkpoint and never
+resubscribes under the other. The feature is a store setting fixed at
+initialization; a store that adopts it later gets its columns backfilled by
+the migrate command, never by drift.
 
 ## Server-computed lag counts
 
@@ -90,10 +107,33 @@ position, so a consumer sees one unbroken enumeration across reconnects.
 Persistent subscriptions ship with dispatch to a single consumer and a
 subscriber limit of one. Round-robin and pinned strategies add one dispatcher
 per group fanning out to several connections; the in-flight tracker already
-accepts acknowledgements in any order. Also in this group: replay of parked
-messages, group info and listing, and group ownership across several gateway
-instances by an application lock, with a cross-instance wake-up or accepted
-polling latency.
+accepts acknowledgements in any order. Group info and listing, and updating a
+group's settings in place, are in this group too.
+
+## Group ownership across instances, by lease and forwarding
+
+A persistent-subscription group runs in exactly one instance at a time,
+because its in-flight messages, retry counts and dispatch order are in
+memory. Ownership is a lease row per group, taken by the instance that first
+serves the group and renewed on a heartbeat; an expired lease is taken over,
+and the previous owner's in-flight messages are redelivered from the
+checkpoint. No leader, no gossip: the database is the only coordination
+point, and the client never learns the topology. Today an instance that does
+not own a group refuses the call with the owner named; the pending step is
+in-cluster forwarding, where that instance opens the same call to the owner
+and relays both directions, so any address serves any group through a dumb
+load balancer, at the cost of one hop. An instance registry table, id,
+address and last heartbeat, is what forwarding resolves the owner through.
+
+## Parked messages as rows, replayable one at a time
+
+The reference parks a message, after its retries are spent, into a stream per
+group and can replay only all of them or the first so many, because a log
+has no random-access removal. Ours are rows, one per group and event, with
+the reason, the attempt count and when it was parked: replay one by key,
+skip one by deleting it, replay all or all before a position, and list them.
+The first slice ships parking and replay of all and of one; listing and
+replay before a position follow with group info.
 
 ## Reads from a readable secondary
 

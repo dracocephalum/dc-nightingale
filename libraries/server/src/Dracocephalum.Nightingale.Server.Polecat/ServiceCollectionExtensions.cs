@@ -86,6 +86,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
+        services.AddSingleton<IGroupStore>(provider => new PolecatGroupStore(
+            connectionString,
+            provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
+            JasperFx.StorageConstants.DefaultTenantId,
+            provider.GetService<TimeProvider>() ?? TimeProvider.System));
         services.AddSingleton<IHostedService>(provider => new StoreInitializer(
             provider.GetRequiredService<IDocumentStore>(),
             connectionString,

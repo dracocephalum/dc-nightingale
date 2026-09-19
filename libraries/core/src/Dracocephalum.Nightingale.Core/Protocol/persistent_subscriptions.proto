@@ -1,15 +1,172 @@
-// Persistent subscriptions: server-side checkpoints, acknowledgements, parking.
+// Persistent subscriptions: a named group over a stream whose checkpoint the
+// server keeps, delivering each event to a connected consumer until it is
+// acknowledged, retrying or parking what is not.
 //
-// PLACEHOLDER: the service exists so that the area, its generated client stub
-// and its service base are in place from the first build. The RPCs follow the
-// reference persistent-subscriptions protocol - unary Create, Update, Delete
-// and a bidirectional Read whose request stream carries Ack and Nack - and
-// arrive with the contract; see TODO.md.
+// The shape follows the reference protocol: unary Create, Delete and
+// ReplayParked, and one bidirectional Read whose request stream carries the
+// options first and then acknowledgements, while the response stream carries
+// the confirmation and the events. A group runs in one server instance at a
+// time; see "Ownership" below. Numbers, names, bodies and errors are defined
+// in shared.proto and errors.proto.
 
 syntax = "proto3";
 
 package dracocephalum.nightingale.v1;
 
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "shared.proto";
+
 option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
 
-service PersistentSubscriptions {}
+service PersistentSubscriptions {
+  // Creates a group over a stream, $all or a virtual stream, with its
+  // settings and its starting position. Errors: GROUP_EXISTS,
+  // INVALID_STREAM_NAME, INVALID_ARGUMENT.
+  rpc Create (CreateRequest) returns (CreateResponse);
+
+  // Deletes a group: its checkpoint and its parked messages go with it, and a
+  // connected consumer's call ends. Errors: GROUP_NOT_FOUND.
+  rpc Delete (DeleteGroupRequest) returns (DeleteGroupResponse);
+
+  // Connects a consumer to a group. The first request carries the options;
+  // every following request acknowledges or refuses delivered events. The
+  // first response is the confirmation; every following one is an event with
+  // its retry count. An event not acknowledged within the group's message
+  // timeout is redelivered; one refused with park, or retried past the
+  // group's limit, is parked. Errors: GROUP_NOT_FOUND, GROUP_OWNED_ELSEWHERE,
+  // CONSUMER_LIMIT_REACHED, INVALID_ARGUMENT.
+  rpc Read (stream PersistentReadRequest) returns (stream PersistentReadResponse);
+
+  // Puts parked messages back in front of the group: all of them, or one by
+  // its position. Errors: GROUP_NOT_FOUND, PARKED_MESSAGE_NOT_FOUND.
+  rpc ReplayParked (ReplayParkedRequest) returns (ReplayParkedResponse);
+}
+
+message CreateRequest {
+  string stream = 1;
+  string group = 2;
+  GroupSettings settings = 3;
+}
+
+message CreateResponse {}
+
+// What the server keeps for a group. Defaults are the reference's where it
+// has them.
+message GroupSettings {
+  // Where the group starts: the first event, the next event after creation,
+  // or an explicit position (a revision for a stream, a position for $all and
+  // the virtual streams), inclusive. Default: end.
+  oneof start {
+    google.protobuf.Empty from_start = 1;
+    google.protobuf.Empty from_end = 2;
+    sint64 from_position = 3;
+  }
+
+  // How long a delivered event may stay unacknowledged before it is
+  // redelivered. Default 30 seconds.
+  google.protobuf.Duration message_timeout = 4;
+
+  // How many times an event is redelivered before it is parked. Default 10.
+  int32 max_retry_count = 5;
+
+  // The checkpoint is written when this many events have been acknowledged
+  // since the last write, or when checkpoint_after has passed with at least
+  // checkpoint_lower_bound acknowledged. Defaults 1000, 2 seconds, 10.
+  int32 checkpoint_upper_bound = 6;
+  google.protobuf.Duration checkpoint_after = 7;
+  int32 checkpoint_lower_bound = 8;
+
+  // How many events the server reads ahead of the consumer. Default 500.
+  int32 buffer_size = 9;
+
+  // How many consumers may connect at once. Only 1 is served today; see
+  // PENDING.md for competing consumers.
+  int32 max_subscriber_count = 10;
+}
+
+message DeleteGroupRequest {
+  string stream = 1;
+  string group = 2;
+}
+
+message DeleteGroupResponse {}
+
+message PersistentReadRequest {
+  oneof content {
+    // First message.
+    PersistentReadOptions options = 1;
+    // These events are done.
+    Ack ack = 2;
+    // These events are not done; the action says what happens to them.
+    Nack nack = 3;
+  }
+}
+
+message PersistentReadOptions {
+  string stream = 1;
+  string group = 2;
+  // How many delivered, unacknowledged events the consumer holds at once; the
+  // server sends no more until some are acknowledged. Default 10.
+  int32 buffer_size = 3;
+}
+
+message Ack {
+  // Event ids, in their canonical UUID form. At most 2000 per message.
+  repeated string ids = 1;
+}
+
+message Nack {
+  repeated string ids = 1;
+  NackAction action = 2;
+  string reason = 3;
+}
+
+enum NackAction {
+  // Treated as retry.
+  NACK_ACTION_UNSPECIFIED = 0;
+  // Park the events now, whatever their retry count.
+  NACK_ACTION_PARK = 1;
+  // Redeliver, counting a retry; parked when the limit is reached.
+  NACK_ACTION_RETRY = 2;
+  // Acknowledge without processing: the events are done and not parked.
+  NACK_ACTION_SKIP = 3;
+}
+
+message PersistentReadResponse {
+  oneof content {
+    // Always the first message.
+    PersistentSubscriptionConfirmed confirmed = 1;
+    PersistentEvent event = 2;
+  }
+}
+
+message PersistentSubscriptionConfirmed {
+  string subscription_id = 1;
+  // The group's checkpoint at that moment: the last position every event up
+  // to which is acknowledged, or -1 when nothing is yet.
+  sint64 checkpoint = 2;
+}
+
+message PersistentEvent {
+  RecordedEvent event = 1;
+  // How many times this event was delivered before this time; 0 on the first
+  // delivery.
+  int32 retry_count = 2;
+}
+
+message ReplayParkedRequest {
+  string stream = 1;
+  string group = 2;
+  oneof which {
+    // Every parked message, in the order they were parked.
+    google.protobuf.Empty all = 3;
+    // The parked message with this position.
+    sint64 position = 4;
+  }
+}
+
+message ReplayParkedResponse {
+  // How many messages were put back.
+  int32 replayed = 1;
+}

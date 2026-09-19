@@ -35,13 +35,14 @@ undecided adds it here rather than mentioning it once in a conversation.
   way the reference protocol does. `streams.proto` is drafted in full, with
   `shared.proto` for the numbers, names, bodies, headers and error conventions
   and `errors.proto` for the reasons. Implemented and verified against a local
-  SQL Server: `Append` and a bounded `Read` of a plain stream, through the
-  server, the store adapter and the client, with the `examples/append-and-read`
-  sample as the end-to-end run. Not yet: `Delete`, `Tombstone`, `$all` and the
-  virtual streams, subscriptions (all answer unimplemented), and the
-  `PersistentSubscriptions` area, which is still an empty service. Close by:
-  the subscriptions slice next, since it brings the tailer everything else
-  builds on.
+  SQL Server: `Append`, bounded reads and catch-up subscriptions over plain
+  streams, `$all` and the virtual streams, `Delete` and `Tombstone` behind the
+  host's switches, and persistent subscriptions with create, delete, one
+  consumer with acknowledgements, retries, parking and replay, on a lease per
+  group; the samples under `examples/` are the end-to-end runs. Not yet:
+  filters and checkpoints on `$all` (they answer unimplemented), group info,
+  listing and updating, competing consumers, in-cluster forwarding and the
+  ordinals, all in `PENDING.md`. Close by: the ordinals next, then forwarding.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,

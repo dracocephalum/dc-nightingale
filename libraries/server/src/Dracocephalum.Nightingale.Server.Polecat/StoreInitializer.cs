@@ -74,6 +74,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
             if (options.ApplySchemaChanges)
             {
                 await database.ApplyAllConfiguredChangesToDatabaseAsync(AutoCreate.CreateOrUpdate, ct: cancellationToken).ConfigureAwait(false);
+                await StampSchemaVersionAsync(cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
@@ -197,6 +198,17 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         LogInitializedStore(name, collation, marker.Partitioning);
     }
 
+    /// <summary>After a change is applied, the marker says which version of the schema the store now has.</summary>
+    private async Task StampSchemaVersionAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = string.Format(CultureInfo.InvariantCulture, "UPDATE {0} SET schema_version = @version WHERE id = 1 AND schema_version < @version", MarkerTable);
+        command.Parameters.AddWithValue("@version", StoreMarker.CurrentSchemaVersion);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<StoreMarker?> ReadMarkerAsync(CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(connectionString);
@@ -235,7 +247,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
     // The schema name comes from the store's options, never from a request; it is bracketed as an
     // identifier all the same.
     private string MarkerTable =>
-        $"[{store.Options.DatabaseSchemaName.Replace("]", "]]", StringComparison.Ordinal)}].[{StoreMarkerFeature.TableName}]";
+        $"[{store.Options.DatabaseSchemaName.Replace("]", "]]", StringComparison.Ordinal)}].[{NightingaleTablesFeature.StoreTable}]";
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created database {Database} with collation {Collation}.")]
     private partial void LogCreatedDatabase(string database, string collation);
