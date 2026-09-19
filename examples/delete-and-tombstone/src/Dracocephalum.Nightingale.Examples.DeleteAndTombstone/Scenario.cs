@@ -1,7 +1,7 @@
 using System.Text;
 
 using Dracocephalum.Nightingale.Client;
-using Grpc.Net.Client;
+using Dracocephalum.Nightingale.Examples.Common;
 
 namespace Dracocephalum.Nightingale.Examples.DeleteAndTombstone;
 
@@ -13,11 +13,6 @@ namespace Dracocephalum.Nightingale.Examples.DeleteAndTombstone;
 /// </summary>
 public static class Scenario
 {
-    private const string MasterEnvironmentVariable = "NIGHTINGALE_SQLSERVER";
-
-    /// <summary>The connection string used when the environment does not name one: a local server, trusted login.</summary>
-    public const string DefaultMasterConnectionString = "Server=localhost;Database=master;Trusted_Connection=True;TrustServerCertificate=True;Command Timeout=300";
-
     /// <summary>What the run observed, in the order the steps happened.</summary>
     /// <param name="Stream">The stream that was deleted, tombstoned and revived.</param>
     /// <param name="CategoryBefore">How many events the category stream held before the delete.</param>
@@ -39,11 +34,6 @@ public static class Scenario
         long ConflictActualRevision,
         string DefaultServerRefusal);
 
-    /// <summary>The master connection string: the environment's, or the local default.</summary>
-    /// <returns>The connection string.</returns>
-    public static string ResolveMasterConnectionString() =>
-        Environment.GetEnvironmentVariable(MasterEnvironmentVariable) ?? DefaultMasterConnectionString;
-
     /// <summary>Runs the scenario.</summary>
     /// <param name="masterConnectionString">A connection string to the server's master database.</param>
     /// <param name="output">Where the steps are narrated.</param>
@@ -56,13 +46,15 @@ public static class Scenario
         await using var database = ExampleDatabase.Reserve(masterConnectionString);
         await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the server creates it.").ConfigureAwait(false);
 
-        await using var server = await ExampleServer.StartAsync(database.ConnectionString, allowDeletion: true, cancellationToken).ConfigureAwait(false);
+        await using var server = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken, options =>
+        {
+            options.Deletion.AllowDelete = true;
+            options.Deletion.AllowTombstone = true;
+        }).ConfigureAwait(false);
         await output.WriteLineAsync($"2. Server listening at {server.Address} with delete and tombstone allowed, which the default host does not.").ConfigureAwait(false);
 
-        // The server is in this process on a loopback port, so the machine's HTTP proxy, if the
-        // environment names one, must not sit in the middle: a proxy cannot carry cleartext HTTP/2.
-        using var channel = GrpcChannel.ForAddress(server.Address, new GrpcChannelOptions { HttpHandler = new SocketsHttpHandler { UseProxy = false } });
-        await using var client = new NightingaleClient(channel.CreateCallInvoker());
+        await using var connection = server.Connect();
+        var client = connection.Client;
         const string stream = "orders-1";
 
         await client.AppendToStreamAsync(stream, StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
@@ -105,9 +97,9 @@ public static class Scenario
         var revived = await client.AppendToStreamAsync(stream, StreamState.NoStream, [Event("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"7. Appended to {stream} again as a new stream; revision {revived.Revision}.").ConfigureAwait(false);
 
-        await using var defaultServer = await ExampleServer.StartAsync(database.ConnectionString, allowDeletion: false, cancellationToken).ConfigureAwait(false);
-        using var defaultChannel = GrpcChannel.ForAddress(defaultServer.Address, new GrpcChannelOptions { HttpHandler = new SocketsHttpHandler { UseProxy = false } });
-        await using var defaultClient = new NightingaleClient(defaultChannel.CreateCallInvoker());
+        await using var defaultServer = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
+        await using var defaultConnection = defaultServer.Connect();
+        var defaultClient = defaultConnection.Client;
         var refusal = await Failure(() => defaultClient.DeleteStreamAsync(stream, StreamState.Any, cancellationToken)).ConfigureAwait(false);
         await output.WriteLineAsync($"8. A second server with the default settings refused to delete {stream}: {refusal}.").ConfigureAwait(false);
         await output.WriteLineAsync("9. Dropping the database.").ConfigureAwait(false);

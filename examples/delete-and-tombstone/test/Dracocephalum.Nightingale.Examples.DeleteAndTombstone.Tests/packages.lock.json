@@ -844,11 +844,17 @@
           "Grpc.Core.Api": "[2.83.0, )"
         }
       },
-      "dracocephalum.nightingale.examples.deleteandtombstone": {
+      "dracocephalum.nightingale.examples.common": {
         "type": "Project",
         "dependencies": {
           "Dracocephalum.Nightingale.Client": "[1.0.0, )",
           "Dracocephalum.Nightingale.Server.Polecat": "[1.0.0, )"
+        }
+      },
+      "dracocephalum.nightingale.examples.deleteandtombstone": {
+        "type": "Project",
+        "dependencies": {
+          "Dracocephalum.Nightingale.Examples.Common": "[1.0.0, )"
         }
       },
       "dracocephalum.nightingale.server": {

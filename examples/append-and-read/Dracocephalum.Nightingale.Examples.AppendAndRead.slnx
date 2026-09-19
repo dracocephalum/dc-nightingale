@@ -9,4 +9,5 @@
   <Project Path="../../libraries/core/src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
   <Project Path="../../libraries/server/src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
   <Project Path="../../libraries/server/src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
+  <Project Path="../common/src/Dracocephalum.Nightingale.Examples.Common/Dracocephalum.Nightingale.Examples.Common.csproj" />
 </Solution>

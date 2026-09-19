@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 
 using Microsoft.Data.SqlClient;
 
-namespace Dracocephalum.Nightingale.Examples.CategoryStream;
+namespace Dracocephalum.Nightingale.Examples.Common;
 
 /// <summary>
 /// A throwaway database name on the local server. The server creates and initializes the database
