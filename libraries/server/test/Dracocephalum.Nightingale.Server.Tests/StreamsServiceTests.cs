@@ -21,6 +21,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
     private readonly IStreamStore _store = A.Fake<IStreamStore>(options => options.Strict());
     private readonly FakeTail _tail = new();
+    private readonly TestOptions _serverOptions = new();
     private WebApplication? _app;
     private GrpcChannel? _channel;
 
@@ -29,6 +30,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
+        builder.Services.AddNightingaleOptions(_serverOptions);
         builder.Services.AddSingleton(_store);
         builder.Services.AddSingleton<IStoreTail>(_tail);
         _app = builder.Build();
@@ -462,6 +464,87 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+    }
+
+    [Fact]
+    public async Task Delete_ByDefault_ShouldBeRefusedAsDisabledWithoutTouchingTheStore()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.DeleteAsync(new DeleteRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("DELETION_DISABLED");
+        info.Metadata["operation"].ShouldBe("Delete");
+    }
+
+    [Fact]
+    public async Task Tombstone_ByDefault_ShouldBeRefusedAsDisabled()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.TombstoneAsync(new TombstoneRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Metadata["operation"].ShouldBe("Tombstone");
+    }
+
+    [Fact]
+    public async Task Delete_WhenAllowed_ShouldPassTheExpectedStateToTheStore()
+    {
+        // Arrange
+        _serverOptions.Deletion.AllowDelete = true;
+        A.CallTo(() => _store.DeleteAsync("orders-1", StreamState.StreamRevision(4), A<CancellationToken>._)).Returns(Task.CompletedTask);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        await client.DeleteAsync(new DeleteRequest { Stream = "orders-1", ExpectedRevision = 4 }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        A.CallTo(() => _store.DeleteAsync("orders-1", StreamState.StreamRevision(4), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task Delete_WhenTheStreamIsMissing_ShouldFailAsNotFound()
+    {
+        // Arrange
+        _serverOptions.Deletion.AllowDelete = true;
+        A.CallTo(() => _store.DeleteAsync("orders-9", StreamState.Any, A<CancellationToken>._)).ThrowsAsync(new StreamNotFoundException("orders-9"));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.DeleteAsync(new DeleteRequest { Stream = "orders-9", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.NotFound);
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("STREAM_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task Tombstone_WhenAllowedAndTheRevisionIsStale_ShouldFailWithTheConflict()
+    {
+        // Arrange
+        _serverOptions.Deletion.AllowTombstone = true;
+        A.CallTo(() => _store.TombstoneAsync("orders-1", StreamState.StreamRevision(1), A<CancellationToken>._))
+            .ThrowsAsync(new RevisionConflictException("orders-1", StreamState.StreamRevision(1), 3));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.TombstoneAsync(new TombstoneRequest { Stream = "orders-1", ExpectedRevision = 1 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Metadata["actual"].ShouldBe("3");
+    }
+
+    /// <summary>The common settings alone; the service reads nothing a backend adds.</summary>
+    private sealed class TestOptions : NightingaleOptionsBase
+    {
     }
 
     private static ProposedEvent Proposed(Guid id, string type, string json, JsonObject? metadata = null)

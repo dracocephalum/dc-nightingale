@@ -34,7 +34,8 @@ public sealed class ServiceCollectionExtensionsTests
             ("Nightingale:CreateDatabase", "false"),
             ("Nightingale:ApplySchemaChanges", "true"),
             ("Nightingale:Store:Collation", "Latin1_General_100_BIN2"),
-            ("Nightingale:Store:Partitioning", "ArchivedStream"));
+            ("Nightingale:Store:Partitioning", "ArchivedStream"),
+            ("Nightingale:Deletion:AllowTombstone", "true"));
         var services = new ServiceCollection();
 
         // Act
@@ -48,7 +49,10 @@ public sealed class ServiceCollectionExtensionsTests
             bound => bound.CreateDatabase.ShouldBeFalse(),
             bound => bound.ApplySchemaChanges.ShouldBeTrue(),
             bound => bound.Store.Collation.ShouldBe("Latin1_General_100_BIN2"),
-            bound => bound.Store.Partitioning.ShouldBe(NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream));
+            bound => bound.Store.Partitioning.ShouldBe(NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream),
+            bound => bound.Deletion.AllowDelete.ShouldBeFalse(),
+            bound => bound.Deletion.AllowTombstone.ShouldBeTrue());
+        provider.GetRequiredService<NightingaleOptionsBase>().ShouldBeSameAs(options);
         provider.GetRequiredService<IStreamStore>().ShouldBeOfType<PolecatStreamStore>();
     }
 

@@ -64,6 +64,13 @@ public static class NightingaleErrors
     public static RpcException InvalidArgument(string message) =>
         Build(StatusCode.InvalidArgument, ErrorReason.InvalidArgument, message);
 
+    /// <summary>The host has not enabled this kind of deletion.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="operation">What was refused: delete or tombstone.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException DeletionDisabled(string stream, string operation) =>
+        Build(StatusCode.PermissionDenied, ErrorReason.DeletionDisabled, $"{operation} is disabled on this server; the host enables it under Nightingale:Deletion.", ("stream", stream), ("operation", operation));
+
     /// <summary>A part of the contract this server does not implement yet. Not a reason: the status code says it all.</summary>
     /// <param name="feature">What was asked for.</param>
     /// <returns>The exception to throw.</returns>

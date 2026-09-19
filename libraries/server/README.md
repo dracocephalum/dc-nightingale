@@ -49,8 +49,9 @@ connected to for that.
 
 The server library reads nothing; configuration belongs to the host.
 
-The default host binds the `Nightingale` section and the connection string it
-names. `appsettings.json` carries the defaults; override any of them the usual
+The default host binds the `Nightingale` section, one tree whose common part
+is the server library's `NightingaleOptionsBase` and whose rest is the
+backend's, and the connection string it names. `appsettings.json` carries the defaults; override any of them the usual
 way, for example with the environment variable `ConnectionStrings__Nightingale`.
 
 | Setting | Default | Meaning |
@@ -59,6 +60,8 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:ConnectionStringName` | `Nightingale` | which entry under `ConnectionStrings` the server uses |
 | `Nightingale:CreateDatabase` | `true` | create the database when it does not exist; off, a missing database is an error, for a host whose login may not create one |
 | `Nightingale:ApplySchemaChanges` | `false` | apply pending schema changes at startup to a store initialized earlier; off, a schema that differs is refused with the change in the message |
+| `Nightingale:Deletion:AllowDelete` | `false` | accept `Delete`: a stream's events leave every read and it cannot be appended to again; the rows stay |
+| `Nightingale:Deletion:AllowTombstone` | `false` | accept `Tombstone`: a stream and its events are removed for good and the name is free again; irreversible, so a switch of its own |
 | `Nightingale:Store:Collation` | none, the server's default | the collation the database is created with; a binary one such as `Latin1_General_100_BIN2` makes stream names case-sensitive |
 | `Nightingale:Store:Partitioning` | `None` | `Tenant` partitions the events table by tenant, each with its own sequence, and the wildcard tenant is then refused; `ArchivedStream` partitions it by the archived flag, so deleted streams' events sit apart; one mode, because a table has one partition scheme |
 

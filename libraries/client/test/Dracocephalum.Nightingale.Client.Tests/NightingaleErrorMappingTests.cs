@@ -80,6 +80,19 @@ public sealed class NightingaleErrorMappingTests
         mapped.ShouldBeSameAs(failure);
     }
 
+    [Fact]
+    public void ToException_WhenDeletionIsDisabled_ShouldBeTheDeletionDisabledException()
+    {
+        // Arrange
+        var failure = Failure(StatusCode.PermissionDenied, "DELETION_DISABLED", ("stream", "orders-1"), ("operation", "Tombstone"));
+
+        // Act
+        var exception = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        exception.ShouldBeOfType<DeletionDisabledException>().Message.ShouldBe(failure.Status.Detail);
+    }
+
     private static RpcException Failure(StatusCode code, string reason, params (string Key, string Value)[] metadata)
     {
         var info = new ErrorInfo { Domain = "nightingale", Reason = reason };

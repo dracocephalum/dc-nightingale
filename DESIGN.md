@@ -165,6 +165,10 @@ poller's call, after the store's threshold.
 - **Errors** cross the wire as a `google.rpc.Status` with an `ErrorInfo`
   detail whose reason is one of `errors.proto`'s; the client maps reasons to
   the shared exceptions, and unknown reasons stay `RpcException`.
+- **Options** are one tree bound from the `Nightingale` section: the server
+  library's `NightingaleOptionsBase` holds what every backend shares, such as
+  which deletions the host allows, a backend's options derive from it and add
+  their own, and the registration accepts any type that derives from the base.
 - **Tenancy** is conjoined from day one, with the default tenant, so enabling
   tenants later is a matter of credentials and a header, not a migration.
 

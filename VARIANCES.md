@@ -145,6 +145,18 @@ no link events exist.
 **Why:** the store has no system streams, and hiding archived events is its
 convention on every read.
 
+## Deletion is off unless the host turns it on
+
+**Reference:** any caller with write access may delete or tombstone a stream.
+
+**Nightingale:** the server refuses both unless its host enables them, each
+under its own switch in `Nightingale:Deletion`, and a caller cannot change
+that; the refusal is the `DELETION_DISABLED` reason.
+
+**Why:** a store that never deletes keeps every event a consumer may still
+need and makes retention a decision of the operator rather than a habit of
+the code; the irreversible tombstone gets its own switch for the same reason.
+
 ## Deleted streams
 
 **Reference:** a soft-deleted stream can be recreated by appending to it, its

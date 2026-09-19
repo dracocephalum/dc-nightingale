@@ -35,6 +35,7 @@ public static class NightingaleErrorMapping
                 Number(info, "actual", -1)),
             ErrorReason.StreamDeleted => new StreamDeletedException(stream),
             ErrorReason.StreamNotFound => new StreamNotFoundException(stream),
+            ErrorReason.DeletionDisabled => new DeletionDisabledException(exception.Status.Detail),
             ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument or ErrorReason.AppendSizeExceeded =>
                 new ArgumentException(exception.Status.Detail),
             _ => exception,

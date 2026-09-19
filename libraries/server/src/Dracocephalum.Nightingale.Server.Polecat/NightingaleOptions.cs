@@ -3,17 +3,15 @@ using System.Text.RegularExpressions;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// What a host configures for the backend, bound from the <c>Nightingale</c> configuration section.
-/// The whole settings tree is in this file: a sub-section's type is nested under the property that
-/// binds it, so a reader finds every setting, its default and its reason in one place. The
-/// connection string itself is not here: it lives under <c>ConnectionStrings</c> like every other
+/// What a host configures for the Polecat backend, bound from the <c>Nightingale</c> configuration
+/// section: the settings every Nightingale server has, from the base, plus this backend's own. The
+/// whole settings tree is in this file and the base's: a sub-section's type is nested under the
+/// property that binds it, so a reader finds every setting, its default and its reason in one
+/// place. The connection string itself is not here: it lives under <c>ConnectionStrings</c> like every other
 /// connection string in a .NET host, and <see cref="ConnectionStringName"/> says which one.
 /// </summary>
-public sealed partial class NightingaleOptions
+public sealed partial class NightingaleOptions : NightingaleOptionsBase
 {
-    /// <summary>The configuration section the options are bound from.</summary>
-    public const string SectionName = "Nightingale";
-
     /// <summary>
     /// Gets or sets the name of the entry under <c>ConnectionStrings</c> that names the database.
     /// The connection string must name a database other than <c>master</c>.

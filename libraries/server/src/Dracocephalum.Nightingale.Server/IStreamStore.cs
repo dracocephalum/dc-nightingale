@@ -84,4 +84,30 @@ public interface IStreamStore
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>How many events lie between the two.</returns>
     Task<long> CountVirtualAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes a stream: its events leave every read and it cannot be appended to again, but its
+    /// rows stay in the store. The expected state is checked first, against the stream's current
+    /// revision.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="expected">What the caller asserts about the stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the stream is deleted.</returns>
+    /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
+    /// <exception cref="StreamDeletedException">The stream was already deleted.</exception>
+    /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
+    Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Tombstones a stream: it and its events are removed for good, and the name afterwards reads
+    /// as one that never existed. A deleted stream can be tombstoned.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="expected">What the caller asserts about the stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the stream is gone.</returns>
+    /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
+    /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
+    Task TombstoneAsync(string stream, StreamState expected, CancellationToken cancellationToken);
 }

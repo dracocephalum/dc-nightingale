@@ -7,7 +7,8 @@ namespace Dracocephalum.Nightingale.Client;
 
 /// <summary>
 /// The client of a Nightingale server, shaped after the reference event-store client: append to a
-/// stream under an expected state, read a stream or $all in either direction, subscribe to either. A failed call surfaces as a
+/// stream under an expected state, read a stream, $all or a virtual stream in either direction,
+/// subscribe to any of them, and delete or tombstone a stream where the server allows it. A failed call surfaces as a
 /// domain exception when the server gave a reason, an argument exception when the request was at
 /// fault, and the raw call exception otherwise. Thread-safe; one instance per server address.
 /// </summary>
@@ -98,6 +99,18 @@ public sealed class NightingaleClient : IAsyncDisposable
         return new ReadStreamResult(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
 
+    private static async Task Unary(Func<Task> call)
+    {
+        try
+        {
+            await call().ConfigureAwait(false);
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
     private static void SetFrom(ReadRequest request, StreamPosition from)
     {
         if (from.IsEnd)
@@ -154,6 +167,41 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <returns>The subscription in progress.</returns>
     public StreamSubscription SubscribeToAllAsync(StreamPosition from, CancellationToken cancellationToken = default) =>
         Subscribe(StreamNames.All, from, cancellationToken);
+
+    /// <summary>
+    /// Deletes a stream: its events leave every read and it cannot be appended to again. Only when
+    /// the server's host allows deletion; it does not by default.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="expected">What the caller asserts about the stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the stream is deleted.</returns>
+    /// <exception cref="DeletionDisabledException">The server does not allow deletion.</exception>
+    /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
+    /// <exception cref="StreamDeletedException">The stream was already deleted.</exception>
+    /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
+    public Task DeleteStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        return Unary(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Tombstones a stream: it and its events are removed for good and the name reads as one that
+    /// never existed. Only when the server's host allows it; it does not by default.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="expected">What the caller asserts about the stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the stream is gone.</returns>
+    /// <exception cref="DeletionDisabledException">The server does not allow tombstoning.</exception>
+    /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
+    /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
+    public Task TombstoneStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        return Unary(async () => await _streams.TombstoneAsync(new TombstoneRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+    }
 
     /// <inheritdoc/>
     public ValueTask DisposeAsync()
