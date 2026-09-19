@@ -16,6 +16,7 @@ public sealed class NightingaleClient : IAsyncDisposable
 {
     private readonly GrpcChannel? _ownedChannel;
     private readonly Streams.StreamsClient _streams;
+    private readonly PersistentSubscriptions.PersistentSubscriptionsClient _persistent;
 
     /// <summary>Initializes a new instance of the <see cref="NightingaleClient"/> class that owns its channel.</summary>
     /// <param name="options">Where the server is.</param>
@@ -25,6 +26,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         options.Validate();
         _ownedChannel = GrpcChannel.ForAddress(options.Address);
         _streams = new Streams.StreamsClient(_ownedChannel);
+        _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(_ownedChannel);
     }
 
     /// <summary>
@@ -36,6 +38,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(invoker);
         _streams = new Streams.StreamsClient(invoker);
+        _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(invoker);
     }
 
     /// <summary>Appends events to a stream atomically under an expected state.</summary>
@@ -201,6 +204,87 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         return Unary(async () => await _streams.TombstoneAsync(new TombstoneRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Creates a persistent-subscription group over a stream, <c>$all</c> or a virtual stream.</summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name, unique per stream.</param>
+    /// <param name="settings">The settings; the defaults when null.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the group exists.</returns>
+    /// <exception cref="GroupExistsException">A group with that name exists on the stream.</exception>
+    public Task CreatePersistentSubscriptionAsync(string stream, string group, GroupSettings? settings = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        return Unary(async () => await _persistent.CreateAsync(new CreateRequest { Stream = stream, Group = group, Settings = (settings ?? GroupSettings.Default).ToWire() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Deletes a persistent-subscription group, its checkpoint and its parked messages.</summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the group is gone.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    public Task DeletePersistentSubscriptionAsync(string stream, string group, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        return Unary(async () => await _persistent.DeleteAsync(new DeleteGroupRequest { Stream = stream, Group = group }, cancellationToken: cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Puts parked messages back in front of a group: all of them, or the one at a position.</summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="position">The parked message's position, or null for all.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many messages were put back.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    /// <exception cref="ParkedMessageNotFoundException">No parked message at that position.</exception>
+    public async Task<int> ReplayParkedMessagesAsync(string stream, string group, long? position = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        var request = new ReplayParkedRequest { Stream = stream, Group = group };
+        if (position is { } wanted)
+        {
+            request.Position = wanted;
+        }
+        else
+        {
+            request.All = new Google.Protobuf.WellKnownTypes.Empty();
+        }
+
+        try
+        {
+            var response = await _persistent.ReplayParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response.Replayed;
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
+    /// <summary>
+    /// Connects to a persistent-subscription group as its consumer. The call starts at once; the
+    /// subscription reports the confirmation and streams the events, each to be acknowledged or
+    /// refused.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="bufferSize">How many delivered, unacknowledged events to hold at once.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The subscription in progress.</returns>
+    public PersistentSubscription SubscribeToPersistentSubscriptionAsync(string stream, string group, int bufferSize = 10, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bufferSize);
+        var call = _persistent.Read(cancellationToken: cancellationToken);
+        var subscription = new PersistentSubscription(stream, group, call, cancellationToken);
+        _ = subscription.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = stream, Group = group, BufferSize = bufferSize } });
+        return subscription;
     }
 
     /// <inheritdoc/>

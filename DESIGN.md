@@ -139,6 +139,21 @@ dense under the stream lock. Under tenant partitioning there is no global
 sequence, each tenant has its own, so the wildcard read across tenants is
 refused there and everything else still works.
 
+### 5. A group runs in one place, on a lease
+
+A persistent-subscription group is a checkpoint the server keeps and a set of
+events in flight to one consumer. The checkpoint, the group's settings and its
+parked messages are rows in the gateway's own tables, through the `IGroupStore`
+port; the in-flight events, their retry counts and their deadlines are in
+memory, in `PersistentGroup`, in the one instance that holds the group's lease.
+The lease is a row taken with a merge that only a free, expired or already
+owned lease lets through, renewed while the consumer stays, released when it
+leaves; a second instance asked for the group learns who owns it and refuses,
+until in-cluster forwarding lands. The checkpoint is the last position every
+delivered event up to which is done: acknowledged, skipped, or parked. Parked
+messages are rows, one per event, so one can be replayed by itself; the
+reference keeps them in a stream and can only replay them together.
+
 `IStoreTail` is the seam for liveness. One tailer per process runs the store's
 own high-water agent, the part of its async daemon that finds that mark, and
 publishes every advance; each subscription waits on it instead of polling the

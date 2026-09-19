@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A sample program: runs end to end against a local SQL Server, and its test project runs the same scenario. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- TEMPORARY: cross-component project reference. Components reference each
+       other as packages (agentics/rules/layout.md); this stands in until a
+       package feed exists. Listed in TODO.md. -->
+  <ItemGroup>
+    <ProjectReference Include="../../../common/src/Dracocephalum.Nightingale.Examples.Common/Dracocephalum.Nightingale.Examples.Common.csproj" />
+  </ItemGroup>
+
+</Project>

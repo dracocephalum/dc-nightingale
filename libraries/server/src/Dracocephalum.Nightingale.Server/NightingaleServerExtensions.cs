@@ -19,6 +19,7 @@ public static class NightingaleServerExtensions
         ArgumentNullException.ThrowIfNull(services);
         services.AddGrpc();
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<GroupRegistry>();
         return services;
     }
 
@@ -47,6 +48,7 @@ public static class NightingaleServerExtensions
     {
         endpoints.MapGrpcService<ServerFeaturesService>();
         endpoints.MapGrpcService<StreamsService>();
+        endpoints.MapGrpcService<PersistentSubscriptionsService>();
         return endpoints;
     }
 }

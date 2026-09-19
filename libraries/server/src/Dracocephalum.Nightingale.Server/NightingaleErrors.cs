@@ -71,6 +71,44 @@ public static class NightingaleErrors
     public static RpcException DeletionDisabled(string stream, string operation) =>
         Build(StatusCode.PermissionDenied, ErrorReason.DeletionDisabled, $"{operation} is disabled on this server; the host enables it under Nightingale:Deletion.", ("stream", stream), ("operation", operation));
 
+    /// <summary>A group with that name exists on the stream.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="group">The group.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException GroupExists(string stream, string group) =>
+        Build(StatusCode.AlreadyExists, ErrorReason.GroupExists, $"Group '{group}' already exists on stream '{stream}'.", ("stream", stream), ("group", group));
+
+    /// <summary>No such group.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="group">The group.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException GroupNotFound(string stream, string group) =>
+        Build(StatusCode.NotFound, ErrorReason.GroupNotFound, $"Group '{group}' was not found on stream '{stream}'.", ("stream", stream), ("group", group));
+
+    /// <summary>Another instance owns the group.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="group">The group.</param>
+    /// <param name="owner">The owning instance's id.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException GroupOwnedElsewhere(string stream, string group, string owner) =>
+        Build(StatusCode.Unavailable, ErrorReason.GroupOwnedElsewhere, $"Group '{group}' on stream '{stream}' is owned by instance {owner}.", ("stream", stream), ("group", group), ("owner", owner));
+
+    /// <summary>The group has as many consumers as it allows.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="group">The group.</param>
+    /// <param name="limit">The limit.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException ConsumerLimitReached(string stream, string group, int limit) =>
+        Build(StatusCode.ResourceExhausted, ErrorReason.ConsumerLimitReached, $"Group '{group}' on stream '{stream}' already has {limit} consumer(s).", ("stream", stream), ("group", group), ("limit", limit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+    /// <summary>No parked message at that position.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="group">The group.</param>
+    /// <param name="position">The position.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException ParkedMessageNotFound(string stream, string group, long position) =>
+        Build(StatusCode.NotFound, ErrorReason.ParkedMessageNotFound, $"Group '{group}' on stream '{stream}' has no parked message at position {position}.", ("stream", stream), ("group", group), ("position", position.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
     /// <summary>A part of the contract this server does not implement yet. Not a reason: the status code says it all.</summary>
     /// <param name="feature">What was asked for.</param>
     /// <returns>The exception to throw.</returns>

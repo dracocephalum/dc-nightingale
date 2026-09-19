@@ -83,6 +83,62 @@ public static class WireConversions
             recorded.Metadata.IsEmpty ? [] : ParseMetadata(recorded.Metadata));
     }
 
+    /// <summary>Maps group settings from their wire form; unset fields take the defaults.</summary>
+    /// <param name="settings">The wire message.</param>
+    /// <returns>The settings.</returns>
+    public static GroupSettings ToGroupSettings(this Protocol.V1.GroupSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var defaults = GroupSettings.Default;
+        var start = settings.StartCase switch
+        {
+            Protocol.V1.GroupSettings.StartOneofCase.FromStart => StreamPosition.Start,
+            Protocol.V1.GroupSettings.StartOneofCase.FromPosition => StreamPosition.From(settings.FromPosition),
+            _ => StreamPosition.End,
+        };
+        return new GroupSettings(
+            start,
+            settings.MessageTimeout?.ToTimeSpan() ?? defaults.MessageTimeout,
+            settings.MaxRetryCount > 0 ? settings.MaxRetryCount : defaults.MaxRetryCount,
+            settings.CheckpointUpperBound > 0 ? settings.CheckpointUpperBound : defaults.CheckpointUpperBound,
+            settings.CheckpointAfter?.ToTimeSpan() ?? defaults.CheckpointAfter,
+            settings.CheckpointLowerBound > 0 ? settings.CheckpointLowerBound : defaults.CheckpointLowerBound,
+            settings.BufferSize > 0 ? settings.BufferSize : defaults.BufferSize,
+            settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount);
+    }
+
+    /// <summary>Maps group settings to their wire form.</summary>
+    /// <param name="settings">The settings.</param>
+    /// <returns>The wire message.</returns>
+    public static Protocol.V1.GroupSettings ToWire(this GroupSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var wire = new Protocol.V1.GroupSettings
+        {
+            MessageTimeout = Duration.FromTimeSpan(settings.MessageTimeout),
+            MaxRetryCount = settings.MaxRetryCount,
+            CheckpointUpperBound = settings.CheckpointUpperBound,
+            CheckpointAfter = Duration.FromTimeSpan(settings.CheckpointAfter),
+            CheckpointLowerBound = settings.CheckpointLowerBound,
+            BufferSize = settings.BufferSize,
+            MaxSubscriberCount = settings.MaxSubscriberCount,
+        };
+        if (settings.Start.IsEnd)
+        {
+            wire.FromEnd = new Empty();
+        }
+        else if (settings.Start == StreamPosition.Start)
+        {
+            wire.FromStart = new Empty();
+        }
+        else
+        {
+            wire.FromPosition = settings.Start.Value;
+        }
+
+        return wire;
+    }
+
     /// <summary>The wire form of a metadata object: its JSON text, or empty when there is nothing to say.</summary>
     /// <param name="metadata">The object, possibly null or empty.</param>
     /// <returns>The bytes.</returns>

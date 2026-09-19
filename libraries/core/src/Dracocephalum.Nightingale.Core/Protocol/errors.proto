@@ -45,4 +45,18 @@ enum ErrorReason {
   // deletion; both kinds are off unless the operator turns them on. metadata:
   // stream, operation (delete or tombstone).
   ERROR_REASON_DELETION_DISABLED = 8;
+  // ALREADY_EXISTS. A persistent-subscription group with this name exists on
+  // this stream. metadata: stream, group.
+  ERROR_REASON_GROUP_EXISTS = 9;
+  // NOT_FOUND. No such persistent-subscription group. metadata: stream, group.
+  ERROR_REASON_GROUP_NOT_FOUND = 10;
+  // UNAVAILABLE. Another server instance owns this group; connect there.
+  // metadata: stream, group, owner.
+  ERROR_REASON_GROUP_OWNED_ELSEWHERE = 11;
+  // RESOURCE_EXHAUSTED. The group already has as many consumers as it allows.
+  // metadata: stream, group, limit.
+  ERROR_REASON_CONSUMER_LIMIT_REACHED = 12;
+  // NOT_FOUND. No parked message at that position in this group. metadata:
+  // stream, group, position.
+  ERROR_REASON_PARKED_MESSAGE_NOT_FOUND = 13;
 }

@@ -36,11 +36,19 @@ public static class NightingaleErrorMapping
             ErrorReason.StreamDeleted => new StreamDeletedException(stream),
             ErrorReason.StreamNotFound => new StreamNotFoundException(stream),
             ErrorReason.DeletionDisabled => new DeletionDisabledException(exception.Status.Detail),
+            ErrorReason.GroupExists => new GroupExistsException(stream, Text(info, "group")),
+            ErrorReason.GroupNotFound => new GroupNotFoundException(stream, Text(info, "group")),
+            ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, Text(info, "group"), Text(info, "owner")),
+            ErrorReason.ConsumerLimitReached => new ConsumerLimitReachedException(stream, Text(info, "group")),
+            ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, Text(info, "group")),
             ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument or ErrorReason.AppendSizeExceeded =>
                 new ArgumentException(exception.Status.Detail),
             _ => exception,
         };
     }
+
+    private static string Text(ErrorInfo info, string key) =>
+        info.Metadata.TryGetValue(key, out var text) ? text : string.Empty;
 
     private static long Number(ErrorInfo info, string key, long fallback) =>
         info.Metadata.TryGetValue(key, out var text) && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)

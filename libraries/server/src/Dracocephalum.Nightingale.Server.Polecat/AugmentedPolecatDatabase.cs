@@ -30,6 +30,6 @@ internal sealed class AugmentedPolecatDatabase : PolecatDatabase
     public override IFeatureSchema[] BuildFeatureSchemas() =>
         base.BuildFeatureSchemas()
             .Select(feature => feature.Identifier == PatchedEventStoreFeature.EventStoreIdentifier ? new PatchedEventStoreFeature(feature) : feature)
-            .Append(new StoreMarkerFeature(_options.DatabaseSchemaName))
+            .Append(new NightingaleTablesFeature(_options.DatabaseSchemaName))
             .ToArray();
 }

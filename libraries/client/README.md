@@ -16,7 +16,8 @@ append, bounded reads of a plain stream, of `$all` and of the virtual streams
 (`$ce-<category>`, `$et-<event type>`), and catch-up subscriptions to any of
 them, delivered through a one-slot channel so a slow
 consumer holds the server back; delete and tombstone, which a server refuses
-unless its host allows them; the mapping from the wire's failure reasons
+unless its host allows them; persistent-subscription groups, created, consumed
+with acknowledgements and refusals, replayed and deleted; the mapping from the wire's failure reasons
 to the shared exceptions; and the connection options. It
 carries Core and the client transport and nothing else - no server, no backend.
 
