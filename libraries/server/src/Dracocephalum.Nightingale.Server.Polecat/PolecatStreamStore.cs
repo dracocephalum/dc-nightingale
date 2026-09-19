@@ -17,8 +17,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// the append already happened.
 /// </summary>
 /// <param name="store">The store.</param>
-internal sealed class PolecatStreamStore(IDocumentStore store) : IStreamStore
+/// <param name="connectionString">The connection string the store uses, for the virtual streams read straight from the table.</param>
+internal sealed class PolecatStreamStore(IDocumentStore store, string connectionString) : IStreamStore
 {
+    private readonly VirtualStreamReader _virtual = new(connectionString, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
+
     /// <inheritdoc/>
     public async Task<AppendResult> AppendAsync(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken)
     {
@@ -152,6 +155,21 @@ internal sealed class PolecatStreamStore(IDocumentStore store) : IStreamStore
 
         return records;
     }
+
+    /// <inheritdoc/>
+    public Task<StreamHead?> VirtualHeadAsync(VirtualStreamName stream, long head, CancellationToken cancellationToken) =>
+        _virtual.HeadAsync(stream, head, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<EventRecord>> ReadVirtualAsync(VirtualStreamName stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        return _virtual.ReadAsync(stream, direction, from, head, count, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<long> CountVirtualAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken) =>
+        _virtual.CountAsync(stream, after, head, cancellationToken);
 
     private static EventRecord ToRecord(IEvent stored) =>
         new(

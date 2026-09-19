@@ -9,8 +9,8 @@ namespace Dracocephalum.Nightingale.Server;
 /// The <c>Streams</c> service over an <see cref="IStreamStore"/> and its <see cref="IStoreTail"/>.
 /// It validates requests, keeps the contract's message order on a read, and translates the store's
 /// domain exceptions into the contract's errors. It knows nothing about the backend: revisions and
-/// positions arrive from the store already in the contract's numbering. This slice serves plain
-/// streams and <c>$all</c>, bounded and as subscriptions; the virtual streams and filters answer
+/// positions arrive from the store already in the contract's numbering. It serves plain streams,
+/// <c>$all</c> and the virtual streams, bounded and as subscriptions; filters on <c>$all</c> answer
 /// with an unimplemented status until their slice lands.
 /// </summary>
 /// <param name="store">The backend.</param>
@@ -36,6 +36,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
 
         var stream = ValidStreamName(request.Stream);
         var all = stream == StreamNames.All;
+        var isVirtual = StreamNames.TryParseVirtual(stream, out var virtualStream);
         if (request.Filter is not null)
         {
             throw all ? NightingaleErrors.NotImplemented("Filtering $all") : NightingaleErrors.FilterNotAllowed(stream);
@@ -55,6 +56,10 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 {
                     await ReadAllBounded(request, direction, responseStream, cancellationToken).ConfigureAwait(false);
                 }
+                else if (isVirtual)
+                {
+                    await ReadVirtualBounded(virtualStream, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
+                }
                 else
                 {
                     await ReadStreamBounded(stream, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
@@ -70,6 +75,10 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 if (all)
                 {
                     await SubscribeAll(request, responseStream, cancellationToken).ConfigureAwait(false);
+                }
+                else if (isVirtual)
+                {
+                    await SubscribeVirtual(virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -170,9 +179,8 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     }
 
     /// <summary>
-    /// Validates a name for a read: a plain stream or <c>$all</c>. The virtual streams are valid in
-    /// the contract but served by a later slice, so they are refused as not implemented rather than
-    /// as invalid.
+    /// Validates a name for a read: a plain stream, <c>$all</c>, or a virtual stream with a key. Any
+    /// other reserved name is invalid.
     /// </summary>
     private static string ValidStreamName(string stream)
     {
@@ -186,9 +194,9 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
             throw NightingaleErrors.InvalidStreamName(stream, $"longer than {MaxStreamNameLength} characters");
         }
 
-        if (StreamNames.IsReserved(stream) && stream != StreamNames.All)
+        if (StreamNames.IsReserved(stream) && stream != StreamNames.All && !StreamNames.TryParseVirtual(stream, out _))
         {
-            throw NightingaleErrors.NotImplemented("Reading the virtual streams");
+            throw NightingaleErrors.InvalidStreamName(stream, "reserved and not $all, $ce-<category> or $et-<event type>");
         }
 
         return stream;
@@ -387,6 +395,109 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
             }
 
             await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+            head = await tail.WaitForAdvanceAsync(head, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// A bounded read of a virtual stream: a snapshot up to the refreshed global head, whose bounds
+    /// are the stream's own first and last events. A virtual stream with no events reads as empty,
+    /// with bounds of zero, never as not found.
+    /// </summary>
+    private async Task ReadVirtualBounded(VirtualStreamName stream, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    {
+        var head = await tail.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        var bounds = await store.VirtualHeadAsync(stream, head, cancellationToken).ConfigureAwait(false);
+        await responseStream.WriteAsync(new ReadResponse { Head = new StreamBounds { First = bounds?.First ?? 0, Last = bounds?.Last ?? 0 } }, cancellationToken).ConfigureAwait(false);
+        if (bounds is null)
+        {
+            return;
+        }
+
+        var from = request.FromCase switch
+        {
+            ReadRequest.FromOneofCase.Position => request.Position,
+            ReadRequest.FromOneofCase.End => direction == Direction.Backwards ? bounds.Last : bounds.Last + 1,
+            _ => direction == Direction.Forwards ? bounds.First : bounds.Last,
+        };
+
+        var remaining = request.Count;
+        while (remaining > 0)
+        {
+            if (direction == Direction.Forwards ? from > bounds.Last : from < bounds.First)
+            {
+                return;
+            }
+
+            var pageSize = (int)Math.Min(remaining, PageSize);
+            var page = await store.ReadVirtualAsync(stream, direction, from, head, pageSize, cancellationToken).ConfigureAwait(false);
+            foreach (var record in page)
+            {
+                await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+            }
+
+            remaining -= (ulong)page.Count;
+            if (page.Count < pageSize)
+            {
+                return;
+            }
+
+            from = direction == Direction.Forwards ? page[^1].Position + 1 : page[^1].Position - 1;
+        }
+    }
+
+    /// <summary>
+    /// A subscription to a virtual stream: the shape of <c>$all</c>'s, over the predicate. The head
+    /// it reports is always the stream's own last event, so a quiet category keeps a stable head
+    /// while the store moves on, and an advance of the store that brings it nothing is silent.
+    /// </summary>
+    private async Task SubscribeVirtual(VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    {
+        var id = Guid.NewGuid().ToString("D");
+        var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
+        var bounds = await store.VirtualHeadAsync(stream, head, cancellationToken).ConfigureAwait(false);
+        var own = bounds?.Last ?? -1;
+        var next = request.FromCase switch
+        {
+            ReadRequest.FromOneofCase.Position => request.Position,
+            ReadRequest.FromOneofCase.End => head + 1,
+            _ => 0,
+        };
+        await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = own } }, cancellationToken).ConfigureAwait(false);
+
+        var delivered = true;
+        while (true)
+        {
+            var behind = false;
+            while (head > 0 && next <= head)
+            {
+                var page = await store.ReadVirtualAsync(stream, Direction.Forwards, next, head, PageSize, cancellationToken).ConfigureAwait(false);
+                if (page.Count == PageSize && !behind)
+                {
+                    var rest = await store.CountVirtualAsync(stream, page[^1].Position, head, cancellationToken).ConfigureAwait(false);
+                    if (rest > 0)
+                    {
+                        behind = true;
+                        await responseStream.WriteAsync(FellBehindAt(own, rest + page.Count, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                foreach (var record in page)
+                {
+                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    own = record.Position;
+                    delivered = true;
+                }
+
+                next = page.Count < PageSize ? head + 1 : page[^1].Position + 1;
+            }
+
+            if (delivered)
+            {
+                await responseStream.WriteAsync(CaughtUpAt(own, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                delivered = false;
+            }
+
             head = await tail.WaitForAdvanceAsync(head, cancellationToken).ConfigureAwait(false);
         }
     }

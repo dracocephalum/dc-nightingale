@@ -51,4 +51,37 @@ public interface IStreamStore
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events of the page, in the reading direction; fewer than asked means the end was reached.</returns>
     Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds the bounds of a virtual stream: the positions of its first and last live events at or
+    /// below <paramref name="head"/>. Its last event is its head; the global head is never reported
+    /// as a virtual stream's.
+    /// </summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <param name="head">The highest position to consider.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The bounds, or <see langword="null"/> when the stream has no events at or below the head.</returns>
+    Task<StreamHead?> VirtualHeadAsync(VirtualStreamName stream, long head, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads one page of a virtual stream, with the same bounds as <see cref="ReadAllAsync"/>: forwards
+    /// from <paramref name="from"/> up to <paramref name="head"/>, both inclusive, or backwards from
+    /// <paramref name="from"/>.
+    /// </summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
+    /// <param name="head">The highest position a forwards page may hold.</param>
+    /// <param name="count">The most events to return. Positive.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events of the page, in the reading direction; fewer than asked means the end was reached.</returns>
+    Task<IReadOnlyList<EventRecord>> ReadVirtualAsync(VirtualStreamName stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken);
+
+    /// <summary>Counts the live events of a virtual stream after a position, up to the head.</summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <param name="after">The position already delivered, exclusive.</param>
+    /// <param name="head">The highest position to count, inclusive.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many events lie between the two.</returns>
+    Task<long> CountVirtualAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken);
 }

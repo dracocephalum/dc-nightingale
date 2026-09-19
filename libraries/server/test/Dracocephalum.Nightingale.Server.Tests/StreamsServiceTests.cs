@@ -369,6 +369,88 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Read_WhenReadingACategoryStream_ShouldSendItsOwnBoundsThenItsEvents()
+    {
+        // Arrange: the global head is 20; the category's own bounds are what the client learns.
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        A.CallTo(() => _store.VirtualHeadAsync(orders, 20, A<CancellationToken>._)).Returns(new StreamHead(5, 17));
+        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 5, 20, 10, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 5, "a"), Record("orders-2", 0, 9, "b"), Record("orders-1", 1, 17, "c")]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 10 });
+
+        // Assert
+        messages[0].Head.ShouldSatisfyAllConditions(head => head.First.ShouldBe(5), head => head.Last.ShouldBe(17));
+        messages.Skip(1).Select(message => message.Event.Position).ShouldBe([5, 9, 17]);
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingAnEventTypeStreamWithNoEvents_ShouldSendZeroBoundsOnly()
+    {
+        // Arrange
+        var placed = new VirtualStreamName(VirtualStreamKind.EventType, "OrderPlaced");
+        _tail.Advance(20);
+        A.CallTo(() => _store.VirtualHeadAsync(placed, 20, A<CancellationToken>._)).Returns((StreamHead?)null);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$et-OrderPlaced", Start = new(), Count = 10 });
+
+        // Assert
+        messages.ShouldHaveSingleItem().Head.ShouldSatisfyAllConditions(head => head.First.ShouldBe(0), head => head.Last.ShouldBe(0));
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingToACategory_ShouldReportItsOwnHeadAndStaySilentWhenTheStoreMovesWithoutIt()
+    {
+        // Arrange: the store's head is 20 but the category's last event is at 17; an advance to 30
+        // brings the category nothing, and only the advance to 40 does. The two advances may be
+        // seen as one, so the range 21..40 is configured as well.
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        A.CallTo(() => _store.VirtualHeadAsync(orders, 20, A<CancellationToken>._)).Returns(new StreamHead(5, 17));
+        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 0, 20, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 5, "a"), Record("orders-1", 1, 17, "b")]);
+        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 21, 30, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([]);
+        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 31, 40, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([Record("orders-2", 0, 35, "c")]);
+        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 21, 40, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([Record("orders-2", 0, 35, "c")]);
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var catchUp = await Next(call, 4);
+        _tail.Advance(30);
+        _tail.Advance(40);
+        var live = await Next(call, 2);
+
+        // Assert: never the global head, 20, 30 or 40.
+        catchUp[0].Confirmed.Head.ShouldBe(17);
+        catchUp.Skip(1).Take(2).Select(message => message.Event.Position).ShouldBe([5, 17]);
+        catchUp[3].CaughtUp.Head.ShouldBe(17);
+        live[0].Event.Position.ShouldBe(35);
+        live[1].CaughtUp.Head.ShouldBe(35);
+    }
+
+    [Fact]
+    public async Task Read_WhenTheReservedNameIsUnknown_ShouldRejectTheName()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, new ReadRequest { Stream = "$streams", Start = new(), Count = 1 }));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
+    }
+
+    [Fact]
     public async Task Read_WhenSubscribingBackwards_ShouldReject()
     {
         // Arrange
@@ -380,19 +462,6 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
-    }
-
-    [Fact]
-    public async Task Read_WhenReadingAVirtualStream_ShouldAnswerUnimplemented()
-    {
-        // Arrange
-        var client = new Streams.StreamsClient(_channel);
-
-        // Act
-        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 1 }));
-
-        // Assert
-        exception.StatusCode.ShouldBe(StatusCode.Unimplemented);
     }
 
     private static ProposedEvent Proposed(Guid id, string type, string json, JsonObject? metadata = null)

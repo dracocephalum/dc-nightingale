@@ -83,7 +83,7 @@ public static class ServiceCollectionExtensions
             store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store), connectionString);
         }).UseLightweightSessions();
 
-        services.AddSingleton<IStreamStore, PolecatStreamStore>();
+        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddSingleton<IHostedService>(provider => new StoreInitializer(
