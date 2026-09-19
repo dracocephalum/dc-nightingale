@@ -1,4 +1,3 @@
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -16,10 +15,6 @@ namespace Dracocephalum.Nightingale.Protocol;
 /// </summary>
 public static class WireConversions
 {
-    // Non-ASCII stays as written. The default encoder would escape it as \uXXXX, which is the same
-    // JSON but not the same bytes, and fidelity is the promise here.
-    private static readonly JsonSerializerOptions MetadataOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-
     /// <summary>Maps a proposed event to its wire form.</summary>
     /// <param name="eventData">The event.</param>
     /// <returns>The wire message.</returns>
@@ -94,7 +89,7 @@ public static class WireConversions
     public static ByteString ToMetadataBytes(JsonObject? metadata) =>
         metadata is null || metadata.Count == 0
             ? ByteString.Empty
-            : ByteString.CopyFromUtf8(metadata.ToJsonString(MetadataOptions));
+            : ByteString.CopyFromUtf8(metadata.ToJsonString(NightingaleJson.Options));
 
     /// <summary>Parses wire metadata back into an object.</summary>
     /// <param name="metadata">The bytes; must hold a JSON object.</param>

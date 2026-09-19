@@ -46,8 +46,10 @@ type name and JSON body are the whole event. `JsonEvent` is the seam. It is the
 store's event wrapper over a `JsonElement`, sealed, with the type name the
 client sent held in a property whose setter does nothing, so the store's own
 naming pass cannot overwrite it. The body is written and read as JSON text
-with the relaxed encoder, so the client's casing, key order, number formatting
-and unicode come back byte for byte, insignificant whitespace aside.
+with `NightingaleJson.Options`, the one set of serializer options every
+component uses for JSON it does not own, so the client's casing, key order,
+number formatting and unicode come back byte for byte, insignificant
+whitespace aside.
 
 Metadata is a JSON object, also sent as bytes. Two keys the server
 understands, `$correlationId` and `$causationId`, move into the store's own
