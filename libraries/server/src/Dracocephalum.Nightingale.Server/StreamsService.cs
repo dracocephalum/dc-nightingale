@@ -16,7 +16,8 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="store">The backend.</param>
 /// <param name="tail">The backend's head as it moves.</param>
 /// <param name="timeProvider">The clock the progress notes are stamped with.</param>
-public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProvider timeProvider) : Streams.StreamsBase
+/// <param name="options">The common settings: which deletions the host allows.</param>
+public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
 {
     /// <summary>The longest stream name the store column holds.</summary>
     public const int MaxStreamNameLength = 250;
@@ -103,17 +104,9 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
             throw NightingaleErrors.InvalidArgument("The first message of an append carries the options.");
         }
 
-        var options = requestStream.Current.Options;
-        var stream = PlainStreamName(options.Stream);
-        StreamState expected;
-        try
-        {
-            expected = StreamState.FromInt64(options.ExpectedRevision);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            throw NightingaleErrors.InvalidArgument("The expected revision is neither a revision nor a named state.");
-        }
+        var appendOptions = requestStream.Current.Options;
+        var stream = PlainStreamName(appendOptions.Stream);
+        var expected = Expected(appendOptions.ExpectedRevision);
 
         var events = new List<EventData>();
         while (await requestStream.MoveNext(context.CancellationToken).ConfigureAwait(false))
@@ -160,6 +153,70 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         catch (StreamDeletedException deleted)
         {
             throw NightingaleErrors.StreamDeleted(deleted.Stream);
+        }
+    }
+
+    /// <inheritdoc/>
+    public override async Task<DeleteResponse> Delete(DeleteRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var stream = PlainStreamName(request.Stream);
+        if (!options.Deletion.AllowDelete)
+        {
+            throw NightingaleErrors.DeletionDisabled(stream, "Delete");
+        }
+
+        await Deleting(stream, () => store.DeleteAsync(stream, Expected(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
+        return new DeleteResponse();
+    }
+
+    /// <inheritdoc/>
+    public override async Task<TombstoneResponse> Tombstone(TombstoneRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var stream = PlainStreamName(request.Stream);
+        if (!options.Deletion.AllowTombstone)
+        {
+            throw NightingaleErrors.DeletionDisabled(stream, "Tombstone");
+        }
+
+        await Deleting(stream, () => store.TombstoneAsync(stream, Expected(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
+        return new TombstoneResponse();
+    }
+
+    private static StreamState Expected(long expectedRevision)
+    {
+        try
+        {
+            return StreamState.FromInt64(expectedRevision);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw NightingaleErrors.InvalidArgument("The expected revision is neither a revision nor a named state.");
+        }
+    }
+
+    private static async Task Deleting(string stream, Func<Task> operation)
+    {
+        try
+        {
+            await operation().ConfigureAwait(false);
+        }
+        catch (StreamNotFoundException)
+        {
+            throw NightingaleErrors.StreamNotFound(stream);
+        }
+        catch (StreamDeletedException)
+        {
+            throw NightingaleErrors.StreamDeleted(stream);
+        }
+        catch (RevisionConflictException conflict)
+        {
+            throw NightingaleErrors.RevisionConflict(conflict);
         }
     }
 

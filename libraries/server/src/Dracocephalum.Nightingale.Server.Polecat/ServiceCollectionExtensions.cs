@@ -31,12 +31,12 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configuration);
 
         var options = new NightingaleOptions();
-        configuration.GetSection(NightingaleOptions.SectionName).Bind(options);
+        configuration.GetSection(NightingaleOptionsBase.SectionName).Bind(options);
         var connectionString = configuration.GetConnectionString(options.ConnectionStringName);
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             throw new InvalidOperationException(
-                $"ConnectionStrings:{options.ConnectionStringName} is not configured. {NightingaleOptions.SectionName}:{nameof(NightingaleOptions.ConnectionStringName)} names the connection string the server uses.");
+                $"ConnectionStrings:{options.ConnectionStringName} is not configured. {NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.ConnectionStringName)} names the connection string the server uses.");
         }
 
         return Register(services, connectionString, options);
@@ -68,7 +68,7 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options)
     {
         options.Store.Validate();
-        services.AddSingleton(options);
+        services.AddNightingaleOptions(options);
         services.AddPolecat((StoreOptions store) =>
         {
             store.Connection(connectionString);

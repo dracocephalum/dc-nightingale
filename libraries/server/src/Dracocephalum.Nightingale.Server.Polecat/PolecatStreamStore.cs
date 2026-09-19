@@ -171,6 +171,56 @@ internal sealed class PolecatStreamStore(IDocumentStore store, string connection
     public Task<long> CountVirtualAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken) =>
         _virtual.CountAsync(stream, after, head, cancellationToken);
 
+    /// <inheritdoc/>
+    public async Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+
+        // The check and the archive are two statements in one session; an append that lands between
+        // them is archived with the rest, so the outcome is a deleted stream either way.
+        await using var session = store.LightweightSession();
+        var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
+        if (state is null || state.Version == 0)
+        {
+            throw new StreamNotFoundException(stream);
+        }
+
+        if (state.IsArchived)
+        {
+            throw new StreamDeletedException(stream);
+        }
+
+        CheckExpected(stream, expected, state.Version - 1);
+        session.Events.ArchiveStream(stream);
+        await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task TombstoneAsync(string stream, StreamState expected, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+
+        await using var session = store.LightweightSession();
+        var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
+        if (state is null || state.Version == 0)
+        {
+            throw new StreamNotFoundException(stream);
+        }
+
+        CheckExpected(stream, expected, state.Version - 1);
+        session.Events.TombstoneStream(stream);
+        await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The expected state against the stream's current revision; any and stream-exists always pass here, because the stream exists.</summary>
+    private static void CheckExpected(string stream, StreamState expected, long actual)
+    {
+        if (expected == StreamState.NoStream || (expected.HasRevision && expected.ToInt64() != actual))
+        {
+            throw new RevisionConflictException(stream, expected, actual);
+        }
+    }
+
     private static EventRecord ToRecord(IEvent stored) =>
         new(
             stored.Id,

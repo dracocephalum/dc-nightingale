@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Dracocephalum.Nightingale.Examples.DeleteAndTombstone/Dracocephalum.Nightingale.Examples.DeleteAndTombstone.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Dracocephalum.Nightingale.Examples.DeleteAndTombstone.Tests/Dracocephalum.Nightingale.Examples.DeleteAndTombstone.Tests.csproj" />
+  </Folder>
+  <Project Path="../../libraries/client/src/Dracocephalum.Nightingale.Client/Dracocephalum.Nightingale.Client.csproj" />
+  <Project Path="../../libraries/core/src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
+  <Project Path="../../libraries/server/src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
+  <Project Path="../../libraries/server/src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
+</Solution>

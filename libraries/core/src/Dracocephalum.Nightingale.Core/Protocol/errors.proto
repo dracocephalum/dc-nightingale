@@ -41,4 +41,8 @@ enum ErrorReason {
   // INVALID_ARGUMENT. Anything else wrong with a request; the status message
   // says what. No metadata.
   ERROR_REASON_INVALID_ARGUMENT = 7;
+  // PERMISSION_DENIED. The server's host has not enabled this kind of
+  // deletion; both kinds are off unless the operator turns them on. metadata:
+  // stream, operation (delete or tombstone).
+  ERROR_REASON_DELETION_DISABLED = 8;
 }

@@ -41,6 +41,22 @@ undecided adds it here rather than mentioning it once in a conversation.
   `PersistentSubscriptions` area, which is still an empty service. Close by:
   the subscriptions slice next, since it brings the tailer everything else
   builds on.
+- **A delete's expected-revision check is not atomic with the archive.** The
+  adapter reads the stream's revision, compares, then archives in the same
+  session; an append that lands between the two is archived with the rest,
+  so the outcome is still a deleted stream, but the check passed on a
+  revision that was no longer current. Close by: a conditional archive
+  statement that carries the expected revision, if the store grows one.
+- **The default-host integration test fails once in a few full runs.** The
+  second `ProgramTests` case, which hosts the default program beside the
+  fixture's host on the same database, has failed about one run in three of
+  the full suite with "The CancellationTokenSource has been disposed", and
+  never when its class runs alone, eight times over. The tailer's shutdown
+  was reordered to drain its loop before stopping the store's daemon, which
+  cured the one reproducible case; what remains looks like a background task
+  of a stopped daemon throwing after disposal while several hosts stop at
+  once. Close by: capturing the stack from a failing full run and either
+  fixing the shutdown or filing it upstream.
 - **Live delivery waits out a polling interval.** The tailer runs the store's
   high-water agent, which polls on the store's cadence, so an event reaches a
   live subscriber up to a quarter of a second after its append. The store's
