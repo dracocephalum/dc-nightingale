@@ -3,6 +3,7 @@ using JasperFx.Events;
 using JasperFx.MultiTenancy;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Polecat;
@@ -80,10 +81,10 @@ public static class ServiceCollectionExtensions
             store.Events.EnableCausationId = true;
             store.Events.EnableHeaders = true;
             store.AutoCreateSchemaObjects = AutoCreate.None;
-            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store), connectionString);
+            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.Ordinals), connectionString);
         }).UseLightweightSessions();
 
-        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString));
+        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString, options.Store.Ordinals));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddSingleton<IGroupStore>(provider => new PolecatGroupStore(
@@ -98,6 +99,21 @@ public static class ServiceCollectionExtensions
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetRequiredService<ILogger<StoreInitializer>>()));
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
+        if (options.Store.Ordinals)
+        {
+            // After the tailer, so the numberer's first look at the head is a real one. The
+            // registry is the server's, but a host that registers only the backend still numbers.
+            services.TryAddSingleton<GroupRegistry>();
+            services.AddSingleton<IHostedService>(provider => new OrdinalLinker(
+                provider.GetRequiredService<IGroupStore>(),
+                provider.GetRequiredService<IStoreTail>(),
+                provider.GetRequiredService<GroupRegistry>(),
+                connectionString,
+                provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
+                provider.GetService<TimeProvider>() ?? TimeProvider.System,
+                provider.GetRequiredService<ILogger<OrdinalLinker>>()));
+        }
+
         return services;
     }
 }

@@ -53,6 +53,36 @@ public sealed class WireConversionsTests
     }
 
     [Fact]
+    public void RecordedEvent_ShouldCarryTheOrdinalOnlyWhenTheRecordHasOne()
+    {
+        // Arrange
+        var numbered = new EventRecord(Guid.NewGuid(), "orders-1", 0, 5, "OrderPlaced", Created, Encoding.UTF8.GetBytes("{}"), [], 3);
+        var plain = numbered with { Ordinal = null };
+
+        // Act
+        var wireNumbered = numbered.ToRecordedEvent();
+        var wirePlain = plain.ToRecordedEvent();
+
+        // Assert
+        wireNumbered.HasOrdinal.ShouldBeTrue();
+        wireNumbered.Ordinal.ShouldBe(3);
+        wirePlain.HasOrdinal.ShouldBeFalse();
+        wireNumbered.ToEventRecord().Ordinal.ShouldBe(3);
+        wirePlain.ToEventRecord().Ordinal.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(Numbering.Global, Protocol.V1.Numbering.Global)]
+    [InlineData(Numbering.Ordinal, Protocol.V1.Numbering.Ordinal)]
+    public void Numbering_ShouldRoundTripAndTreatUnspecifiedAsGlobal(Numbering numbering, Protocol.V1.Numbering wire)
+    {
+        // Act & Assert
+        numbering.ToWire().ShouldBe(wire);
+        wire.ToNumbering().ShouldBe(numbering);
+        Protocol.V1.Numbering.Unspecified.ToNumbering().ShouldBe(Numbering.Global);
+    }
+
+    [Fact]
     public void RecordedEvent_ShouldRoundTripThroughTheDomainTypeUnchanged()
     {
         // Arrange

@@ -543,9 +543,139 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     /// <summary>The common settings alone; the service reads nothing a backend adds.</summary>
+    /// <returns><placeholder>A <see cref="Task"/> representing the asynchronous unit test.</placeholder></returns>
+    [Fact]
+    public async Task Read_WhenReadingACategoryByOrdinal_ShouldSendOrdinalBoundsThenEventsWithTheirOrdinals()
+    {
+        // Arrange: three numbered events at sparse positions. The tail is never consulted: what is
+        // numbered is committed by construction.
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 2));
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 0, 10, A<CancellationToken>._))
+            .Returns([Numbered("orders-1", 0, 5, 0), Numbered("orders-2", 0, 9, 1), Numbered("orders-1", 1, 17, 2)]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 10, Numbering = Protocol.V1.Numbering.Ordinal });
+
+        // Assert
+        messages[0].Head.ShouldSatisfyAllConditions(head => head.First.ShouldBe(0), head => head.Last.ShouldBe(2));
+        messages.Skip(1).Select(message => message.Event.Ordinal).ShouldBe([0, 1, 2]);
+        messages.Skip(1).Select(message => message.Event.Position).ShouldBe([5, 9, 17]);
+        messages.Skip(1).ShouldAllBe(message => message.Event.HasOrdinal);
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingByOrdinalBackwardsFromTheEnd_ShouldStartAtTheLastOrdinal()
+    {
+        // Arrange
+        var placed = new VirtualStreamName(VirtualStreamKind.EventType, "OrderPlaced");
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        A.CallTo(() => _store.OrdinalHeadAsync(placed, A<CancellationToken>._)).Returns(new StreamHead(0, 7));
+        A.CallTo(() => _store.ReadByOrdinalAsync(placed, Direction.Backwards, 7, 2, A<CancellationToken>._))
+            .Returns([Numbered("orders-9", 0, 40, 7), Numbered("orders-8", 0, 31, 6)]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$et-OrderPlaced", Direction = ReadDirection.Backwards, End = new(), Count = 2, Numbering = Protocol.V1.Numbering.Ordinal });
+
+        // Assert
+        messages.Skip(1).Select(message => message.Event.Ordinal).ShouldBe([7, 6]);
+    }
+
+    [Fact]
+    public async Task Read_WhenOrdinalsAreNotEnabled_ShouldRefuseBeforeTouchingTheStore()
+    {
+        // Arrange
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(false);
+        var client = new Streams.StreamsClient(_channel);
+        var request = new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 1, Numbering = Protocol.V1.Numbering.Ordinal };
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("ORDINALS_NOT_ENABLED");
+    }
+
+    [Theory]
+    [InlineData("orders-1")]
+    [InlineData("$all")]
+    public async Task Read_WhenOrdinalNumberingIsAskedOutsideAVirtualStream_ShouldReject(string stream)
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+        var request = new ReadRequest { Stream = stream, Start = new(), Count = 1, Numbering = Protocol.V1.Numbering.Ordinal };
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_ARGUMENT");
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingByOrdinal_ShouldConfirmWithTheLastOrdinalAndLookAgainWhileTheNumbererIsBehind()
+    {
+        // Arrange: two numbered events; the tail then advances to 30 before the numberer has
+        // reached it, so the first look after the wake finds nothing and the next one, after the
+        // interval, finds the event the numberer assigned meanwhile.
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 1));
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([Numbered("orders-1", 0, 5, 0), Numbered("orders-1", 1, 17, 1)]);
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 2, StreamsService.PageSize, A<CancellationToken>._))
+            .ReturnsNextFromSequence([], [Numbered("orders-2", 0, 25, 2)]);
+        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsNextFromSequence(20L, 20L, 30L);
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", Start = new(), Subscription = new SubscriptionOptions(), Numbering = Protocol.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var catchUp = await Next(call, 4);
+        _tail.Advance(30);
+        var live = await Next(call, 2);
+
+        // Assert: every number an ordinal, never a position.
+        catchUp[0].Confirmed.Head.ShouldBe(1);
+        catchUp.Skip(1).Take(2).Select(message => message.Event.Ordinal).ShouldBe([0, 1]);
+        catchUp[3].CaughtUp.Head.ShouldBe(1);
+        live[0].Event.Ordinal.ShouldBe(2);
+        live[0].Event.Position.ShouldBe(25);
+        live[1].CaughtUp.Head.ShouldBe(2);
+        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).MustHaveHappened(3, Times.Exactly);
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingByOrdinalFromEnd_ShouldStartAfterTheLastOrdinal()
+    {
+        // Arrange
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 7));
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 8, StreamsService.PageSize, A<CancellationToken>._)).Returns([]);
+        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).Returns(20L);
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocol.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var confirmed = await Next(call, 1);
+
+        // Assert
+        confirmed.ShouldHaveSingleItem().Confirmed.Head.ShouldBe(7);
+    }
+
     private sealed class TestOptions : NightingaleOptionsBase
     {
     }
+
+    private static EventRecord Numbered(string stream, long revision, long position, long ordinal) =>
+        Record(stream, revision, position, "a") with { Ordinal = ordinal };
 
     private static ProposedEvent Proposed(Guid id, string type, string json, JsonObject? metadata = null)
     {

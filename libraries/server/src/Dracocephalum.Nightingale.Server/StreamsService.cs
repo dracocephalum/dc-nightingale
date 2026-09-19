@@ -10,8 +10,9 @@ namespace Dracocephalum.Nightingale.Server;
 /// It validates requests, keeps the contract's message order on a read, and translates the store's
 /// domain exceptions into the contract's errors. It knows nothing about the backend: revisions and
 /// positions arrive from the store already in the contract's numbering. It serves plain streams,
-/// <c>$all</c> and the virtual streams, bounded and as subscriptions; filters on <c>$all</c> answer
-/// with an unimplemented status until their slice lands.
+/// <c>$all</c> and the virtual streams, bounded and as subscriptions, the virtual streams under
+/// either numbering; filters on <c>$all</c> answer with an unimplemented status until their slice
+/// lands.
 /// </summary>
 /// <param name="store">The backend.</param>
 /// <param name="tail">The backend's head as it moves.</param>
@@ -28,6 +29,14 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     /// </summary>
     public const int PageSize = 512;
 
+    /// <summary>
+    /// How long an ordinal subscription waits between looks while the numberer is behind the head
+    /// it woke up for. Ordinals are assigned after commit, so an advance of the tail says events
+    /// were committed, not that they are numbered yet; the subscription looks again on this cadence
+    /// until the numberer has passed the head, then waits on the tail once more.
+    /// </summary>
+    public static readonly TimeSpan NumberingPollInterval = TimeSpan.FromMilliseconds(250);
+
     /// <inheritdoc/>
     public override async Task Read(ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, ServerCallContext context)
     {
@@ -43,6 +52,17 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
             throw all ? NightingaleErrors.NotImplemented("Filtering $all") : NightingaleErrors.FilterNotAllowed(stream);
         }
 
+        var ordinal = request.Numbering.ToNumbering() == Numbering.Ordinal;
+        if (ordinal && !isVirtual)
+        {
+            throw NightingaleErrors.InvalidArgument("Ordinal numbering applies to $ce- and $et- streams only.");
+        }
+
+        if (ordinal && !store.OrdinalsEnabled)
+        {
+            throw NightingaleErrors.OrdinalsNotEnabled(stream);
+        }
+
         var direction = request.Direction == ReadDirection.Backwards ? Direction.Backwards : Direction.Forwards;
         if (request.FromCase == ReadRequest.FromOneofCase.Position && request.Position < 0)
         {
@@ -56,6 +76,10 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 if (all)
                 {
                     await ReadAllBounded(request, direction, responseStream, cancellationToken).ConfigureAwait(false);
+                }
+                else if (ordinal)
+                {
+                    await ReadOrdinalBounded(virtualStream, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else if (isVirtual)
                 {
@@ -76,6 +100,10 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 if (all)
                 {
                     await SubscribeAll(request, responseStream, cancellationToken).ConfigureAwait(false);
+                }
+                else if (ordinal)
+                {
+                    await SubscribeOrdinal(virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else if (isVirtual)
                 {
@@ -558,6 +586,137 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
             head = await tail.WaitForAdvanceAsync(head, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// A bounded read of a virtual stream by ordinal: a snapshot of what is numbered, whose bounds
+    /// are the lowest and highest ordinal assigned. No head is refreshed, because ordinals are
+    /// assigned in atomic batches after commit and every assigned one is readable; what the
+    /// numberer has not reached yet is not in the snapshot. A stream with nothing numbered reads
+    /// as empty, with bounds of zero.
+    /// </summary>
+    private async Task ReadOrdinalBounded(VirtualStreamName stream, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    {
+        var bounds = await store.OrdinalHeadAsync(stream, cancellationToken).ConfigureAwait(false);
+        await responseStream.WriteAsync(new ReadResponse { Head = new StreamBounds { First = bounds?.First ?? 0, Last = bounds?.Last ?? 0 } }, cancellationToken).ConfigureAwait(false);
+        if (bounds is null)
+        {
+            return;
+        }
+
+        var from = request.FromCase switch
+        {
+            ReadRequest.FromOneofCase.Position => request.Position,
+            ReadRequest.FromOneofCase.End => direction == Direction.Backwards ? bounds.Last : bounds.Last + 1,
+            _ => direction == Direction.Forwards ? bounds.First : bounds.Last,
+        };
+
+        var remaining = request.Count;
+        while (remaining > 0)
+        {
+            if (direction == Direction.Forwards ? from > bounds.Last : from < bounds.First)
+            {
+                return;
+            }
+
+            var pageSize = (int)Math.Min(remaining, PageSize);
+            var page = await store.ReadByOrdinalAsync(stream, direction, from, pageSize, cancellationToken).ConfigureAwait(false);
+            foreach (var record in page)
+            {
+                await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+            }
+
+            remaining -= (ulong)page.Count;
+            if (page.Count < pageSize)
+            {
+                return;
+            }
+
+            from = direction == Direction.Forwards ? OrdinalOf(page[^1]) + 1 : OrdinalOf(page[^1]) - 1;
+        }
+    }
+
+    /// <summary>
+    /// A subscription to a virtual stream by ordinal. Every number is an ordinal: the confirmation
+    /// carries the highest one assigned, or -1 when none is, and from the end means after that.
+    /// The catch-up drains the numbered rows; the live phase waits on the tail like every other
+    /// subscription, then looks for newly numbered rows, and while the numberer is still behind
+    /// the head it woke for, looks again on <see cref="NumberingPollInterval"/> rather than waiting
+    /// for an advance that a quiet store would never bring. A store advance that brings this
+    /// stream nothing is silent, as under global numbering.
+    /// </summary>
+    private async Task SubscribeOrdinal(VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    {
+        var id = Guid.NewGuid().ToString("D");
+        var observed = tail.Head;
+        var bounds = await store.OrdinalHeadAsync(stream, cancellationToken).ConfigureAwait(false);
+        var own = bounds?.Last ?? -1;
+        var next = request.FromCase switch
+        {
+            ReadRequest.FromOneofCase.Position => request.Position,
+            ReadRequest.FromOneofCase.End => own + 1,
+            _ => 0,
+        };
+        await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = own } }, cancellationToken).ConfigureAwait(false);
+
+        var delivered = true;
+        while (true)
+        {
+            var behind = false;
+            while (true)
+            {
+                var page = await store.ReadByOrdinalAsync(stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
+                if (page.Count == 0)
+                {
+                    break;
+                }
+
+                if (page.Count == PageSize && !behind)
+                {
+                    // Ordinals are dense, so the distance to the highest assigned one is the count,
+                    // holes included.
+                    var head = (await store.OrdinalHeadAsync(stream, cancellationToken).ConfigureAwait(false))?.Last ?? own;
+                    if (head > OrdinalOf(page[^1]))
+                    {
+                        behind = true;
+                        await responseStream.WriteAsync(FellBehindAt(head, head - next + 1, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                foreach (var record in page)
+                {
+                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    own = OrdinalOf(record);
+                    delivered = true;
+                }
+
+                next = own + 1;
+                if (page.Count < PageSize)
+                {
+                    break;
+                }
+            }
+
+            if (delivered)
+            {
+                await responseStream.WriteAsync(CaughtUpAt(own, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                delivered = false;
+            }
+
+            // Everything up to the observed head is numbered and was just read, so the next thing
+            // to wait for is an advance; otherwise the numberer is behind, and the next look is soon.
+            if (await store.NumberedThroughAsync(cancellationToken).ConfigureAwait(false) >= observed)
+            {
+                observed = await tail.WaitForAdvanceAsync(observed, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await Task.Delay(NumberingPollInterval, timeProvider, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static long OrdinalOf(EventRecord record) =>
+        record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.");
 
     private async Task<StreamSlice?> ReadPage(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
     {

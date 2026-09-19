@@ -55,6 +55,19 @@ public sealed class NightingaleErrorMappingTests
     }
 
     [Fact]
+    public void ToException_WhenOrdinalsAreNotEnabled_ShouldNameTheStream()
+    {
+        // Arrange
+        var failure = Failure(StatusCode.FailedPrecondition, "ORDINALS_NOT_ENABLED", ("stream", "$ce-orders"));
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        mapped.ShouldBeOfType<OrdinalsNotEnabledException>().Stream.ShouldBe("$ce-orders");
+    }
+
+    [Fact]
     public void ToException_WhenReasonIsUnknown_ShouldReturnTheOriginal()
     {
         // Arrange

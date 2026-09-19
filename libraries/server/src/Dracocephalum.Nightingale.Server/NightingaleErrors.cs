@@ -109,6 +109,12 @@ public static class NightingaleErrors
     public static RpcException ParkedMessageNotFound(string stream, string group, long position) =>
         Build(StatusCode.NotFound, ErrorReason.ParkedMessageNotFound, $"Group '{group}' on stream '{stream}' has no parked message at position {position}.", ("stream", stream), ("group", group), ("position", position.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
+    /// <summary>Ordinal numbering was asked for on a store initialized without ordinals.</summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException OrdinalsNotEnabled(string stream) =>
+        Build(StatusCode.FailedPrecondition, ErrorReason.OrdinalsNotEnabled, $"Stream '{stream}' cannot be read by ordinal: the store was not initialized with ordinals.", ("stream", stream));
+
     /// <summary>A part of the contract this server does not implement yet. Not a reason: the status code says it all.</summary>
     /// <param name="feature">What was asked for.</param>
     /// <returns>The exception to throw.</returns>

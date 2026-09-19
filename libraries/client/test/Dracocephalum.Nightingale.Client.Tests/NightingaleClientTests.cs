@@ -24,7 +24,7 @@ public sealed class NightingaleClientTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act & Assert
-        Should.Throw<ArgumentOutOfRangeException>(() => sut.ReadStreamAsync(Direction.Forwards, "orders-1", StreamPosition.Start, 0, TestContext.Current.CancellationToken));
+        Should.Throw<ArgumentOutOfRangeException>(() => sut.ReadStreamAsync(Direction.Forwards, "orders-1", StreamPosition.Start, 0, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]

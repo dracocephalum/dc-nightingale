@@ -78,16 +78,19 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     /// <summary>
     /// Reads a stream. The call starts immediately; the result reports the stream's state and head
-    /// before any event and streams the events after.
+    /// before any event and streams the events after. A virtual stream can be read by ordinal, in
+    /// which case <paramref name="from"/>, the head and each event's ordinal are its dense numbers;
+    /// the server refuses that on a store initialized without ordinals, and on any other stream.
     /// </summary>
     /// <param name="direction">The direction to read in.</param>
     /// <param name="stream">The stream name.</param>
     /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
     /// <param name="maxCount">The most events to return.</param>
+    /// <param name="numbering">How the numbers of the read are meant; global by default.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The read in progress.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The count is not positive.</exception>
-    public ReadStreamResult ReadStreamAsync(Direction direction, string stream, StreamPosition from, long maxCount = long.MaxValue, CancellationToken cancellationToken = default)
+    public ReadStreamResult ReadStreamAsync(Direction direction, string stream, StreamPosition from, long maxCount = long.MaxValue, Numbering numbering = Numbering.Global, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCount);
@@ -97,6 +100,7 @@ public sealed class NightingaleClient : IAsyncDisposable
             Stream = stream,
             Direction = direction == Direction.Backwards ? ReadDirection.Backwards : ReadDirection.Forwards,
             Count = (ulong)maxCount,
+            Numbering = numbering.ToWire(),
         };
         SetFrom(request, from);
         return new ReadStreamResult(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
@@ -130,9 +134,9 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
     }
 
-    private StreamSubscription Subscribe(string stream, StreamPosition from, CancellationToken cancellationToken)
+    private StreamSubscription Subscribe(string stream, StreamPosition from, Numbering numbering, CancellationToken cancellationToken)
     {
-        var request = new ReadRequest { Stream = stream, Direction = ReadDirection.Forwards, Subscription = new SubscriptionOptions() };
+        var request = new ReadRequest { Stream = stream, Direction = ReadDirection.Forwards, Subscription = new SubscriptionOptions(), Numbering = numbering.ToWire() };
         SetFrom(request, from);
         return new StreamSubscription(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
@@ -147,21 +151,24 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The read in progress.</returns>
     public ReadStreamResult ReadAllAsync(Direction direction, StreamPosition from, long maxCount = long.MaxValue, CancellationToken cancellationToken = default) =>
-        ReadStreamAsync(direction, StreamNames.All, from, maxCount, cancellationToken);
+        ReadStreamAsync(direction, StreamNames.All, from, maxCount, Numbering.Global, cancellationToken);
 
     /// <summary>
     /// Subscribes to a stream: every event from <paramref name="from"/> to the head, a caught-up
     /// note, then every event as it is appended, until the subscription is disposed. A stream
-    /// that does not exist yet is waited for.
+    /// that does not exist yet is waited for. A virtual stream can be followed by ordinal, in which
+    /// case every number in the conversation is its dense one; the server refuses that on a store
+    /// initialized without ordinals, and on any other stream.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="from">Where to begin, inclusive; <see cref="StreamPosition.End"/> for only what comes after.</param>
+    /// <param name="numbering">How the numbers of the subscription are meant; global by default.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The subscription in progress.</returns>
-    public StreamSubscription SubscribeToStreamAsync(string stream, StreamPosition from, CancellationToken cancellationToken = default)
+    public StreamSubscription SubscribeToStreamAsync(string stream, StreamPosition from, Numbering numbering = Numbering.Global, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return Subscribe(stream, from, cancellationToken);
+        return Subscribe(stream, from, numbering, cancellationToken);
     }
 
     /// <summary>Subscribes to <c>$all</c>; see <see cref="SubscribeToStreamAsync"/>.</summary>
@@ -169,7 +176,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The subscription in progress.</returns>
     public StreamSubscription SubscribeToAllAsync(StreamPosition from, CancellationToken cancellationToken = default) =>
-        Subscribe(StreamNames.All, from, cancellationToken);
+        Subscribe(StreamNames.All, from, Numbering.Global, cancellationToken);
 
     /// <summary>
     /// Deletes a stream: its events leave every read and it cannot be appended to again. Only when

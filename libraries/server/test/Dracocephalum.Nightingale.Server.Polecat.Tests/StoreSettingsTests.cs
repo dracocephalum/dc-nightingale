@@ -17,6 +17,19 @@ public sealed class StoreSettingsTests
         exception.Message.ShouldContain("None, Tenant, ArchivedStream");
     }
 
+    [Fact]
+    public void Validate_WhenOrdinalsMeetTenantPartitioning_ShouldRefuse()
+    {
+        // Arrange: ordinals number one global sequence; a sequence per tenant has none.
+        var sut = new NightingaleOptions.StoreSettings { Ordinals = true, Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant };
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(sut.Validate);
+
+        // Assert
+        exception.Message.ShouldContain("cannot be combined");
+    }
+
     [Theory]
     [InlineData("Latin1_General_100_BIN2")]
     [InlineData("SQL_Latin1_General_CP1_CI_AS")]

@@ -178,6 +178,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         var marker = new StoreMarker(
             StoreMarker.CurrentSchemaVersion,
             options.Store.Partitioning,
+            options.Store.Ordinals,
             collation,
             timeProvider.GetUtcNow(),
             typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown");
@@ -185,17 +186,18 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         {
             insert.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
-                "INSERT INTO {0} (id, schema_version, partitioning, collation, created_at, created_by) VALUES (1, @version, @partitioning, @collation, @created_at, @created_by)",
+                "INSERT INTO {0} (id, schema_version, partitioning, ordinals, collation, created_at, created_by) VALUES (1, @version, @partitioning, @ordinals, @collation, @created_at, @created_by)",
                 MarkerTable);
             insert.Parameters.AddWithValue("@version", marker.SchemaVersion);
             insert.Parameters.AddWithValue("@partitioning", marker.Partitioning.ToString());
+            insert.Parameters.AddWithValue("@ordinals", marker.Ordinals);
             insert.Parameters.AddWithValue("@collation", marker.Collation);
             insert.Parameters.AddWithValue("@created_at", marker.CreatedAt);
             insert.Parameters.AddWithValue("@created_by", marker.CreatedBy);
             await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        LogInitializedStore(name, collation, marker.Partitioning);
+        LogInitializedStore(name, collation, marker.Partitioning, marker.Ordinals);
     }
 
     /// <summary>After a change is applied, the marker says which version of the schema the store now has.</summary>
@@ -228,8 +230,9 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         await using var select = connection.CreateCommand();
         select.CommandText = string.Format(
             CultureInfo.InvariantCulture,
-            "SELECT schema_version, partitioning, collation, created_at, created_by FROM {0} WHERE id = 1",
-            MarkerTable);
+            "SELECT schema_version, partitioning, collation, created_at, created_by, {1} FROM {0} WHERE id = 1",
+            MarkerTable,
+            await HasColumnAsync(connection, "ordinals", cancellationToken).ConfigureAwait(false) ? "ordinals" : "CAST(NULL AS bit)");
         await using var reader = await select.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -239,9 +242,23 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         return new StoreMarker(
             reader.GetInt32(0),
             Enum.Parse<NightingaleOptions.StoreSettings.PartitioningMode>(reader.GetString(1)),
+            !reader.IsDBNull(5) && reader.GetBoolean(5),
             reader.GetString(2),
             reader.GetFieldValue<DateTimeOffset>(3),
             reader.GetString(4));
+    }
+
+    /// <summary>
+    /// Whether the marker table has a column: a store initialized by an older server lacks the
+    /// ones added since, and the marker is read before the migration that adds them can run.
+    /// </summary>
+    private async Task<bool> HasColumnAsync(SqlConnection connection, string column, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(@table, 'U') AND name = @column";
+        command.Parameters.AddWithValue("@table", MarkerTable);
+        command.Parameters.AddWithValue("@column", column);
+        return (int)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))! > 0;
     }
 
     // The schema name comes from the store's options, never from a request; it is bracketed as an
@@ -252,8 +269,8 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
     [LoggerMessage(Level = LogLevel.Information, Message = "Created database {Database} with collation {Collation}.")]
     private partial void LogCreatedDatabase(string database, string collation);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Initialized the store in database {Database}: collation {Collation}, partitioning {Partitioning}.")]
-    private partial void LogInitializedStore(string database, string collation, NightingaleOptions.StoreSettings.PartitioningMode partitioning);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Initialized the store in database {Database}: collation {Collation}, partitioning {Partitioning}, ordinals {Ordinals}.")]
+    private partial void LogInitializedStore(string database, string collation, NightingaleOptions.StoreSettings.PartitioningMode partitioning, bool ordinals);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Serving the store in database {Database}, schema version {SchemaVersion}, initialized by {CreatedBy}.")]
     private partial void LogServingStore(string database, int schemaVersion, string createdBy);

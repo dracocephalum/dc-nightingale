@@ -19,8 +19,8 @@ option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
 service Streams {
   // A bounded read, or a subscription, over a stream, $all, or a virtual
   // stream. Errors: STREAM_DELETED, INVALID_STREAM_NAME, FILTER_NOT_ALLOWED,
-  // INVALID_ARGUMENT. A stream with no events is not an error: the first and
-  // only response is stream_not_found.
+  // ORDINALS_NOT_ENABLED, INVALID_ARGUMENT. A stream with no events is not
+  // an error: the first and only response is stream_not_found.
   rpc Read (ReadRequest) returns (stream ReadResponse);
 
   // Appends events to one stream atomically: all of them, or none, under one
@@ -68,6 +68,12 @@ message ReadRequest {
 
   // $all only. See shared.proto.
   Filter filter = 8;
+
+  // How the numbers in this conversation are read: global positions, the
+  // default, or the dense ordinals of a virtual stream. See "Numbering" in
+  // shared.proto. Under ORDINAL, `position` above is an ordinal, and so is
+  // every head, checkpoint and count the responses carry.
+  Numbering numbering = 9;
 }
 
 enum ReadDirection {

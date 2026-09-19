@@ -92,6 +92,20 @@ public sealed class VirtualStreamTests(SqlServerTestDatabase database)
             record => record.Metadata.ToJsonString(NightingaleJson.Options).ShouldBe(viaStream.Metadata.ToJsonString(NightingaleJson.Options)));
     }
 
+    [Fact]
+    public async Task ReadByOrdinal_WhenTheStoreHasNoOrdinals_ShouldRefuseWithoutQuerying()
+    {
+        // Arrange: the shared store is initialized without ordinals, so the columns do not exist.
+        var sut = database.Store;
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "vso-none");
+
+        // Act & Assert
+        sut.OrdinalsEnabled.ShouldBeFalse();
+        (await Should.ThrowAsync<OrdinalsNotEnabledException>(() => sut.ReadByOrdinalAsync(orders, Direction.Forwards, 0, 1, TestContext.Current.CancellationToken))).Stream.ShouldBe("$ce-vso-none");
+        await Should.ThrowAsync<OrdinalsNotEnabledException>(() => sut.OrdinalHeadAsync(orders, TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<OrdinalsNotEnabledException>(() => sut.NumberedThroughAsync(TestContext.Current.CancellationToken));
+    }
+
     private static (string Orders, string Shipments, string Placed) Names()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
