@@ -18,7 +18,8 @@ system projections, with dense revisions of their own (0, 1, 2, ...).
 Their positions are the store's global sequence number: monotonic within the
 stream but sparse, because other streams' events occupy the numbers between.
 The head of each virtual stream is its own last event, never the global head,
-so a quiet category reports a stable head and zero lag.
+so a quiet category reports a stable head and zero lag, and a subscription to
+it says nothing while the store moves on without it.
 
 **Why:** no link events, no projection lag, no extra writes. A consumer that
 alerts on an absolute count of events behind, rather than on a growing lag,

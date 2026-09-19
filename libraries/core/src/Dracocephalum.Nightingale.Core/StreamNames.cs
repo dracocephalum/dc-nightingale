@@ -24,4 +24,27 @@ public static class StreamNames
         ArgumentNullException.ThrowIfNull(stream);
         return stream.Length > 0 && stream[0] == '$';
     }
+
+    /// <summary>Recognises a virtual stream name.</summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="virtualStream">The virtual stream, when the name is one with a non-empty key.</param>
+    /// <returns>True for <c>$ce-</c> or <c>$et-</c> followed by at least one character.</returns>
+    public static bool TryParseVirtual(string stream, out VirtualStreamName virtualStream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (stream.Length > CategoryPrefix.Length && stream.StartsWith(CategoryPrefix, StringComparison.Ordinal))
+        {
+            virtualStream = new VirtualStreamName(VirtualStreamKind.Category, stream[CategoryPrefix.Length..]);
+            return true;
+        }
+
+        if (stream.Length > EventTypePrefix.Length && stream.StartsWith(EventTypePrefix, StringComparison.Ordinal))
+        {
+            virtualStream = new VirtualStreamName(VirtualStreamKind.EventType, stream[EventTypePrefix.Length..]);
+            return true;
+        }
+
+        virtualStream = default;
+        return false;
+    }
 }

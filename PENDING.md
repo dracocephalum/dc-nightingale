@@ -77,6 +77,14 @@ growing lag: a range count over the category or type index from the
 subscriber's position to the head, reported on the fell-behind message or by a
 small extra call.
 
+## Resubscription after a dropped connection
+
+A subscription ends with an exception when its connection drops, and the
+consumer subscribes again from the position after the last event it handled;
+that is what the reference client leaves to the application too. A client
+option that resubscribes on its own, with backoff and from the last delivered
+position, so a consumer sees one unbroken enumeration across reconnects.
+
 ## Competing consumers
 
 Persistent subscriptions ship with dispatch to a single consumer and a

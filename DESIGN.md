@@ -75,6 +75,12 @@ the events table, and the gateway's own `nightingale_store` table is added as
 a feature beside it. `SingleTenancy` exists only to hand this database class
 to the store, because the store's default tenancy always builds the plain one.
 
+The virtual streams are read straight from the table, `VirtualStreamReader`,
+because the store's query surface knows nothing of the added column and
+reaches the type column only through its own type registry; the reader's SQL
+is what the two indexes were declared for, and an integration test holds its
+rows to the same bytes the store's own path returns.
+
 The store's automatic schema management is off. Its table ensurer rebuilds
 the event-store definition from the options on first use, bypassing the
 tenancy's database, and would drop the additions. The initializer applies

@@ -90,13 +90,6 @@ undecided adds it here rather than mentioning it once in a conversation.
 
 ## Owed before the first server code
 
-- **One guard test still owed.** Two of the three behaviours the design relies
-  on are guarded in the polecat component's tests: the event wrapper that
-  keeps the client's type name through the store's append, and the patched
-  schema applying twice with an empty second delta. The third, the head of a
-  virtual stream never reporting the global head, waits for the `$all` slice.
-  If a store release breaks one, the package version stays pinned. Close by:
-  the third test, with the virtual streams.
 - **Migration DDL is not logged.** The store's default migration logger
   writes every statement to the console, so the gateway's database class
   silences it; an operator has no record of what a startup applied. Close by:
@@ -105,7 +98,8 @@ undecided adds it here rather than mentioning it once in a conversation.
 - **Upstream requests to the store's maintainers.** Honour a caller-supplied
   event type name on a prebuilt event; expose Weasel's ignored-index list or an
   add-index call for the events table, or a first-class category column; note
-  that the event-store table ensurer bypasses the tenancy database. Close by:
-  issues filed, links recorded here.
+  that the event-store table ensurer bypasses the tenancy database; guard the
+  high-water mark's update so a lagging detector cannot lower it (several
+  gateway instances each run one). Close by: issues filed, links recorded here.
 - **No authentication until the first beta.** See `PENDING.md`. Close by:
   username and password per call, before beta.
