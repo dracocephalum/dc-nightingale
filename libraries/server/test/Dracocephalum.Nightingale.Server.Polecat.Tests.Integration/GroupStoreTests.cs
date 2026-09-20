@@ -32,7 +32,9 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         await sut.CreateAsync(new GroupDefinition(stream, group, settings, -1), TestContext.Current.CancellationToken);
         await Should.ThrowAsync<GroupExistsException>(() => sut.CreateAsync(new GroupDefinition(stream, group, settings, -1), TestContext.Current.CancellationToken));
         await sut.SaveCheckpointAsync(stream, group, 41, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 40, 40, null, Guid.NewGuid(), "poison", 2, Now, false), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(stream, group, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(stream, group, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(stream, group, 42, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         var read = await sut.GetAsync(stream, group, TestContext.Current.CancellationToken);
         var deleted = await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
         var again = await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
@@ -43,37 +45,43 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         deleted.ShouldBeTrue();
         again.ShouldBeFalse();
         (await sut.GetAsync(stream, group, TestContext.Current.CancellationToken)).ShouldBeNull();
-        (await sut.ReplayableAsync(stream, group, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+        (await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+        (await sut.ReplayAsync(stream, group, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
     [Fact]
-    public async Task Parked_ShouldBeReplayableOnlyOnceMarkedOneOrAllAndGoneOnceUnparked()
+    public async Task Replay_ShouldMoveParkedMessagesToTheOutboxAndParkingShouldMoveThemBack()
     {
         // Arrange
         var sut = Store();
         var (stream, group) = Names();
         await sut.CreateAsync(new GroupDefinition(stream, group, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 10, 10, null, Guid.NewGuid(), "a", 1, Now, false), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1), false), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(stream, group, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(stream, group, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), TestContext.Current.CancellationToken);
 
         // Act
-        var before = await sut.ReplayableAsync(stream, group, TestContext.Current.CancellationToken);
-        var one = await sut.MarkForReplayAsync(stream, group, 12, ParkedNumber.Position, TestContext.Current.CancellationToken);
-        var missing = await sut.MarkForReplayAsync(stream, group, 99, ParkedNumber.Position, TestContext.Current.CancellationToken);
-        var afterOne = await sut.ReplayableAsync(stream, group, TestContext.Current.CancellationToken);
-        var rest = await sut.MarkForReplayAsync(stream, group, null, ParkedNumber.Position, TestContext.Current.CancellationToken);
-        var afterAll = await sut.ReplayableAsync(stream, group, TestContext.Current.CancellationToken);
-        await sut.UnparkAsync(stream, group, 10, TestContext.Current.CancellationToken);
-        var afterUnpark = await sut.ReplayableAsync(stream, group, TestContext.Current.CancellationToken);
+        var before = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
+        var one = await sut.ReplayAsync(stream, group, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var missing = await sut.ReplayAsync(stream, group, 99, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var sameAgain = await sut.ReplayAsync(stream, group, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterOne = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
+        var rest = await sut.ReplayAsync(stream, group, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterAll = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
+        await sut.DequeueAsync(stream, group, 10, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(stream, group, 12, 12, null, Guid.NewGuid(), "b again", 2, Now.AddSeconds(2)), TestContext.Current.CancellationToken);
+        var afterBoth = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
+        var backAgain = await sut.ReplayAsync(stream, group, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
 
         // Assert
         before.ShouldBeEmpty();
         one.ShouldBe(1);
         missing.ShouldBe(0);
+        sameAgain.ShouldBe(1);
         afterOne.ShouldHaveSingleItem().Position.ShouldBe(12);
         rest.ShouldBe(2);
-        afterAll.Select(parked => parked.Position).ShouldBe([10, 12]);
-        afterUnpark.ShouldHaveSingleItem().Position.ShouldBe(12);
+        afterAll.Select(message => message.Position).ShouldBe([10, 12]);
+        afterBoth.ShouldBeEmpty("one dequeued, one parked again");
+        backAgain.ShouldBe(1);
     }
 
     [Fact]

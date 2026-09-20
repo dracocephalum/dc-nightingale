@@ -118,15 +118,22 @@ load balancer, at the cost of one hop. An instance registry, id, address and
 last heartbeat, one more table on the gateway's context, is what forwarding
 resolves the owner through.
 
-## Parked messages as rows, replayable one at a time
+## Parked messages as rows, and the outbox beside them
 
 The reference parks a message, after its retries are spent, into a stream per
 group and can replay only all of them or the first so many, because a log
 has no random-access removal. Ours are rows, one per group and event, with
-the reason, the attempt count and when it was parked: replay one by key,
-skip one by deleting it, replay all or all before a position, and list them.
-The first slice ships parking and replay of all and of one; listing and
-replay before a position follow with group info.
+the reason, the attempt count and when it was parked, and a replay moves a
+row to the group's outbox, the shape of a service bus's dead-letter queue:
+what is on the outbox is delivered ahead of the stream, a delivery that
+fails again moves the row back. Shipped: parking, replay of all and of one,
+delivery at once to a consumer connected to the serving instance. Pending:
+listing parked and outbox rows and skipping one by deleting it, with group
+info; replay of all before a number; a consumer connected to another
+instance woken through in-cluster forwarding; and deferred delivery, a retry
+with a delay or a nack that says later, which is an outbox row with a due
+time in the future and a timer in the group's loop, the outbox already
+having the column.
 
 ## Reads from a readable secondary
 

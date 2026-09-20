@@ -84,14 +84,15 @@ public static class Scenario
             await output.WriteLineAsync($"6. Delivered {string.Join(", ", delivered)}: all three were in flight before the payment was refused, so it came back after the shipment with retry count {retryOnRedelivery}, and was parked on the second refusal.").ConfigureAwait(false);
         }
 
-        var replayed = await ReplayOnceParkedAsync(client, stream, group, position: 1, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"7. Replayed the one parked message at revision 1, by itself: {replayed} put back.").ConfigureAwait(false);
-
         string replayedType;
         long checkpointOnReturn;
-        await using (var subscription = client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken))
+        int replayed;
+        await using (var subscription = await ReconnectAsync(client, stream, group, cancellationToken).ConfigureAwait(false))
         {
             checkpointOnReturn = (await subscription.Confirmed.ConfigureAwait(false)).Checkpoint;
+            await output.WriteLineAsync($"7. A new consumer was confirmed at checkpoint {checkpointOnReturn}; everything is acknowledged or parked, so it waits.").ConfigureAwait(false);
+
+            replayed = await ReplayOnceParkedAsync(client, stream, group, position: 1, cancellationToken).ConfigureAwait(false);
             var messages = subscription.GetAsyncEnumerator(cancellationToken);
             if (!await messages.MoveNextAsync().ConfigureAwait(false))
             {
@@ -101,7 +102,7 @@ public static class Scenario
             replayedType = messages.Current.Record.Type;
             await subscription.AckAsync(messages.Current.Record.Id).ConfigureAwait(false);
             await messages.DisposeAsync().ConfigureAwait(false);
-            await output.WriteLineAsync($"8. A new consumer was confirmed at checkpoint {checkpointOnReturn}, received the replayed {replayedType} first, and acknowledged it.").ConfigureAwait(false);
+            await output.WriteLineAsync($"8. Replayed the one parked message at revision 1 while the consumer was connected: {replayed} moved to the group's outbox, and the consumer received the {replayedType} at once and acknowledged it.").ConfigureAwait(false);
         }
 
         await client.DeletePersistentSubscriptionAsync(stream, group, cancellationToken).ConfigureAwait(false);
@@ -112,6 +113,29 @@ public static class Scenario
 
     private static EventData Event(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
+
+    /// <summary>
+    /// Connects to the group again. The server frees a consumer's place a moment after its call
+    /// ends, so a consumer that reconnects at once may be told the place is still taken; it tries
+    /// again shortly, as a consumer resuming after a dropped connection would.
+    /// </summary>
+    private static async Task<Client.PersistentSubscription> ReconnectAsync(NightingaleClient client, string stream, string group, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var subscription = client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken);
+            try
+            {
+                await subscription.Confirmed.ConfigureAwait(false);
+                return subscription;
+            }
+            catch (ConsumerLimitReachedException) when (attempt < 50)
+            {
+                await subscription.DisposeAsync().ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
 
     /// <summary>
     /// Replays one parked message. A refusal is one-way: it is on the wire when NackAsync returns,

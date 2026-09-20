@@ -1,12 +1,12 @@
 namespace Dracocephalum.Nightingale.Server.Persistence;
 
 /// <summary>
-/// A parked message as its row: one per group and event, keyed by the event's global position,
-/// carrying its revision and, for a group numbered by ordinal, its ordinal, so it can be
-/// addressed by whichever number the group speaks; with why it was parked, how many times it
-/// had been tried, and when. A replay moves the row to the outbox.
+/// A message on a group's outbox as its row: due to be delivered again, keyed like a parked
+/// message by the event's global position and carrying the same numbers, with when it is due
+/// and when it was put there. A replay moves a parked row here; a delivery that fails again
+/// moves it back.
 /// </summary>
-public sealed class ParkedRow
+public sealed class OutboxRow
 {
     /// <summary>Gets or sets the tenant.</summary>
     public required string TenantId { get; set; }
@@ -29,12 +29,15 @@ public sealed class ParkedRow
     /// <summary>Gets or sets the event's id.</summary>
     public Guid EventId { get; set; }
 
-    /// <summary>Gets or sets the consumer's reason.</summary>
+    /// <summary>Gets or sets why it was parked.</summary>
     public required string Reason { get; set; }
 
     /// <summary>Gets or sets how many times the event had been delivered.</summary>
     public int Attempts { get; set; }
 
-    /// <summary>Gets or sets when it was parked.</summary>
-    public DateTimeOffset ParkedAt { get; set; }
+    /// <summary>Gets or sets when it becomes deliverable.</summary>
+    public DateTimeOffset DueAt { get; set; }
+
+    /// <summary>Gets or sets when it was put on the outbox.</summary>
+    public DateTimeOffset QueuedAt { get; set; }
 }

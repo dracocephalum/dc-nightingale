@@ -12,11 +12,14 @@ namespace Dracocephalum.Nightingale.Server;
 /// event up to which is done, acknowledged, skipped or parked, and is written, whenever it has
 /// moved, on the group's policy and when the consumer leaves. A group over a stream counts in revisions; one over
 /// <c>$all</c> or a virtual stream in positions, or in ordinals when it was created under ordinal
-/// numbering, which then keys its checkpoint and its parked messages too. Replays come first: a parked message marked for
-/// replay is delivered before the stream is read on, and a retry goes straight back, ahead of
-/// anything new. What a consumer asks for, an acknowledgement, a refusal, is applied to the
-/// store to completion even when the consumer leaves the moment it asked: its departure ends
-/// the delivery, never the bookkeeping.
+/// numbering, which then keys its checkpoint and its parked messages too. Delivery has the
+/// reference's shape: a list of retries served before the live buffer. What is due on the outbox
+/// joins the retries, when the consumer connects and whenever the group is woken, which a replay
+/// does, so a replayed message goes out ahead of the next event the stream would have sent; a
+/// refused event that may be tried again goes straight back, ahead of anything new. What a
+/// consumer asks for, an acknowledgement, a refusal, is applied to the store to completion even
+/// when the consumer leaves the moment it asked: its departure ends the delivery, never the
+/// bookkeeping.
 /// </summary>
 internal sealed class PersistentGroup : IAsyncDisposable
 {
@@ -32,10 +35,18 @@ internal sealed class PersistentGroup : IAsyncDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<Guid, InFlight> _inFlight = [];
     private readonly SortedDictionary<long, bool> _delivered = [];
+    private readonly Queue<InFlight> _retries = [];
+    private readonly HashSet<Guid> _queued = [];
     private readonly Channel<PersistentSubscriptionMessage.Recorded> _outgoing = Channel.CreateUnbounded<PersistentSubscriptionMessage.Recorded>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<EventRecord> _live = Channel.CreateBounded<EventRecord>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = true });
+    private readonly Channel<bool> _wakes = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
+    private readonly SemaphoreSlim _draining = new(1, 1);
     private readonly SemaphoreSlim _room;
     private readonly CancellationTokenSource _stopping = new();
-    private readonly Task _pump;
+    private readonly Task _reader;
+    private readonly Task _dispatcher;
+    private readonly Task _drainer;
+    private TaskCompletionSource _retryArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _checkpoint;
     private long _written;
     private int _doneSinceWrite;
@@ -61,17 +72,20 @@ internal sealed class PersistentGroup : IAsyncDisposable
         _byOrdinal = definition.Settings.Numbering == Numbering.Ordinal && StreamNames.TryParseVirtual(definition.Stream, out _virtual);
         _byPosition = StreamNames.IsReserved(definition.Stream) && !_byOrdinal;
 
-        // Where the feed starts is settled now, not on the pump's thread: from the end of $all or a
-        // virtual stream by position means after the head as it is at this moment. A plain stream
+        // Where the feed starts is settled now, not on the reader's thread: from the end of $all or
+        // a virtual stream by position means after the head as it is at this moment. A plain stream
         // from its end needs the stream's own head, and a virtual stream by ordinal its last
-        // ordinal, which are reads the pump does.
+        // ordinal, which are reads the reader does.
         _from = definition.Checkpoint >= 0 ? definition.Checkpoint + 1
             : !definition.Settings.Start.IsEnd ? definition.Settings.Start.Value
             : _byPosition ? tail.Head + 1
             : null;
 
         _room = new SemaphoreSlim(consumerBuffer, consumerBuffer);
-        _pump = Task.Run(() => PumpAsync(_stopping.Token));
+        _reader = Task.Run(() => ReadAsync(_stopping.Token));
+        _dispatcher = Task.Run(() => DispatchAsync(_stopping.Token));
+        _drainer = Task.Run(() => DrainOnWakeAsync(_stopping.Token));
+        Delivery = Task.WhenAny(_reader, _dispatcher).Unwrap();
     }
 
     /// <summary>Gets the group's checkpoint as it stands.</summary>
@@ -90,14 +104,17 @@ internal sealed class PersistentGroup : IAsyncDisposable
     public ChannelReader<PersistentSubscriptionMessage.Recorded> Outgoing => _outgoing.Reader;
 
     /// <summary>Gets a task that faults when delivery fails, so the consumer's call can end with the cause.</summary>
-    public Task Delivery => _pump;
+    public Task Delivery { get; }
+
+    /// <summary>Wakes the group: it looks at its outbox and queues what is due, ahead of the stream. Coalesces.</summary>
+    public void Wake() => _wakes.Writer.TryWrite(true);
 
     /// <summary>The consumer is done with these events.</summary>
     /// <param name="ids">The event ids.</param>
     /// <returns>A task that completes when the checkpoint policy has been applied.</returns>
     public async Task AcknowledgeAsync(IEnumerable<Guid> ids)
     {
-        var toUnpark = new List<long>();
+        var toDequeue = new List<long>();
         lock (_gate)
         {
             foreach (var id in ids)
@@ -109,16 +126,16 @@ internal sealed class PersistentGroup : IAsyncDisposable
 
                 _room.Release();
                 MarkDone(Key(flight.Record));
-                if (flight.Replayed)
+                if (flight.FromOutbox)
                 {
-                    toUnpark.Add(flight.Record.Position);
+                    toDequeue.Add(flight.Record.Position);
                 }
             }
         }
 
-        foreach (var key in toUnpark)
+        foreach (var position in toDequeue)
         {
-            await _groups.UnparkAsync(_definition.Stream, _definition.Group, key, CancellationToken.None).ConfigureAwait(false);
+            await _groups.DequeueAsync(_definition.Stream, _definition.Group, position, CancellationToken.None).ConfigureAwait(false);
         }
 
         await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
@@ -132,7 +149,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
     public async Task RefuseAsync(IEnumerable<Guid> ids, NackAction action, string reason)
     {
         var toPark = new List<InFlight>();
-        var toUnpark = new List<long>();
+        var toDequeue = new List<long>();
         var toRedeliver = new List<InFlight>();
         lock (_gate)
         {
@@ -148,9 +165,9 @@ internal sealed class PersistentGroup : IAsyncDisposable
                     case NackAction.Skip:
                         _room.Release();
                         MarkDone(Key(flight.Record));
-                        if (flight.Replayed)
+                        if (flight.FromOutbox)
                         {
-                            toUnpark.Add(flight.Record.Position);
+                            toDequeue.Add(flight.Record.Position);
                         }
 
                         break;
@@ -167,9 +184,9 @@ internal sealed class PersistentGroup : IAsyncDisposable
         }
 
         await SettleAsync(toRedeliver, toPark, reason, CancellationToken.None).ConfigureAwait(false);
-        foreach (var key in toUnpark)
+        foreach (var position in toDequeue)
         {
-            await _groups.UnparkAsync(_definition.Stream, _definition.Group, key, CancellationToken.None).ConfigureAwait(false);
+            await _groups.DequeueAsync(_definition.Stream, _definition.Group, position, CancellationToken.None).ConfigureAwait(false);
         }
 
         await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
@@ -199,9 +216,11 @@ internal sealed class PersistentGroup : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _stopping.CancelAsync().ConfigureAwait(false);
+        _wakes.Writer.TryComplete();
+        _live.Writer.TryComplete();
         try
         {
-            await _pump.ConfigureAwait(false);
+            await Task.WhenAll(_reader, _dispatcher, _drainer).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -210,6 +229,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
 
         await WriteCheckpointIfDueAsync(true, CancellationToken.None).ConfigureAwait(false);
         _stopping.Dispose();
+        _draining.Dispose();
         _room.Dispose();
     }
 
@@ -260,13 +280,10 @@ internal sealed class PersistentGroup : IAsyncDisposable
 
         foreach (var flight in toPark)
         {
-            if (flight.Replayed)
-            {
-                await _groups.UnparkAsync(_definition.Stream, _definition.Group, flight.Record.Position, cancellationToken).ConfigureAwait(false);
-            }
-
+            // Parking moves a message off the outbox in the same write, so one that came from
+            // there and failed again is back where it was, with its new reason and count.
             await _groups.ParkAsync(
-                new ParkedMessage(_definition.Stream, _definition.Group, flight.Record.Position, flight.Record.Revision, flight.Record.Ordinal, flight.Record.Id, reason, flight.Attempts, _time.GetUtcNow(), false),
+                new ParkedMessage(_definition.Stream, _definition.Group, flight.Record.Position, flight.Record.Revision, flight.Record.Ordinal, flight.Record.Id, reason, flight.Attempts, _time.GetUtcNow()),
                 cancellationToken).ConfigureAwait(false);
         }
     }
@@ -295,28 +312,44 @@ internal sealed class PersistentGroup : IAsyncDisposable
         await _groups.SaveCheckpointAsync(_definition.Stream, _definition.Group, checkpoint, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Delivers, in order: replays first, then the stream from where the group stands.</summary>
-    private async Task PumpAsync(CancellationToken cancellationToken)
+    /// <summary>Reads the stream from where the group stands into the live buffer, after the outbox has been queued.</summary>
+    private async Task ReadAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var replays = await _groups.ReplayableAsync(_definition.Stream, _definition.Group, cancellationToken).ConfigureAwait(false);
-            foreach (var parked in replays)
-            {
-                var record = await ReadOneAsync(parked, cancellationToken).ConfigureAwait(false);
-                if (record is null)
-                {
-                    await _groups.UnparkAsync(_definition.Stream, _definition.Group, parked.Position, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                await DeliverAsync(new InFlight(record, parked.Attempts, default, true), cancellationToken).ConfigureAwait(false);
-            }
-
+            await DrainOutboxAsync(cancellationToken).ConfigureAwait(false);
             var from = _from ?? await HeadAsync(cancellationToken).ConfigureAwait(false) + 1;
             await foreach (var record in EventSource.FollowAsync(_store, _tail, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, _time, cancellationToken).ConfigureAwait(false))
             {
-                await DeliverAsync(new InFlight(record, 0, default, false), cancellationToken).ConfigureAwait(false);
+                await _live.Writer.WriteAsync(record, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _live.Writer.TryComplete();
+        }
+    }
+
+    /// <summary>
+    /// Hands events to the consumer as it has room, retries first, then the live buffer: the
+    /// reference's order. Owning every slot here is what lets a retry go ahead of an event the
+    /// stream has already read.
+    /// </summary>
+    private async Task DispatchAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                await _room.WaitAsync(cancellationToken).ConfigureAwait(false);
+                var next = await NextAsync(cancellationToken).ConfigureAwait(false);
+                if (next is null)
+                {
+                    _room.Release();
+                    return;
+                }
+
+                await SendAsync(next, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -325,11 +358,108 @@ internal sealed class PersistentGroup : IAsyncDisposable
         }
     }
 
-    /// <summary>A slot is taken before an event is sent and given back when the event is done.</summary>
-    private async Task DeliverAsync(InFlight flight, CancellationToken cancellationToken)
+    /// <summary>The next event to send: a queued retry if there is one, else the next live event, whichever comes first.</summary>
+    private async Task<InFlight?> NextAsync(CancellationToken cancellationToken)
     {
-        await _room.WaitAsync(cancellationToken).ConfigureAwait(false);
-        await SendAsync(flight, cancellationToken).ConfigureAwait(false);
+        while (true)
+        {
+            Task arrived;
+            lock (_gate)
+            {
+                if (_retries.TryDequeue(out var retry))
+                {
+                    _queued.Remove(retry.Record.Id);
+                    return retry;
+                }
+
+                arrived = _retryArrived.Task;
+            }
+
+            var live = _live.Reader.WaitToReadAsync(cancellationToken).AsTask();
+            if (await Task.WhenAny(live, arrived).ConfigureAwait(false) == arrived)
+            {
+                continue;
+            }
+
+            if (!await live.ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            if (_live.Reader.TryRead(out var record))
+            {
+                return new InFlight(record, 0, default, false);
+            }
+        }
+    }
+
+    /// <summary>Queues a retry and lets the dispatcher know.</summary>
+    private void EnqueueRetry(InFlight flight)
+    {
+        TaskCompletionSource arrived;
+        lock (_gate)
+        {
+            _retries.Enqueue(flight);
+            _queued.Add(flight.Record.Id);
+            arrived = _retryArrived;
+            _retryArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        arrived.TrySetResult();
+    }
+
+    /// <summary>Looks at the outbox on every wake, so a replay reaches a connected consumer at once.</summary>
+    private async Task DrainOnWakeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await _wakes.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _wakes.Reader.TryRead(out _);
+                await DrainOutboxAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopping.
+        }
+    }
+
+    /// <summary>
+    /// Queues what is due on the outbox as retries, one drain at a time. A message already in
+    /// flight or already queued is left alone: it is on the outbox until it is done, and a wake in
+    /// the meantime must not deliver it twice. A message whose event is gone leaves the outbox.
+    /// </summary>
+    private async Task DrainOutboxAsync(CancellationToken cancellationToken)
+    {
+        await _draining.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var due = await _groups.DueAsync(_definition.Stream, _definition.Group, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
+            foreach (var message in due)
+            {
+                lock (_gate)
+                {
+                    if (_inFlight.ContainsKey(message.EventId) || _queued.Contains(message.EventId))
+                    {
+                        continue;
+                    }
+                }
+
+                var record = await ReadOneAsync(message, cancellationToken).ConfigureAwait(false);
+                if (record is null)
+                {
+                    await _groups.DequeueAsync(_definition.Stream, _definition.Group, message.Position, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                EnqueueRetry(new InFlight(record, message.Attempts, default, true));
+            }
+        }
+        finally
+        {
+            _draining.Release();
+        }
     }
 
     private async Task SendAsync(InFlight flight, CancellationToken cancellationToken)
@@ -357,11 +487,11 @@ internal sealed class PersistentGroup : IAsyncDisposable
         return page?.Head.Last ?? -1;
     }
 
-    private async Task<EventRecord?> ReadOneAsync(ParkedMessage parked, CancellationToken cancellationToken)
+    private async Task<EventRecord?> ReadOneAsync(OutboxMessage message, CancellationToken cancellationToken)
     {
         if (_byOrdinal)
         {
-            if (parked.Ordinal is not { } ordinal)
+            if (message.Ordinal is not { } ordinal)
             {
                 return null;
             }
@@ -372,20 +502,20 @@ internal sealed class PersistentGroup : IAsyncDisposable
 
         if (_definition.Stream == StreamNames.All)
         {
-            var page = await _store.ReadAllAsync(Direction.Forwards, parked.Position, parked.Position, 1, cancellationToken).ConfigureAwait(false);
+            var page = await _store.ReadAllAsync(Direction.Forwards, message.Position, message.Position, 1, cancellationToken).ConfigureAwait(false);
             return page.Count == 1 ? page[0] : null;
         }
 
         if (StreamNames.TryParseVirtual(_definition.Stream, out var virtualStream))
         {
-            var page = await _store.ReadVirtualAsync(virtualStream, Direction.Forwards, parked.Position, parked.Position, 1, cancellationToken).ConfigureAwait(false);
+            var page = await _store.ReadVirtualAsync(virtualStream, Direction.Forwards, message.Position, message.Position, 1, cancellationToken).ConfigureAwait(false);
             return page.Count == 1 ? page[0] : null;
         }
 
-        var slice = await _store.ReadAsync(_definition.Stream, Direction.Forwards, parked.Revision, 1, cancellationToken).ConfigureAwait(false);
-        return slice is { Events.Count: 1 } && slice.Events[0].Revision == parked.Revision ? slice.Events[0] : null;
+        var slice = await _store.ReadAsync(_definition.Stream, Direction.Forwards, message.Revision, 1, cancellationToken).ConfigureAwait(false);
+        return slice is { Events.Count: 1 } && slice.Events[0].Revision == message.Revision ? slice.Events[0] : null;
     }
 
     /// <summary>A delivered event the consumer has not answered for yet.</summary>
-    private sealed record InFlight(EventRecord Record, int Attempts, DateTimeOffset Deadline, bool Replayed);
+    private sealed record InFlight(EventRecord Record, int Attempts, DateTimeOffset Deadline, bool FromOutbox);
 }

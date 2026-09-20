@@ -27,6 +27,9 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
     /// <summary>The parked messages table.</summary>
     public const string ParkedTable = "nightingale_parked";
 
+    /// <summary>The outbox table: messages due to be delivered to a group again.</summary>
+    public const string OutboxTable = "nightingale_outbox";
+
     /// <summary>The leases table.</summary>
     public const string LeasesTable = "nightingale_leases";
 
@@ -72,8 +75,21 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         parked.AddColumn("reason", "nvarchar(1000)").NotNull();
         parked.AddColumn("attempts", "int").NotNull();
         parked.AddColumn("parked_at", "datetimeoffset").NotNull();
-        parked.AddColumn("replay", "bit").NotNull();
         yield return parked;
+
+        var outbox = new Table(new SqlServerObjectName(schemaName, OutboxTable));
+        outbox.AddColumn("tenant_id", "varchar(250)").NotNull().AsPrimaryKey();
+        outbox.AddColumn("stream", "varchar(250)").NotNull().AsPrimaryKey();
+        outbox.AddColumn("group_name", "varchar(250)").NotNull().AsPrimaryKey();
+        outbox.AddColumn("position", "bigint").NotNull().AsPrimaryKey();
+        outbox.AddColumn("revision", "bigint").NotNull();
+        outbox.AddColumn("ordinal", "bigint");
+        outbox.AddColumn("event_id", "uniqueidentifier").NotNull();
+        outbox.AddColumn("reason", "nvarchar(1000)").NotNull();
+        outbox.AddColumn("attempts", "int").NotNull();
+        outbox.AddColumn("due_at", "datetimeoffset").NotNull();
+        outbox.AddColumn("queued_at", "datetimeoffset").NotNull();
+        yield return outbox;
 
         var leases = new Table(new SqlServerObjectName(schemaName, LeasesTable));
         leases.AddColumn("name", "varchar(750)").NotNull().AsPrimaryKey();

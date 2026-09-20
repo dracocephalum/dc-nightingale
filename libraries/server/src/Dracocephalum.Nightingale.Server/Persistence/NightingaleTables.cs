@@ -17,6 +17,9 @@ public sealed record NightingaleTables(string Schema)
     /// <summary>The parked messages table.</summary>
     public const string ParkedTable = "nightingale_parked";
 
+    /// <summary>The outbox table: messages due to be delivered to a group again.</summary>
+    public const string OutboxTable = "nightingale_outbox";
+
     /// <summary>The leases table.</summary>
     public const string LeasesTable = "nightingale_leases";
 

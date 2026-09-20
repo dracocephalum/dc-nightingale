@@ -31,7 +31,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         A.CallTo(() => _groups.AcquireLeaseAsync(A<string>._, A<string>._, A<TimeSpan>._, A<CancellationToken>._)).Returns((string?)null);
-        A.CallTo(() => _groups.ReplayableAsync(A<string>._, A<string>._, A<CancellationToken>._)).Returns(new List<ParkedMessage>());
+        A.CallTo(() => _groups.DueAsync(A<string>._, A<string>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<OutboxMessage>());
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
@@ -151,12 +151,12 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReplayParked_ShouldMarkAllOrOneAndFailWhenTheOneIsMissing()
+    public async Task ReplayParked_ShouldMoveAllOrOneToTheOutboxAndFailWhenTheOneIsMissing()
     {
         // Arrange
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
-        A.CallTo(() => _groups.MarkForReplayAsync("orders-1", "billing", null, ParkedNumber.Revision, A<CancellationToken>._)).Returns(3);
-        A.CallTo(() => _groups.MarkForReplayAsync("orders-1", "billing", 7, ParkedNumber.Revision, A<CancellationToken>._)).Returns(0);
+        A.CallTo(() => _groups.ReplayAsync("orders-1", "billing", null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(3);
+        A.CallTo(() => _groups.ReplayAsync("orders-1", "billing", 7, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(0);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act

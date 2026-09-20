@@ -45,26 +45,11 @@ undecided adds it here rather than mentioning it once in a conversation.
   unimplemented), group info, listing and updating, competing consumers,
   in-cluster forwarding and the ordinal backfill, all in `PENDING.md`. Close
   by: forwarding next.
-- **Replay as a move to an outbox, not a flag (proposed 2026-09-22).** A
-  parked message is replayed today by a flag on its row, which the group
-  reads once when a consumer connects; a message that fails again is parked
-  again under the same row. The proposal, the shape of a service bus's
-  dead-letter queue: replay moves the row to a per-group outbox of pending
-  deliveries, the group drains the outbox ahead of the stream and whenever it
-  is woken, a delivery that fails again moves the row back to parked, and
-  the flag goes. The outbox is also where a retry with a delay, or any other
-  deferred delivery, would live. Close by: deciding, then one slice: the
-  outbox table on the context, the move in both directions, the drain in the
-  group's loop, and the wake from the replay call; it also closes the item
-  below.
-- **A replay reaches a connected consumer only on its next connection.** A
-  group reads its replayable parked messages once, when a consumer connects,
-  and delivers them before the stream; a replay asked for while the consumer
-  is connected waits for the next connection. The reference delivers it at
-  once. Close by: the registry holding the live group of this instance so the
-  replay call can hand the marked rows to its delivery loop, with the
-  in-cluster forwarding work, which is where the registry grows and where a
-  group owned elsewhere is reached.
+- **A replay wakes only a consumer connected to the serving instance.** The
+  replay call moves the rows and wakes the group through this instance's
+  registry; a consumer connected to another instance receives them at its
+  next connection. Close by: with in-cluster forwarding, which resolves the
+  owning instance and relays the wake.
 - **The sequencer's progress is read as SQL text beside the context.** The
   sequencer's batch is raw by design, and its progress row is read raw by the
   virtual-stream reader too, although the context maps that row. Close by:
