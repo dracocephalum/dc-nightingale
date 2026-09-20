@@ -9,7 +9,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// The gateway's own tables in the store, declared as one feature beside the store's so the same
 /// migration creates them and the same assertion notices when one is missing: the marker row that
 /// says the store is ours, the persistent-subscription groups with their checkpoints, their parked
-/// messages one row each, and the leases that say which instance runs a group.
+/// messages one row each, the leases that say which instance runs a group or the sequencer, and the
+/// sequencer's progress, the position every event up to which has its ordinals.
 /// </summary>
 /// <param name="schemaName">The schema the store's tables live in.</param>
 internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchemaBase(Identifier, new SqlServerMigrator())
@@ -29,6 +30,9 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
     /// <summary>The leases table.</summary>
     public const string LeasesTable = "nightingale_leases";
 
+    /// <summary>The sequencer's progress table: one row, the position numbered through.</summary>
+    public const string OrdinalsTable = "nightingale_ordinals";
+
     /// <inheritdoc/>
     protected override IEnumerable<ISchemaObject> schemaObjects()
     {
@@ -36,6 +40,10 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         store.AddColumn("id", "int").NotNull().AsPrimaryKey();
         store.AddColumn("schema_version", "int").NotNull();
         store.AddColumn("partitioning", "varchar(20)").NotNull();
+
+        // Nullable, and read as false when null: a store initialized before the feature existed
+        // has no value, and the column is added to it by the ordinary schema migration.
+        store.AddColumn("assign_ordinals", "bit");
         store.AddColumn("collation", "varchar(128)").NotNull();
         store.AddColumn("created_at", "datetimeoffset").NotNull();
         store.AddColumn("created_by", "varchar(200)").NotNull();
@@ -67,5 +75,10 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         leases.AddColumn("owner", "varchar(64)").NotNull();
         leases.AddColumn("expires_at", "datetimeoffset").NotNull();
         yield return leases;
+
+        var ordinals = new Table(new SqlServerObjectName(schemaName, OrdinalsTable));
+        ordinals.AddColumn("id", "int").NotNull().AsPrimaryKey();
+        ordinals.AddColumn("numbered_through", "bigint").NotNull();
+        yield return ordinals;
     }
 }

@@ -11,11 +11,12 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <summary>
 /// Reads the virtual streams straight from the events table. The store's own query surface knows
 /// nothing of the persisted <c>category</c> column, and its type column is only reachable through
-/// its event-type registry, so the predicates are written here as SQL that the two filtered
-/// indexes answer with a seek: tenant, key, then position. Rows are hydrated into event records
-/// the way the store adapter hydrates the store's events, body re-serialized through the shared
-/// options and the two reserved metadata keys appended last, so an event reads the same through
-/// either path; an integration test holds the two paths to the same bytes.
+/// its event-type registry, so the predicates are written here as SQL that the filtered indexes
+/// answer with a seek: tenant, key, then position, or tenant, key, then ordinal on a store with
+/// ordinals. Rows are hydrated into event records the way the store adapter hydrates the store's
+/// events, body re-serialized through the shared options and the two reserved metadata keys
+/// appended last, so an event reads the same through either path; an integration test holds the
+/// two paths to the same bytes.
 /// </summary>
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="schemaName">The schema the events table lives in.</param>
@@ -26,7 +27,7 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
 
     // The schema name comes from the store's options, never from a request; it is bracketed as an
     // identifier all the same.
-    private readonly string _table = $"[{schemaName.Replace("]", "]]", StringComparison.Ordinal)}].[pc_events]";
+    private readonly string _schema = "[" + schemaName.Replace("]", "]]", StringComparison.Ordinal) + "]";
 
     /// <summary>The bounds of a virtual stream at or below a head.</summary>
     /// <param name="stream">The virtual stream.</param>
@@ -37,15 +38,9 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT MIN(seq_id), MAX(seq_id) FROM {0} WHERE {1} AND seq_id <= @head", _table, Predicate(stream)));
+        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT MIN(seq_id), MAX(seq_id) FROM {0} WHERE {1} AND seq_id <= @head", Table, Predicate(stream)));
         command.Parameters.AddWithValue("@head", head);
-        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.IsDBNull(0))
-        {
-            return null;
-        }
-
-        return new StreamHead(reader.GetInt64(0), reader.GetInt64(1));
+        return await BoundsAsync(command, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>One page of a virtual stream; see the port for the bounds.</summary>
@@ -63,18 +58,11 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
             : "seq_id <= @from ORDER BY seq_id DESC";
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT TOP (@count) {0} FROM {1} WHERE {2} AND {3}", Columns, _table, Predicate(stream), range));
+        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT TOP (@count) {0} FROM {1} WHERE {2} AND {3}", Columns, Table, Predicate(stream), range));
         command.Parameters.AddWithValue("@from", from);
         command.Parameters.AddWithValue("@head", head);
         command.Parameters.AddWithValue("@count", count);
-        var records = new List<EventRecord>(count);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            records.Add(Hydrate(reader));
-        }
-
-        return records;
+        return await PageAsync(command, count, ordinal: false, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>How many live events of a virtual stream lie after a position, up to the head.</summary>
@@ -87,18 +75,95 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT COUNT_BIG(*) FROM {0} WHERE {1} AND seq_id > @after AND seq_id <= @head", _table, Predicate(stream)));
+        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT COUNT_BIG(*) FROM {0} WHERE {1} AND seq_id > @after AND seq_id <= @head", Table, Predicate(stream)));
         command.Parameters.AddWithValue("@after", after);
         command.Parameters.AddWithValue("@head", head);
         return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
     }
 
-    private static string Predicate(VirtualStreamName stream) =>
-        stream.Kind == VirtualStreamKind.Category
-            ? "tenant_id = @tenant AND category = @key AND is_archived = 0"
-            : "tenant_id = @tenant AND [type] = @key AND is_archived = 0";
+    /// <summary>
+    /// The bounds of a virtual stream under ordinal numbering: the lowest and highest ordinal
+    /// assigned, archived rows included, because a hole is still a number in the sequence.
+    /// </summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The bounds, or <see langword="null"/> when nothing is numbered.</returns>
+    public async Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
+    {
+        var column = OrdinalColumn(stream);
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT MIN({2}), MAX({2}) FROM {0} WHERE {1} AND {2} IS NOT NULL", Table, KeyPredicate(stream), column));
+        return await BoundsAsync(command, cancellationToken).ConfigureAwait(false);
+    }
 
-    private static EventRecord Hydrate(SqlDataReader reader)
+    /// <summary>One page of a virtual stream by ordinal, live rows only, each record carrying its ordinal.</summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">The ordinal to begin at, inclusive, in the reading direction.</param>
+    /// <param name="count">The most events to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events of the page.</returns>
+    public async Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken)
+    {
+        var column = OrdinalColumn(stream);
+        var range = direction == Direction.Forwards
+            ? column + " >= @from ORDER BY " + column
+            : column + " <= @from ORDER BY " + column + " DESC";
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT TOP (@count) {0}, {4} FROM {1} WHERE {2} AND {3}", Columns, Table, Predicate(stream), range, column));
+        command.Parameters.AddWithValue("@from", from);
+        command.Parameters.AddWithValue("@count", count);
+        return await PageAsync(command, count, ordinal: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The position every event up to which has its ordinals; 0 when none has.</summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The position.</returns>
+    public async Task<long> NumberedThroughAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = string.Format(CultureInfo.InvariantCulture, "SELECT ISNULL((SELECT numbered_through FROM {0}.[{1}] WHERE id = 1), CAST(0 AS bigint))", _schema, NightingaleTablesFeature.OrdinalsTable);
+        return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+    }
+
+    private static string KeyPredicate(VirtualStreamName stream) =>
+        stream.Kind == VirtualStreamKind.Category
+            ? "tenant_id = @tenant AND category = @key"
+            : "tenant_id = @tenant AND [type] = @key";
+
+    private static string Predicate(VirtualStreamName stream) => KeyPredicate(stream) + " AND is_archived = 0";
+
+    private static string OrdinalColumn(VirtualStreamName stream) =>
+        stream.Kind == VirtualStreamKind.Category ? PatchedEventStoreFeature.CategoryOrdinalColumn : PatchedEventStoreFeature.TypeOrdinalColumn;
+
+    private static async Task<StreamHead?> BoundsAsync(SqlCommand command, CancellationToken cancellationToken)
+    {
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.IsDBNull(0))
+        {
+            return null;
+        }
+
+        return new StreamHead(reader.GetInt64(0), reader.GetInt64(1));
+    }
+
+    private static async Task<IReadOnlyList<EventRecord>> PageAsync(SqlCommand command, int count, bool ordinal, CancellationToken cancellationToken)
+    {
+        var records = new List<EventRecord>(count);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            records.Add(Hydrate(reader, ordinal));
+        }
+
+        return records;
+    }
+
+    private static EventRecord Hydrate(SqlDataReader reader, bool ordinal)
     {
         // The body is re-serialized through the shared options rather than copied from the column,
         // so it comes back as the store adapter returns it, whatever escaping the store wrote.
@@ -122,8 +187,11 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
             reader.GetString(5),
             reader.GetFieldValue<DateTimeOffset>(6),
             JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Options),
-            metadata);
+            metadata,
+            ordinal ? reader.GetInt64(10) : null);
     }
+
+    private string Table => _schema + ".[pc_events]";
 
     private SqlCommand Command(SqlConnection connection, VirtualStreamName stream, string text)
     {

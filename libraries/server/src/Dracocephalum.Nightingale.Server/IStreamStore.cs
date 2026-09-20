@@ -86,6 +86,49 @@ public interface IStreamStore
     Task<long> CountVirtualAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Gets a value indicating whether the store was initialized with ordinals, so the virtual
+    /// streams can be read under <see cref="Numbering.Ordinal"/>. Fixed for the store's life; the
+    /// service refuses an ordinal read outright when this is false.
+    /// </summary>
+    bool OrdinalsEnabled { get; }
+
+    /// <summary>
+    /// Finds the bounds of a virtual stream under ordinal numbering: the lowest and highest ordinal
+    /// assigned so far. Ordinals are assigned after commit, so the last one lags the stream's last
+    /// event by the sequencer's cadence; a numbered event that was since removed is still counted
+    /// in the bounds and read as a hole.
+    /// </summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The bounds, or <see langword="null"/> when nothing is numbered yet.</returns>
+    /// <exception cref="OrdinalsNotEnabledException">The store has no ordinals.</exception>
+    Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads one page of a virtual stream by ordinal, live events only, each record carrying its
+    /// ordinal. Forwards from <paramref name="from"/> upwards, backwards from it downwards; no head
+    /// bounds the page, because a batch of ordinals is assigned atomically and every assigned
+    /// ordinal is committed.
+    /// </summary>
+    /// <param name="stream">The virtual stream.</param>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">The ordinal to begin at, inclusive, in the reading direction.</param>
+    /// <param name="count">The most events to return. Positive.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events of the page, in the reading direction; fewer than asked means the end was reached.</returns>
+    /// <exception cref="OrdinalsNotEnabledException">The store has no ordinals.</exception>
+    Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The global position up to which every event has its ordinals, so a subscription under ordinal
+    /// numbering can tell "nothing new for this stream" from "not numbered yet". 0 when nothing is.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The position.</returns>
+    /// <exception cref="OrdinalsNotEnabledException">The store has no ordinals.</exception>
+    Task<long> NumberedThroughAsync(CancellationToken cancellationToken);
+
+    /// <summary>
     /// Deletes a stream: its events leave every read and it cannot be appended to again, but its
     /// rows stay in the store. The expected state is checked first, against the stream's current
     /// revision.

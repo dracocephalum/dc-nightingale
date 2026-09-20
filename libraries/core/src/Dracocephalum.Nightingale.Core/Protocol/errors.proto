@@ -59,4 +59,7 @@ enum ErrorReason {
   // NOT_FOUND. No parked message at that position in this group. metadata:
   // stream, group, position.
   ERROR_REASON_PARKED_MESSAGE_NOT_FOUND = 13;
+  // FAILED_PRECONDITION. Ordinal numbering was asked for and the store was
+  // not initialized with ordinals. metadata: stream.
+  ERROR_REASON_ORDINALS_NOT_ENABLED = 14;
 }

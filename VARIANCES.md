@@ -19,11 +19,19 @@ Their positions are the store's global sequence number: monotonic within the
 stream but sparse, because other streams' events occupy the numbers between.
 The head of each virtual stream is its own last event, never the global head,
 so a quiet category reports a stable head and zero lag, and a subscription to
-it says nothing while the store moves on without it.
+it says nothing while the store moves on without it. On a store initialized
+with `Nightingale:Store:AssignOrdinals`, a read or subscription of `$ce-` or `$et-`
+may ask for ordinal numbering instead: dense, zero-based numbers assigned
+after commit by one sequencer per cluster, so they trail the global head by
+its cadence, and a deleted event leaves a hole that is skipped and never
+reused. The choice is explicit per call, global by default, and refused with
+`ORDINALS_NOT_ENABLED` on a store without the feature; under it every number
+in the conversation is an ordinal and each event carries its ordinal beside
+its position.
 
-**Why:** no link events, no projection lag, no extra writes. A consumer that
-alerts on an absolute count of events behind, rather than on a growing lag,
-needs a server-computed count; see `PENDING.md`.
+**Why:** no link events, no projection lag, no extra writes by default; and
+where a dense number is worth a numbering pass, it is two columns and one
+seek rather than a second copy of every event.
 
 ## A position is one number
 

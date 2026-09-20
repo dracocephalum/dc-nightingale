@@ -1,8 +1,10 @@
 using Dracocephalum.Nightingale.Protocol.V1;
+using FakeItEasy;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Tests;
@@ -13,10 +15,14 @@ public sealed class ServerFeaturesServiceTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        // Arrange: a minimal host, exactly as a real host would mount the server.
+        // Arrange: a minimal host, exactly as a real host would mount the server, over a store
+        // that was initialized with ordinals.
+        var store = A.Fake<IStreamStore>();
+        A.CallTo(() => store.OrdinalsEnabled).Returns(true);
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
+        builder.Services.AddSingleton(store);
         _app = builder.Build();
         _app.MapNightingaleServer();
         await _app.StartAsync();
@@ -31,7 +37,7 @@ public sealed class ServerFeaturesServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Ping_ShouldReturnTheServerVersion()
+    public async Task Ping_ShouldReturnTheServerVersionAndWhatTheStoreHas()
     {
         // Arrange
         using var channel = GrpcChannel.ForAddress(
@@ -44,5 +50,6 @@ public sealed class ServerFeaturesServiceTests : IAsyncLifetime
 
         // Assert
         response.Version.ShouldNotBeNullOrWhiteSpace();
+        response.SupportsOrdinals.ShouldBeTrue();
     }
 }

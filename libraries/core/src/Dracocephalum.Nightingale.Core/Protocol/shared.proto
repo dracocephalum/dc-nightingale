@@ -10,6 +10,24 @@
 //             because other streams' events occupy the numbers in between.
 //   Every read and subscription reports the head of the stream it reads, and
 //   a virtual stream's head is its own last event, never the global head.
+//   ordinal   an event's place within its virtual stream, 0-based and dense:
+//             two ordinals subtracted are a count. Only under ordinal
+//             numbering (see Numbering), only for $ce- and $et-, and only
+//             on a store initialized with the feature. Ordinals are assigned
+//             after commit by one sequencer per cluster, so they lag the
+//             global head by its cadence; a removed event leaves a hole the
+//             reader skips.
+//
+// Numbering
+//   A read or subscription of a virtual stream chooses how it is numbered.
+//   Under GLOBAL, the default, every number in the conversation is a global
+//   position and the recorded events carry no ordinal. Under ORDINAL, every
+//   number in the conversation is an ordinal: the start, the bounds, the head
+//   in the confirmation and the progress notes, and each recorded event
+//   carries its ordinal beside the position it always carries. A consumer
+//   stores the numbering with its checkpoint and never resumes under the
+//   other. ORDINAL is refused with INVALID_ARGUMENT on a plain stream or
+//   $all, and with ORDINALS_NOT_ENABLED when the store has no ordinals.
 //
 // Stream names
 //   Any string up to 250 characters. The category of a stream is everything
@@ -88,6 +106,20 @@ message RecordedEvent {
   // A JSON object of user-supplied properties, or empty; see "Event bodies
   // and metadata" above.
   bytes metadata = 8;
+  // The event's place within the virtual stream being read, under ordinal
+  // numbering only; absent otherwise. See "Numbering" above.
+  optional sint64 ordinal = 9;
+}
+
+// How a read or subscription of a virtual stream is numbered; see
+// "Numbering" above.
+enum Numbering {
+  // Treated as GLOBAL.
+  NUMBERING_UNSPECIFIED = 0;
+  // Global positions, sparse; the ordinal is absent from every event.
+  NUMBERING_GLOBAL = 1;
+  // Ordinals, dense; $ce- and $et- only, on a store with the feature.
+  NUMBERING_ORDINAL = 2;
 }
 
 // An event as a client proposes it.

@@ -25,7 +25,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, TestContext.Current.CancellationToken);
+        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, cancellationToken: TestContext.Current.CancellationToken);
         var messages = new List<SubscriptionMessage>();
         await foreach (var message in subscription.Messages.WithCancellation(TestContext.Current.CancellationToken))
         {
@@ -43,6 +43,32 @@ public sealed class StreamSubscriptionTests
     }
 
     [Fact]
+    public async Task SubscribeToStreamAsync_ByOrdinal_ShouldSendTheNumberingAndKeepEachEventsOrdinal()
+    {
+        // Arrange
+        var numbered = Recorded("orders-1", 0, 10);
+        numbered.Ordinal = 4;
+        var (invoker, request) = FakeStreamsCall.Read(
+        [
+            new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = "s-1", Head = 4 } },
+            new ReadResponse { Event = numbered },
+        ]);
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        await using var subscription = sut.SubscribeToStreamAsync("$ce-orders", StreamPosition.Start, Numbering.Ordinal, TestContext.Current.CancellationToken);
+        var records = new List<EventRecord>();
+        await foreach (var record in subscription.WithCancellation(TestContext.Current.CancellationToken))
+        {
+            records.Add(record);
+        }
+
+        // Assert
+        request()!.Numbering.ShouldBe(Protocol.V1.Numbering.Ordinal);
+        records.ShouldHaveSingleItem().Ordinal.ShouldBe(4);
+    }
+
+    [Fact]
     public async Task Enumerating_ShouldYieldOnlyTheEvents()
     {
         // Arrange
@@ -56,7 +82,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, TestContext.Current.CancellationToken);
+        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, cancellationToken: TestContext.Current.CancellationToken);
         var revisions = new List<long>();
         await foreach (var record in subscription.WithCancellation(TestContext.Current.CancellationToken))
         {
@@ -94,7 +120,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.From(7), TestContext.Current.CancellationToken);
+        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.From(7), cancellationToken: TestContext.Current.CancellationToken);
         var delivered = 0;
         await foreach (var record in subscription.WithCancellation(TestContext.Current.CancellationToken))
         {
@@ -115,7 +141,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, TestContext.Current.CancellationToken);
+        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         var exception = await Should.ThrowAsync<RpcException>(() => subscription.Confirmed);

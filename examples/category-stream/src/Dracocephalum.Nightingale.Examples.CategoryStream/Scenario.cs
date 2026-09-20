@@ -74,7 +74,7 @@ public static class Scenario
 
         await output.WriteLineAsync($"5. Read $et-order_placed: one from each of {string.Join(", ", byType)}.").ConfigureAwait(false);
 
-        await using var subscription = client.SubscribeToStreamAsync("$ce-orders", StreamPosition.End, cancellationToken);
+        await using var subscription = client.SubscribeToStreamAsync("$ce-orders", StreamPosition.End, cancellationToken: cancellationToken);
         var messages = subscription.Messages.GetAsyncEnumerator(cancellationToken);
         var confirmed = await subscription.Confirmed.ConfigureAwait(false);
         await output.WriteLineAsync($"6. Subscribed to $ce-orders from the end: confirmed at the category's head, position {confirmed.Head}.").ConfigureAwait(false);

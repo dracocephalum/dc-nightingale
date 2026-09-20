@@ -37,12 +37,33 @@ undecided adds it here rather than mentioning it once in a conversation.
   and `errors.proto` for the reasons. Implemented and verified against a local
   SQL Server: `Append`, bounded reads and catch-up subscriptions over plain
   streams, `$all` and the virtual streams, `Delete` and `Tombstone` behind the
-  host's switches, and persistent subscriptions with create, delete, one
+  host's switches, persistent subscriptions with create, delete, one
   consumer with acknowledgements, retries, parking and replay, on a lease per
-  group; the samples under `examples/` are the end-to-end runs. Not yet:
-  filters and checkpoints on `$all` (they answer unimplemented), group info,
-  listing and updating, competing consumers, in-cluster forwarding and the
-  ordinals, all in `PENDING.md`. Close by: the ordinals next, then forwarding.
+  group, and the virtual streams by ordinal on a store initialized with
+  `Nightingale:Store:AssignOrdinals`; the samples under `examples/` are the
+  end-to-end runs. Not yet: filters and checkpoints on `$all` (they answer
+  unimplemented), group info, listing and updating, competing consumers,
+  in-cluster forwarding and the ordinal backfill, all in `PENDING.md`. Close
+  by: forwarding next.
+- **The gateway's own tables are read and written as SQL text.** The group
+  store, the sequencer, the tail's refresh and the initializer's marker are
+  raw statements in strings; the virtual-stream reader too. The decision
+  (2026-09-21): move the gateway's own tables, groups, parked messages,
+  leases, the sequencing progress and the marker, and the instance registry
+  forwarding adds, to an EF Core `DbContext`, because it is one model that
+  the later Marten backend shares with a provider swap instead of a second
+  raw-SQL group store, and it takes the plain reads and writes out of
+  strings. Three statements stay raw through it: the lease merge, the
+  sequencing batch and the tail's contiguous-prefix query, because their
+  shape is the point. The events table stays the store's, read through a
+  keyless entity or the raw reader, never mapped for writing. Weasel keeps
+  creating the tables, so one initializer applies one schema; a test holds
+  the EF model to the Weasel definition. The unit-test gain is bounded: the
+  in-memory provider has no transactions, merges, collations or filtered
+  indexes, so it can stand in for the plain reads and writes only, and the
+  integration suite stays the truth for the three raw statements and the
+  sequencer. Close by: a slice before in-cluster forwarding, so the instance
+  registry is born on the context.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,
@@ -72,6 +93,28 @@ undecided adds it here rather than mentioning it once in a conversation.
   with the number of subscriptions, not the number of events. Close by: a
   router that reads each advanced range of `$all` once and hands events to
   the subscriptions by stream, when the subscription count demands it.
+- **An ordinal subscription polls while the sequencer is behind.** After the
+  tail advances, a subscription under ordinal numbering reads the numbered
+  rows, and while the sequencer has not yet passed the head it woke for, it
+  looks again every quarter second: one cheap query per subscription per
+  interval, only during the sequencer's lag, which is about one tail interval.
+  Close by: the sequencer publishing its progress in-process, and one poller
+  per process for the other instances, once the subscription count demands it.
+- **A bounded read abandoned mid-page has stalled the next read.** While the
+  ordinals sample polled a virtual stream by disposing each read right after
+  its head, the following read sometimes got no answer for a minute, with no
+  blocking visible in SQL Server, and never once the sample consumed each read
+  to its end. Disposing the call cancels the server's page query mid-flight;
+  the suspect is the pooled connection that query ran on. Close by: a test
+  that cancels a streaming read during a page and then reads again on the
+  same host, and either a fix in how the reader cancels its command or an
+  upstream issue on the SQL client.
+- **The sequencer's takeover is not tested with two instances.** The lease
+  logic is the group store's, tested there, and the batch transaction reads
+  the progress row under an update lock so an overlapping sequencer continues
+  from what the other committed; no test runs two hosts against one store to
+  see it happen. Close by: a two-host integration test with the in-cluster
+  forwarding work, which needs the same fixture.
 - **Subscriptions under tenant partitioning follow the wrong mark.** The
   tailer follows the store's single high-water mark; with a sequence per
   tenant the store keeps a mark per tenant, and the tail would need one too.

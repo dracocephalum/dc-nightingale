@@ -213,7 +213,7 @@ internal sealed class PolecatGroupStore(string connectionString, string schemaNa
     }
 
     /// <summary>The settings as stored: primitives only, so the document outlives the domain type's shape.</summary>
-    private sealed record StoredSettings(long Start, long MessageTimeoutMs, int MaxRetryCount, int CheckpointUpperBound, long CheckpointAfterMs, int CheckpointLowerBound, int BufferSize, int MaxSubscriberCount)
+    private sealed record StoredSettings(long Start, long MessageTimeoutMs, int MaxRetryCount, int CheckpointUpperBound, long CheckpointAfterMs, int CheckpointLowerBound, int BufferSize, int MaxSubscriberCount, int Numbering = 0)
     {
         public static StoredSettings From(GroupSettings settings) => new(
             settings.Start.IsEnd ? -1 : settings.Start.Value,
@@ -223,7 +223,8 @@ internal sealed class PolecatGroupStore(string connectionString, string schemaNa
             (long)settings.CheckpointAfter.TotalMilliseconds,
             settings.CheckpointLowerBound,
             settings.BufferSize,
-            settings.MaxSubscriberCount);
+            settings.MaxSubscriberCount,
+            settings.Numbering == Nightingale.Numbering.Ordinal ? 1 : 0);
 
         public GroupSettings ToSettings() => new(
             Start < 0 ? StreamPosition.End : StreamPosition.From(Start),
@@ -233,6 +234,7 @@ internal sealed class PolecatGroupStore(string connectionString, string schemaNa
             TimeSpan.FromMilliseconds(CheckpointAfterMs),
             CheckpointLowerBound,
             BufferSize,
-            MaxSubscriberCount);
+            MaxSubscriberCount,
+            Numbering == 1 ? Nightingale.Numbering.Ordinal : Nightingale.Numbering.Global);
     }
 }

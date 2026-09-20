@@ -54,7 +54,7 @@ public static class Scenario
         await client.AppendToStreamAsync(orders, StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"3. Appended two events to {orders} before anyone subscribed.").ConfigureAwait(false);
 
-        await using var streamSubscription = client.SubscribeToStreamAsync(orders, StreamPosition.Start, cancellationToken);
+        await using var streamSubscription = client.SubscribeToStreamAsync(orders, StreamPosition.Start, cancellationToken: cancellationToken);
         var streamMessages = streamSubscription.Messages.GetAsyncEnumerator(cancellationToken);
         var confirmed = await streamSubscription.Confirmed.ConfigureAwait(false);
         var caughtUp = new List<string>();

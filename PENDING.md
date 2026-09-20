@@ -51,48 +51,40 @@ store is initialized and guarded by its marker row) or a database per tenant
 there is no global position,
 the server says so through its features call, and the wildcard is refused.
 Range partitioning by sequence, the gateway's own if ever added, keeps the
-shared sequence and the wildcard. Provisioning a tenant touches no schema: a new value in the tenant
-column, a registry entry and credentials, all the gateway's own documents. The store runs in conjoined mode
+shared sequence and the wildcard. Ordinals are per tenant by construction,
+the sequencer partitions by tenant and the ordinal indexes lead with the tenant
+column, so they fit either partitioning; what tenant partitioning needs is a
+sequencer that follows the mark and keeps its progress per tenant, which is why
+`Nightingale:Store:AssignOrdinals` is refused with it until then. A wildcard
+read spans tenants and so has no single ordinal sequence: it is served under
+global numbering only, and ordinal numbering with the wildcard is refused.
+Provisioning a tenant touches no schema: a new value in the tenant column, a
+registry entry and credentials, all the gateway's own documents. The store
+runs in conjoined mode
 with the default tenant from day one, so enabling tenants later adds
 credentials, not a schema migration; the category and type indexes lead with
 the tenant column. Database-per-tenant is not planned: there is no coherent
 cross-tenant position across databases.
 
-## Ordinals for category and event-type streams
+## Ordinals on a store initialized without them
 
-An ordinal is an event's place within its virtual stream: dense, so a
-consumer subtracts two of them and gets a count. The reference gets the same
-from link events with their own numbers; ours are two nullable columns on the
-events table, the category ordinal and the type ordinal, declared through the
-same patched schema as the category column, each with a filtered index that
-holds only numbered rows, so a read of a virtual stream by ordinal is one seek
-and can never return an unnumbered row. A linker, one per cluster on the same
-lease persistent-subscription groups use, walks `$all` behind the high-water
-mark in batches and numbers each batch from the last numbered entry per key;
-the append path is untouched, because numbering at append time would
-serialize every append to a category. The linker's lag is the virtual
-streams' visibility lag under this numbering, as the high-water mark's lag is
-`$all`'s. A removed event leaves a numbered hole the reader skips, which is
-what the reference does with a link whose event is gone.
-
-The numbering is the caller's explicit choice per read or subscription,
-`Global` by default, `Ordinal` only for `$ce-` and `$et-`, and refused with
-`ORDINALS_NOT_ENABLED` when the store was not initialized with the feature,
-before anything is delivered. In ordinal mode every number in the
-conversation, the start position, the head, the caught-up and fell-behind
-notes, is an ordinal, and each recorded event carries its ordinal beside the
-global position it always carries; under global numbering the ordinal is
-absent. A consumer stores the numbering with its checkpoint and never
-resubscribes under the other. The feature is a store setting fixed at
-initialization; a store that adopts it later gets its columns backfilled by
-the migrate command, never by drift.
+Ordinal numbering of the virtual streams (`DESIGN.md`, seam 6) is a store
+setting fixed at initialization, and a store initialized without it refuses
+the setting. Adopting it later is a backfill: the migrate command adds the two
+columns and their indexes, then the sequencer numbers from position 0, which
+on a large store takes as long as one pass over the table and is done while
+the store is served, because a batch is atomic and a read under ordinal
+numbering sees only what is numbered. The marker row is stamped with the
+setting once the columns exist, before the backfill completes, so the server
+knows the store has the feature and readers see the ordinals arrive.
 
 ## Server-computed lag counts
 
 For consumers that alert on an absolute number of events behind rather than a
 growing lag: a range count over the category or type index from the
 subscriber's position to the head, reported on the fell-behind message or by a
-small extra call.
+small extra call. Under ordinal numbering the count is already a subtraction,
+holes included; this entry is for global numbering.
 
 ## Resubscription after a dropped connection
 

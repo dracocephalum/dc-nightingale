@@ -11,7 +11,8 @@ namespace Dracocephalum.Nightingale.Server;
 /// acknowledged, refused, or times out. The checkpoint is the last position every delivered
 /// event up to which is done, acknowledged, skipped or parked, and is written, whenever it has
 /// moved, on the group's policy and when the consumer leaves. A group over a stream counts in revisions; one over
-/// <c>$all</c> or a virtual stream in positions. Replays come first: a parked message marked for
+/// <c>$all</c> or a virtual stream in positions, or in ordinals when it was created under ordinal
+/// numbering, which then keys its checkpoint and its parked messages too. Replays come first: a parked message marked for
 /// replay is delivered before the stream is read on, and a retry goes straight back, ahead of
 /// anything new.
 /// </summary>
@@ -23,6 +24,8 @@ internal sealed class PersistentGroup : IAsyncDisposable
     private readonly TimeProvider _time;
     private readonly GroupDefinition _definition;
     private readonly bool _byPosition;
+    private readonly bool _byOrdinal;
+    private readonly VirtualStreamName _virtual;
     private readonly long? _from;
     private readonly Lock _gate = new();
     private readonly Dictionary<Guid, InFlight> _inFlight = [];
@@ -53,11 +56,13 @@ internal sealed class PersistentGroup : IAsyncDisposable
         _checkpoint = definition.Checkpoint;
         _written = definition.Checkpoint;
         _lastWrite = time.GetUtcNow();
-        _byPosition = StreamNames.IsReserved(definition.Stream);
+        _byOrdinal = definition.Settings.Numbering == Numbering.Ordinal && StreamNames.TryParseVirtual(definition.Stream, out _virtual);
+        _byPosition = StreamNames.IsReserved(definition.Stream) && !_byOrdinal;
 
         // Where the feed starts is settled now, not on the pump's thread: from the end of $all or a
-        // virtual stream means after the head as it is at this moment. A plain stream from its end
-        // needs the stream's own head, which is a read the pump does.
+        // virtual stream by position means after the head as it is at this moment. A plain stream
+        // from its end needs the stream's own head, and a virtual stream by ordinal its last
+        // ordinal, which are reads the pump does.
         _from = definition.Checkpoint >= 0 ? definition.Checkpoint + 1
             : !definition.Settings.Start.IsEnd ? definition.Settings.Start.Value
             : _byPosition ? tail.Head + 1
@@ -209,7 +214,10 @@ internal sealed class PersistentGroup : IAsyncDisposable
         _room.Dispose();
     }
 
-    private long Key(EventRecord record) => _byPosition ? record.Position : record.Revision;
+    private long Key(EventRecord record) =>
+        _byOrdinal ? record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.")
+        : _byPosition ? record.Position
+        : record.Revision;
 
     private void MarkDone(long key)
     {
@@ -302,8 +310,8 @@ internal sealed class PersistentGroup : IAsyncDisposable
                 await DeliverAsync(new InFlight(record, parked.Attempts, default, true), cancellationToken).ConfigureAwait(false);
             }
 
-            var from = _from ?? await HeadRevisionAsync(cancellationToken).ConfigureAwait(false) + 1;
-            await foreach (var record in EventSource.FollowAsync(_store, _tail, _definition.Stream, from, _definition.Settings.BufferSize, cancellationToken).ConfigureAwait(false))
+            var from = _from ?? await HeadAsync(cancellationToken).ConfigureAwait(false) + 1;
+            await foreach (var record in EventSource.FollowAsync(_store, _tail, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, _time, cancellationToken).ConfigureAwait(false))
             {
                 await DeliverAsync(new InFlight(record, 0, default, false), cancellationToken).ConfigureAwait(false);
             }
@@ -333,14 +341,27 @@ internal sealed class PersistentGroup : IAsyncDisposable
         await _outgoing.Writer.WriteAsync(new PersistentSubscriptionMessage.Recorded(timed.Record, timed.Attempts), cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<long> HeadRevisionAsync(CancellationToken cancellationToken)
+    /// <summary>The head a group from the end starts after: a plain stream's last revision, or a virtual stream's last ordinal.</summary>
+    private async Task<long> HeadAsync(CancellationToken cancellationToken)
     {
+        if (_byOrdinal)
+        {
+            var bounds = await _store.OrdinalHeadAsync(_virtual, cancellationToken).ConfigureAwait(false);
+            return bounds?.Last ?? -1;
+        }
+
         var page = await _store.ReadAsync(_definition.Stream, Direction.Forwards, long.MaxValue, 1, cancellationToken).ConfigureAwait(false);
         return page?.Head.Last ?? -1;
     }
 
     private async Task<EventRecord?> ReadOneAsync(ParkedMessage parked, CancellationToken cancellationToken)
     {
+        if (_byOrdinal)
+        {
+            var page = await _store.ReadByOrdinalAsync(_virtual, Direction.Forwards, parked.Position, 1, cancellationToken).ConfigureAwait(false);
+            return page.Count == 1 && page[0].Ordinal == parked.Position ? page[0] : null;
+        }
+
         if (_definition.Stream == StreamNames.All)
         {
             var page = await _store.ReadAllAsync(Direction.Forwards, parked.Position, parked.Position, 1, cancellationToken).ConfigureAwait(false);

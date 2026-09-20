@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Dracocephalum.Nightingale.Examples.CategoryOrdinals/Dracocephalum.Nightingale.Examples.CategoryOrdinals.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Dracocephalum.Nightingale.Examples.CategoryOrdinals.Tests/Dracocephalum.Nightingale.Examples.CategoryOrdinals.Tests.csproj" />
+  </Folder>
+  <Project Path="../../libraries/client/src/Dracocephalum.Nightingale.Client/Dracocephalum.Nightingale.Client.csproj" />
+  <Project Path="../../libraries/core/src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
+  <Project Path="../../libraries/server/src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
+  <Project Path="../../libraries/server/src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
+  <Project Path="../common/src/Dracocephalum.Nightingale.Examples.Common/Dracocephalum.Nightingale.Examples.Common.csproj" />
+</Solution>

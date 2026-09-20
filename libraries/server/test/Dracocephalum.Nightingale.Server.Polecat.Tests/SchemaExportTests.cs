@@ -62,7 +62,38 @@ public sealed class SchemaExportTests
                 text => text.ShouldContain("ix_pc_events_category_seq"),
                 text => text.ShouldContain("ix_pc_events_type_seq"),
                 text => text.ShouldContain("nightingale_store"),
-                text => text.ShouldContain("PARTITION"));
+                text => text.ShouldContain("PARTITION"),
+                text => text.ShouldNotContain("category_ordinal"));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithOrdinals_ShouldWriteTheOrdinalColumnsTheirIndexesAndTheProgressTable()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.AssignOrdinals = true);
+        using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IDocumentStore>();
+        var path = Path.Combine(Path.GetTempPath(), "nightingale-schema-" + Guid.NewGuid().ToString("N") + ".sql");
+
+        try
+        {
+            // Act
+            await SchemaExport.ExportAsync(store, path, TestContext.Current.CancellationToken);
+
+            // Assert
+            var script = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+            script.ShouldSatisfyAllConditions(
+                text => text.ShouldContain("category_ordinal"),
+                text => text.ShouldContain("type_ordinal"),
+                text => text.ShouldContain("ix_pc_events_category_ordinal"),
+                text => text.ShouldContain("ix_pc_events_type_ordinal"),
+                text => text.ShouldContain("nightingale_ordinals"));
         }
         finally
         {

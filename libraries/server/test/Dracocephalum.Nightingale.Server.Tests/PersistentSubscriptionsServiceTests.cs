@@ -76,6 +76,52 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Create_UnderOrdinalNumbering_ShouldStoreTheNumberingWithTheGroup()
+    {
+        // Arrange
+        GroupDefinition? captured = null;
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).Invokes(call => captured = call.GetArgument<GroupDefinition>(0));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        await client.CreateAsync(new CreateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromStart = new(), Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        captured.ShouldNotBeNull().Settings.Numbering.ShouldBe(Numbering.Ordinal);
+    }
+
+    [Fact]
+    public async Task Create_UnderOrdinalNumberingOnAPlainStream_ShouldRejectBeforeTouchingTheStore()
+    {
+        // Arrange
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Create_UnderOrdinalNumberingWithoutOrdinals_ShouldFailAsNotEnabled()
+    {
+        // Arrange
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(false);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "$et-order_placed", Group = "billing", Settings = new Protocol.V1.GroupSettings { Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("ORDINALS_NOT_ENABLED");
+        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task Create_WhenTheGroupExists_ShouldFailAsAlreadyExists()
     {
         // Arrange

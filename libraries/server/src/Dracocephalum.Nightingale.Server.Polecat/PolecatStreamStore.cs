@@ -18,9 +18,13 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="store">The store.</param>
 /// <param name="connectionString">The connection string the store uses, for the virtual streams read straight from the table.</param>
-internal sealed class PolecatStreamStore(IDocumentStore store, string connectionString) : IStreamStore
+/// <param name="ordinals">Whether the store was initialized with ordinals.</param>
+internal sealed class PolecatStreamStore(IDocumentStore store, string connectionString, bool ordinals) : IStreamStore
 {
     private readonly VirtualStreamReader _virtual = new(connectionString, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
+
+    /// <inheritdoc/>
+    public bool OrdinalsEnabled => ordinals;
 
     /// <inheritdoc/>
     public async Task<AppendResult> AppendAsync(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken)
@@ -170,6 +174,36 @@ internal sealed class PolecatStreamStore(IDocumentStore store, string connection
     /// <inheritdoc/>
     public Task<long> CountVirtualAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken) =>
         _virtual.CountAsync(stream, after, head, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
+    {
+        RequireOrdinals(stream.Name);
+        return _virtual.OrdinalHeadAsync(stream, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        RequireOrdinals(stream.Name);
+        return _virtual.ReadByOrdinalAsync(stream, direction, from, count, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<long> NumberedThroughAsync(CancellationToken cancellationToken)
+    {
+        RequireOrdinals(StreamNames.All);
+        return _virtual.NumberedThroughAsync(cancellationToken);
+    }
+
+    private void RequireOrdinals(string stream)
+    {
+        if (!ordinals)
+        {
+            throw new OrdinalsNotEnabledException(stream);
+        }
+    }
 
     /// <inheritdoc/>
     public async Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken)

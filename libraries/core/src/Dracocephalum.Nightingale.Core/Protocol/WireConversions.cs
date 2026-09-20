@@ -51,7 +51,7 @@ public static class WireConversions
     public static RecordedEvent ToRecordedEvent(this EventRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        return new RecordedEvent
+        var recorded = new RecordedEvent
         {
             Id = record.Id.ToString("D"),
             Stream = record.Stream,
@@ -62,6 +62,12 @@ public static class WireConversions
             Data = ByteString.CopyFrom(record.Data.Span),
             Metadata = ToMetadataBytes(record.Metadata),
         };
+        if (record.Ordinal is { } ordinal)
+        {
+            recorded.Ordinal = ordinal;
+        }
+
+        return recorded;
     }
 
     /// <summary>Maps a wire recorded event to the domain type.</summary>
@@ -80,8 +86,21 @@ public static class WireConversions
             recorded.EventType,
             recorded.Created.ToDateTimeOffset(),
             recorded.Data.Memory,
-            recorded.Metadata.IsEmpty ? [] : ParseMetadata(recorded.Metadata));
+            recorded.Metadata.IsEmpty ? [] : ParseMetadata(recorded.Metadata),
+            recorded.HasOrdinal ? recorded.Ordinal : null);
     }
+
+    /// <summary>Maps a numbering to its wire form.</summary>
+    /// <param name="numbering">The numbering.</param>
+    /// <returns>The wire value.</returns>
+    public static Protocol.V1.Numbering ToWire(this Numbering numbering) =>
+        numbering == Numbering.Ordinal ? Protocol.V1.Numbering.Ordinal : Protocol.V1.Numbering.Global;
+
+    /// <summary>Maps a wire numbering to the domain type; unspecified is global.</summary>
+    /// <param name="numbering">The wire value.</param>
+    /// <returns>The numbering.</returns>
+    public static Numbering ToNumbering(this Protocol.V1.Numbering numbering) =>
+        numbering == Protocol.V1.Numbering.Ordinal ? Numbering.Ordinal : Numbering.Global;
 
     /// <summary>Maps group settings from their wire form; unset fields take the defaults.</summary>
     /// <param name="settings">The wire message.</param>
@@ -104,7 +123,8 @@ public static class WireConversions
             settings.CheckpointAfter?.ToTimeSpan() ?? defaults.CheckpointAfter,
             settings.CheckpointLowerBound > 0 ? settings.CheckpointLowerBound : defaults.CheckpointLowerBound,
             settings.BufferSize > 0 ? settings.BufferSize : defaults.BufferSize,
-            settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount);
+            settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount,
+            settings.Numbering.ToNumbering());
     }
 
     /// <summary>Maps group settings to their wire form.</summary>
@@ -122,6 +142,7 @@ public static class WireConversions
             CheckpointLowerBound = settings.CheckpointLowerBound,
             BufferSize = settings.BufferSize,
             MaxSubscriberCount = settings.MaxSubscriberCount,
+            Numbering = settings.Numbering.ToWire(),
         };
         if (settings.Start.IsEnd)
         {

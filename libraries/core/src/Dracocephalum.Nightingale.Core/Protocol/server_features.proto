@@ -14,7 +14,7 @@ package dracocephalum.nightingale.v1;
 option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
 
 service ServerFeatures {
-  // Liveness, and the server's version.
+  // Liveness, the server's version, and what its store was initialized with.
   rpc Ping (PingRequest) returns (PingResponse);
 }
 
@@ -22,4 +22,8 @@ message PingRequest {}
 
 message PingResponse {
   string version = 1;
+  // Whether the virtual streams can be read under ordinal numbering; see
+  // "Numbering" in shared.proto. A store without the feature refuses such a
+  // read with ORDINALS_NOT_ENABLED.
+  bool supports_ordinals = 2;
 }
