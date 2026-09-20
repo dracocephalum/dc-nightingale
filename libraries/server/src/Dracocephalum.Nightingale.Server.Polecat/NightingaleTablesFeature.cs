@@ -94,6 +94,7 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         var leases = new Table(new SqlServerObjectName(schemaName, LeasesTable));
         leases.AddColumn("name", "varchar(750)").NotNull().AsPrimaryKey();
         leases.AddColumn("owner", "varchar(64)").NotNull();
+        leases.AddColumn("owner_address", "varchar(500)");
         leases.AddColumn("expires_at", "datetimeoffset").NotNull();
         yield return leases;
 

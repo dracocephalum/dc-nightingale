@@ -45,11 +45,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   unimplemented), group info, listing and updating, competing consumers,
   in-cluster forwarding and the ordinal backfill, all in `PENDING.md`. Close
   by: forwarding next.
-- **A replay wakes only a consumer connected to the serving instance.** The
-  replay call moves the rows and wakes the group through this instance's
-  registry; a consumer connected to another instance receives them at its
-  next connection. Close by: with in-cluster forwarding, which resolves the
-  owning instance and relays the wake.
 - **The sequencer's progress is read as SQL text beside the context.** The
   sequencer's batch is raw by design, and its progress row is read raw by the
   virtual-stream reader too, although the context maps that row. Close by:
@@ -105,8 +100,9 @@ undecided adds it here rather than mentioning it once in a conversation.
   logic is the group store's, tested there, and the batch transaction reads
   the progress row under an update lock so an overlapping sequencer continues
   from what the other committed; no test runs two hosts against one store to
-  see it happen. Close by: a two-host integration test with the in-cluster
-  forwarding work, which needs the same fixture.
+  see it happen. Close by: a test on the two-instance fixture the redirect
+  test already has, stopping the sequencing instance and watching the other
+  take over after the lease lapses.
 - **Subscriptions under tenant partitioning follow the wrong mark.** The
   tailer follows the store's single high-water mark; with a sequence per
   tenant the store keeps a mark per tenant, and the tail would need one too.

@@ -22,6 +22,7 @@ public static class NightingaleServerExtensions
         services.AddGrpc();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<GroupRegistry>();
+        services.TryAddSingleton<InstanceAddress>();
         return services;
     }
 
@@ -38,6 +39,7 @@ public static class NightingaleServerExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
+        options.Cluster.Validate();
         services.AddSingleton(options);
         services.AddSingleton<NightingaleOptionsBase>(options);
         return services;

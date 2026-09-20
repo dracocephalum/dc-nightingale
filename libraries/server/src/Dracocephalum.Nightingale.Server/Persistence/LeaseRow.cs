@@ -13,6 +13,9 @@ public sealed class LeaseRow
     /// <summary>Gets or sets the instance holding it.</summary>
     public required string Owner { get; set; }
 
+    /// <summary>Gets or sets where the instance holding it is reached, when it advertised an address.</summary>
+    public string? OwnerAddress { get; set; }
+
     /// <summary>Gets or sets when it lapses unless renewed.</summary>
     public DateTimeOffset ExpiresAt { get; set; }
 }

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 using Dracocephalum.Nightingale.Protocol;
 using Dracocephalum.Nightingale.Protocol.V1;
 using Grpc.Core;
@@ -10,23 +12,30 @@ namespace Dracocephalum.Nightingale.Client;
 /// stream under an expected state, read a stream, $all or a virtual stream in either direction,
 /// subscribe to any of them, and delete or tombstone a stream where the server allows it. A failed call surfaces as a
 /// domain exception when the server gave a reason, an argument exception when the request was at
-/// fault, and the raw call exception otherwise. Thread-safe; one instance per server address.
+/// fault, and the raw call exception otherwise. A persistent-subscription group runs in one server
+/// instance at a time; when another instance answers that the group runs elsewhere and says
+/// where, the client goes there itself, once, the way the reference client follows a not-leader
+/// answer, and keeps the connection for the next time. Thread-safe; one instance per server address.
 /// </summary>
 public sealed class NightingaleClient : IAsyncDisposable
 {
-    private readonly GrpcChannel? _ownedChannel;
+    private readonly ConcurrentBag<GrpcChannel> _ownedChannels = [];
+    private readonly ConcurrentDictionary<Uri, PersistentSubscriptions.PersistentSubscriptionsClient> _owners = new();
+    private readonly Func<Uri, CallInvoker> _redirects;
     private readonly Streams.StreamsClient _streams;
     private readonly PersistentSubscriptions.PersistentSubscriptionsClient _persistent;
 
-    /// <summary>Initializes a new instance of the <see cref="NightingaleClient"/> class that owns its channel.</summary>
+    /// <summary>Initializes a new instance of the <see cref="NightingaleClient"/> class that owns its channels.</summary>
     /// <param name="options">Where the server is.</param>
     public NightingaleClient(NightingaleClientOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
-        _ownedChannel = GrpcChannel.ForAddress(options.Address);
-        _streams = new Streams.StreamsClient(_ownedChannel);
-        _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(_ownedChannel);
+        var channel = GrpcChannel.ForAddress(options.Address);
+        _ownedChannels.Add(channel);
+        _streams = new Streams.StreamsClient(channel);
+        _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(channel);
+        _redirects = OwnedChannelFor;
     }
 
     /// <summary>
@@ -34,11 +43,13 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// invoker the caller owns and disposes, such as an in-process test server's.
     /// </summary>
     /// <param name="invoker">The call invoker.</param>
-    public NightingaleClient(CallInvoker invoker)
+    /// <param name="redirects">Opens a connection to another instance when a group runs there; a channel of this client's own by default.</param>
+    public NightingaleClient(CallInvoker invoker, Func<Uri, CallInvoker>? redirects = null)
     {
         ArgumentNullException.ThrowIfNull(invoker);
         _streams = new Streams.StreamsClient(invoker);
         _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(invoker);
+        _redirects = redirects ?? OwnedChannelFor;
     }
 
     /// <summary>Appends events to a stream atomically under an expected state.</summary>
@@ -264,7 +275,76 @@ public sealed class NightingaleClient : IAsyncDisposable
 
         try
         {
-            var response = await _persistent.ReplayParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return await ReplayAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
+        {
+            return await ReplayAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Connects to a persistent-subscription group as its consumer and waits for the server's
+    /// confirmation; the subscription then streams the events, each to be acknowledged or refused.
+    /// When the group runs in another instance that says where, the client connects there
+    /// instead, once.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="bufferSize">How many delivered, unacknowledged events to hold at once.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The confirmed subscription.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    /// <exception cref="ConsumerLimitReachedException">The group already has its consumer.</exception>
+    /// <exception cref="GroupOwnedElsewhereException">The group runs in another instance that advertises no address, or the instance it named refused too.</exception>
+    public async Task<PersistentSubscription> SubscribeToPersistentSubscriptionAsync(string stream, string group, int bufferSize = 10, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bufferSize);
+        try
+        {
+            return await OpenAsync(_persistent, stream, group, bufferSize, cancellationToken).ConfigureAwait(false);
+        }
+        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
+        {
+            return await OpenAsync(OwnerAt(address), stream, group, bufferSize, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc/>
+    public ValueTask DisposeAsync()
+    {
+        foreach (var channel in _ownedChannels)
+        {
+            channel.Dispose();
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    private static async Task<PersistentSubscription> OpenAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, string stream, string group, int bufferSize, CancellationToken cancellationToken)
+    {
+        var call = client.Read(cancellationToken: cancellationToken);
+        var subscription = new PersistentSubscription(stream, group, call, cancellationToken);
+        _ = subscription.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = stream, Group = group, BufferSize = bufferSize } });
+        try
+        {
+            await subscription.Confirmed.ConfigureAwait(false);
+            return subscription;
+        }
+        catch (Exception)
+        {
+            await subscription.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task<int> ReplayAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, ReplayParkedRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await client.ReplayParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Replayed;
         }
         catch (RpcException exception)
@@ -273,31 +353,14 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Connects to a persistent-subscription group as its consumer. The call starts at once; the
-    /// subscription reports the confirmation and streams the events, each to be acknowledged or
-    /// refused.
-    /// </summary>
-    /// <param name="stream">The stream name.</param>
-    /// <param name="group">The group name.</param>
-    /// <param name="bufferSize">How many delivered, unacknowledged events to hold at once.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The subscription in progress.</returns>
-    public PersistentSubscription SubscribeToPersistentSubscriptionAsync(string stream, string group, int bufferSize = 10, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(stream);
-        ArgumentException.ThrowIfNullOrEmpty(group);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bufferSize);
-        var call = _persistent.Read(cancellationToken: cancellationToken);
-        var subscription = new PersistentSubscription(stream, group, call, cancellationToken);
-        _ = subscription.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = stream, Group = group, BufferSize = bufferSize } });
-        return subscription;
-    }
+    /// <summary>The persistent-subscriptions client for the instance at an address, opened once and kept.</summary>
+    private PersistentSubscriptions.PersistentSubscriptionsClient OwnerAt(Uri address) =>
+        _owners.GetOrAdd(address, target => new PersistentSubscriptions.PersistentSubscriptionsClient(_redirects(target)));
 
-    /// <inheritdoc/>
-    public ValueTask DisposeAsync()
+    private CallInvoker OwnedChannelFor(Uri address)
     {
-        _ownedChannel?.Dispose();
-        return ValueTask.CompletedTask;
+        var channel = GrpcChannel.ForAddress(address);
+        _ownedChannels.Add(channel);
+        return channel.CreateCallInvoker();
     }
 }

@@ -14,8 +14,9 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="store">The stream store.</param>
 /// <param name="tail">The tail.</param>
 /// <param name="registry">The groups live in this instance.</param>
+/// <param name="address">Where this instance is reached, written with every lease it takes.</param>
 /// <param name="timeProvider">The clock.</param>
-public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamStore store, IStoreTail tail, GroupRegistry registry, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
+public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamStore store, IStoreTail tail, GroupRegistry registry, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
 {
     /// <summary>How long a lease lasts; it is renewed at a third of this.</summary>
     public static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
@@ -95,6 +96,15 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         var definition = await groups.GetAsync(stream, group, context.CancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
 
+        // A running group's consumer is woken by the instance that runs it, so a replay goes
+        // there: refused with the owner's address, and the client repeats it there. With no
+        // consumer anywhere, the move is done here and delivered at the next connection.
+        var holder = await groups.LeaseHolderAsync(GroupRegistry.LeaseName(stream, group), context.CancellationToken).ConfigureAwait(false);
+        if (holder is not null && !string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal))
+        {
+            throw NightingaleErrors.GroupOwnedElsewhere(stream, group, holder);
+        }
+
         // The caller's number is in the group's numbering: a revision for a plain stream, a
         // position for $all or a virtual stream, an ordinal for a group created under it.
         var by = definition.Settings.Numbering == Numbering.Ordinal ? ParkedNumber.Ordinal
@@ -141,8 +151,10 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
 
         try
         {
+            // Refused with the owner's address: the client goes there itself, the way the
+            // reference client follows a not-leader answer.
             var lease = GroupRegistry.LeaseName(stream, group);
-            var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, LeaseDuration, cancellationToken).ConfigureAwait(false);
+            var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
             if (owner is not null)
             {
                 throw NightingaleErrors.GroupOwnedElsewhere(stream, group, owner);
@@ -287,7 +299,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         while (true)
         {
             await Task.Delay(interval, timeProvider, cancellationToken).ConfigureAwait(false);
-            var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, LeaseDuration, cancellationToken).ConfigureAwait(false);
+            var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
             if (owner is not null)
             {
                 throw NightingaleErrors.GroupOwnedElsewhere(live.ToString() ?? string.Empty, lease, owner);

@@ -55,7 +55,7 @@ public static class Scenario
 
         var delivered = new List<string>();
         var retryOnRedelivery = -1;
-        await using (var subscription = client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken))
+        await using (var subscription = await client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken))
         {
             var confirmed = await subscription.Confirmed.ConfigureAwait(false);
             await output.WriteLineAsync($"5. Consumer connected; the group's checkpoint is {confirmed.Checkpoint}, nothing acknowledged yet.").ConfigureAwait(false);
@@ -123,7 +123,7 @@ public static class Scenario
     {
         for (var attempt = 1; ; attempt++)
         {
-            var subscription = client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken);
+            var subscription = await client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken);
             try
             {
                 await subscription.Confirmed.ConfigureAwait(false);

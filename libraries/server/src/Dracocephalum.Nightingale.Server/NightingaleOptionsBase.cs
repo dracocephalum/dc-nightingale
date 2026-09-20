@@ -16,6 +16,9 @@ public abstract class NightingaleOptionsBase
     /// <summary>Gets or sets what the server allows to be deleted.</summary>
     public DeletionSettings Deletion { get; set; } = new();
 
+    /// <summary>Gets or sets how this instance takes part in a cluster of instances over one store.</summary>
+    public ClusterSettings Cluster { get; set; } = new();
+
     /// <summary>
     /// Which deletions the server accepts. Both are off by default: a store that never deletes
     /// keeps every event a consumer may still need and makes retention a decision rather than a
@@ -35,5 +38,44 @@ public abstract class NightingaleOptionsBase
         /// why it is a switch of its own.
         /// </summary>
         public bool AllowTombstone { get; set; }
+    }
+
+    /// <summary>
+    /// How clients find the instance that runs a group. A persistent-subscription group runs in one
+    /// instance at a time, the one holding its lease, and the lease carries that instance's
+    /// address; an instance asked for a group another runs refuses with that address, and the
+    /// client goes there itself, the way the reference client follows a not-leader answer. The
+    /// address is derived from what the server listens on unless one is configured here.
+    /// </summary>
+    public sealed class ClusterSettings
+    {
+        /// <summary>
+        /// Gets or sets the address clients reach this instance at, an absolute http or https URI
+        /// such as <c>http://node-1:5000</c>, or null to derive it: the address the server listens
+        /// on, with a wildcard host replaced by this machine's name, which in a container or a pod
+        /// is the routable one. Set it when that derivation is wrong for the network, such as
+        /// behind address translation.
+        /// </summary>
+        public string? AdvertisedAddress { get; set; }
+
+        /// <summary>Gets the advertised address as a URI, or null when there is none.</summary>
+        public Uri? AdvertisedUri =>
+            AdvertisedAddress is null ? null : new Uri(AdvertisedAddress, UriKind.Absolute);
+
+        /// <summary>Checks the settings are usable.</summary>
+        /// <exception cref="InvalidOperationException">The address is not an absolute http or https URI.</exception>
+        public void Validate()
+        {
+            if (AdvertisedAddress is null)
+            {
+                return;
+            }
+
+            if (!Uri.TryCreate(AdvertisedAddress, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                throw new InvalidOperationException(
+                    $"Nightingale:Cluster:AdvertisedAddress '{AdvertisedAddress}' is not an absolute http or https URI.");
+            }
+        }
     }
 }

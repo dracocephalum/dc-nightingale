@@ -23,7 +23,7 @@ internal sealed record StoreMarker(
     string CreatedBy)
 {
     /// <summary>The schema version this server builds and understands.</summary>
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     /// <summary>
     /// Compares the record with a configuration and names each setting that cannot be reconciled:
