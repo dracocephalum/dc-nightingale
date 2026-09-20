@@ -154,6 +154,39 @@ public sealed class PersistentGroupTests
     }
 
     [Fact]
+    public async Task Wake_ShouldDeliverTheOutboxAheadOfTheNextLiveEvent()
+    {
+        // Arrange: room for one; the stream has two events after the checkpoint and the consumer
+        // holds the first. A replay arrives meanwhile; once the first is acknowledged the replayed
+        // message goes out before the second live event, the reference's order.
+        var replayed = Record("orders-1", 3, 30);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 9, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 10), [Record("orders-1", 9, 90), Record("orders-1", 10, 100)]));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 3, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 10), [replayed]));
+        A.CallTo(() => _groups.DueAsync("orders-1", "g", A<DateTimeOffset>._, A<CancellationToken>._))
+            .ReturnsNextFromSequence(
+                new List<OutboxMessage>(),
+                new List<OutboxMessage> { new("orders-1", "g", 30, 3, null, replayed.Id, "poison", 2, Now) });
+        await using var sut = Group("orders-1", checkpoint: 8, consumerBuffer: 1);
+        var first = await Next(sut);
+
+        // Act
+        sut.Wake();
+        await WaitUntilAsync(() => Fake.GetCalls(_store).Any(call => call.Method.Name == nameof(IStreamStore.ReadAsync) && Equals(call.Arguments[2], 3L)));
+        await sut.AcknowledgeAsync([first.Record.Id]);
+        var second = await Next(sut);
+        await sut.AcknowledgeAsync([second.Record.Id]);
+        var third = await Next(sut);
+
+        // Assert
+        first.Record.Revision.ShouldBe(9);
+        second.Record.Revision.ShouldBe(3);
+        second.RetryCount.ShouldBe(2);
+        third.Record.Revision.ShouldBe(10);
+    }
+
+    [Fact]
     public async Task Wake_ShouldDeliverWhatArrivedOnTheOutboxWhileTheConsumerIsConnectedAndNeverTwice()
     {
         // Arrange: nothing on the outbox when the consumer connects; a replay puts one message
@@ -275,6 +308,21 @@ public sealed class PersistentGroupTests
 
     private static async Task<PersistentSubscriptionMessage.Recorded> Next(PersistentGroup group) =>
         await group.Outgoing.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(Wait);
+
+    /// <summary>Polls for something the group does on its own thread, within the usual wait.</summary>
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTimeOffset.UtcNow + Wait;
+        while (!condition())
+        {
+            if (DateTimeOffset.UtcNow > deadline)
+            {
+                throw new TimeoutException("The condition was not met in time.");
+            }
+
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+    }
 
     private PersistentGroup Group(string stream, long checkpoint, int consumerBuffer, Func<GroupSettings, GroupSettings>? adjust = null)
     {

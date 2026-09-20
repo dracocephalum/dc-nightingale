@@ -166,10 +166,13 @@ ordinal, so a replay addresses it by whichever number the group speaks. A
 replay is a move, the shape of a service bus's dead-letter queue: the row
 goes from parked to the group's outbox, a message is always in exactly one of
 the two, and a delivery that fails again moves it back with its new reason
-and count. The group delivers what is due on its outbox ahead of the stream
-when its consumer connects and whenever it is woken, which the replay call
-does through the registry when the consumer is connected to the same
-instance; a message stays on the outbox while it is in flight, so a wake
+and count. Delivery has the reference's shape: one dispatcher owns the
+consumer's slots and serves a list of retries before the live buffer, so
+what is due on the outbox, queued as retries when the consumer connects and
+whenever the group is woken, which the replay call does through the registry
+when the consumer is connected to the same instance, goes out ahead of the
+next event the stream would have sent; the events already in flight complete
+as they are. A message stays on the outbox while it is in flight, so a wake
 in the meantime never delivers it twice. The outbox row has a due time, so a
 retry with a delay is the same row with a later one.
 
