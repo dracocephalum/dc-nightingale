@@ -101,12 +101,15 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
             : StreamNames.IsReserved(stream) ? ParkedNumber.Position
             : ParkedNumber.Revision;
         long? position = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Position ? request.Position : null;
-        var replayed = await groups.MarkForReplayAsync(stream, group, position, by, context.CancellationToken).ConfigureAwait(false);
+        var replayed = await groups.ReplayAsync(stream, group, position, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false);
         if (position is { } wanted && replayed == 0)
         {
             throw NightingaleErrors.ParkedMessageNotFound(stream, group, wanted);
         }
 
+        // A consumer connected here gets the outbox at once; one connected elsewhere, or none,
+        // gets it at its next connection.
+        registry.Wake(stream, group);
         return new ReplayParkedResponse { Replayed = replayed };
     }
 
@@ -214,6 +217,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
     private async Task ServeAsync(GroupDefinition definition, int buffer, string lease, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
         await using var live = new PersistentGroup(store, tail, groups, timeProvider, definition, buffer);
+        registry.Attach(definition.Stream, definition.Group, live.Wake);
         await responseStream.WriteAsync(
             new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = Guid.NewGuid().ToString("D"), Checkpoint = live.Checkpoint } },
             cancellationToken).ConfigureAwait(false);

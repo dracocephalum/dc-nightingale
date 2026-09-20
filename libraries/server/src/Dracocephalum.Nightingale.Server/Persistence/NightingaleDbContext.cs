@@ -25,6 +25,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
     /// <summary>Gets the parked messages.</summary>
     public DbSet<ParkedRow> Parked => Set<ParkedRow>();
 
+    /// <summary>Gets the outbox: messages due to be delivered again.</summary>
+    public DbSet<OutboxRow> Outbox => Set<OutboxRow>();
+
     /// <summary>Gets the leases.</summary>
     public DbSet<LeaseRow> Leases => Set<LeaseRow>();
 
@@ -66,7 +69,23 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             parked.Property(row => row.Reason).HasColumnName("reason").HasColumnType("nvarchar(1000)");
             parked.Property(row => row.Attempts).HasColumnName("attempts").HasColumnType("int");
             parked.Property(row => row.ParkedAt).HasColumnName("parked_at").HasColumnType("datetimeoffset");
-            parked.Property(row => row.Replay).HasColumnName("replay").HasColumnType("bit");
+        });
+
+        modelBuilder.Entity<OutboxRow>(outbox =>
+        {
+            outbox.ToTable(NightingaleTables.OutboxTable);
+            outbox.HasKey(row => new { row.TenantId, row.Stream, row.GroupName, row.Position });
+            outbox.Property(row => row.TenantId).HasColumnName("tenant_id").HasColumnType(Name250);
+            outbox.Property(row => row.Stream).HasColumnName("stream").HasColumnType(Name250);
+            outbox.Property(row => row.GroupName).HasColumnName("group_name").HasColumnType(Name250);
+            outbox.Property(row => row.Position).HasColumnName("position").HasColumnType("bigint");
+            outbox.Property(row => row.Revision).HasColumnName("revision").HasColumnType("bigint");
+            outbox.Property(row => row.Ordinal).HasColumnName("ordinal").HasColumnType("bigint");
+            outbox.Property(row => row.EventId).HasColumnName("event_id").HasColumnType("uniqueidentifier");
+            outbox.Property(row => row.Reason).HasColumnName("reason").HasColumnType("nvarchar(1000)");
+            outbox.Property(row => row.Attempts).HasColumnName("attempts").HasColumnType("int");
+            outbox.Property(row => row.DueAt).HasColumnName("due_at").HasColumnType("datetimeoffset");
+            outbox.Property(row => row.QueuedAt).HasColumnName("queued_at").HasColumnType("datetimeoffset");
         });
 
         modelBuilder.Entity<LeaseRow>(lease =>

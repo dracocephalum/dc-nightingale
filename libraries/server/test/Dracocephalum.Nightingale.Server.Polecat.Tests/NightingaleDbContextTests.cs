@@ -36,7 +36,7 @@ public sealed class NightingaleDbContextTests
         }).OrderBy(table => table.Name, StringComparer.Ordinal).ToList();
 
         // Assert
-        declared.Count.ShouldBe(5);
+        declared.Count.ShouldBe(6);
         mapped.Count.ShouldBe(declared.Count);
         foreach (var table in declared)
         {

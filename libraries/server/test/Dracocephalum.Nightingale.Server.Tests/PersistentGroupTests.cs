@@ -24,7 +24,7 @@ public sealed class PersistentGroupTests
 
     public PersistentGroupTests()
     {
-        A.CallTo(() => _groups.ReplayableAsync(A<string>._, A<string>._, A<CancellationToken>._)).Returns(new List<ParkedMessage>());
+        A.CallTo(() => _groups.DueAsync(A<string>._, A<string>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<OutboxMessage>());
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public sealed class PersistentGroupTests
         await sut.RefuseAsync([first.Record.Id], NackAction.Park, "poison");
 
         // Assert
-        A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.EventId == first.Record.Id && parked.Reason == "poison" && !parked.Replay), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.EventId == first.Record.Id && parked.Reason == "poison"), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         sut.Checkpoint.ShouldBe(0);
     }
 
@@ -128,14 +128,14 @@ public sealed class PersistentGroupTests
     }
 
     [Fact]
-    public async Task Delivery_ShouldReplayAMarkedParkedMessageFirstAndUnparkItOnAcknowledgement()
+    public async Task Delivery_ShouldDeliverTheOutboxFirstAndDequeueOnAcknowledgement()
     {
-        // Arrange: a parked event at revision 5 marked for replay; the stream itself is followed from the checkpoint after it.
-        var parked = Record("orders-1", 5, 50);
-        A.CallTo(() => _groups.ReplayableAsync("orders-1", "g", A<CancellationToken>._))
-            .Returns(new List<ParkedMessage> { new("orders-1", "g", 50, 5, null, parked.Id, "poison", 3, Now, true) });
+        // Arrange: an event at revision 5 on the outbox; the stream itself is followed from the checkpoint after it.
+        var replayed = Record("orders-1", 5, 50);
+        A.CallTo(() => _groups.DueAsync("orders-1", "g", A<DateTimeOffset>._, A<CancellationToken>._))
+            .Returns(new List<OutboxMessage> { new("orders-1", "g", 50, 5, null, replayed.Id, "poison", 3, Now) });
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 5, 1, A<CancellationToken>._))
-            .Returns(new StreamSlice(new StreamHead(0, 8), [parked]));
+            .Returns(new StreamSlice(new StreamHead(0, 8), [replayed]));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 9, 500, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 9), [Record("orders-1", 9, 90)]));
         await using var sut = Group("orders-1", checkpoint: 8, consumerBuffer: 2);
@@ -149,8 +149,46 @@ public sealed class PersistentGroupTests
         first.Record.Revision.ShouldBe(5);
         first.RetryCount.ShouldBe(3);
         second.Record.Revision.ShouldBe(9);
-        A.CallTo(() => _groups.UnparkAsync("orders-1", "g", 50, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.DequeueAsync("orders-1", "g", 50, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         sut.Checkpoint.ShouldBe(8, "acknowledging a replayed message below the checkpoint must not move it back");
+    }
+
+    [Fact]
+    public async Task Wake_ShouldDeliverWhatArrivedOnTheOutboxWhileTheConsumerIsConnectedAndNeverTwice()
+    {
+        // Arrange: nothing on the outbox when the consumer connects; a replay puts one message
+        // there and wakes the group; a second wake before the message is acknowledged finds it
+        // still on the outbox and must not deliver it again.
+        var replayed = Record("orders-1", 3, 30);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 9, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 8), []));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 3, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 8), [replayed]));
+        A.CallTo(() => _groups.DueAsync("orders-1", "g", A<DateTimeOffset>._, A<CancellationToken>._))
+            .ReturnsNextFromSequence(
+                new List<OutboxMessage>(),
+                new List<OutboxMessage> { new("orders-1", "g", 30, 3, null, replayed.Id, "poison", 2, Now) },
+                new List<OutboxMessage> { new("orders-1", "g", 30, 3, null, replayed.Id, "poison", 2, Now) });
+        await using var sut = Group("orders-1", checkpoint: 8, consumerBuffer: 2);
+
+        // Act
+        sut.Wake();
+        var first = await Next(sut);
+        sut.Wake();
+        var deliveredAgain = false;
+        try
+        {
+            deliveredAgain = await sut.Outgoing.WaitToReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            // Nothing arrived, which is the point.
+        }
+
+        // Assert
+        first.Record.Revision.ShouldBe(3);
+        first.RetryCount.ShouldBe(2);
+        deliveredAgain.ShouldBeFalse("the message is in flight and stays on the outbox until it is done");
     }
 
     [Fact]

@@ -38,8 +38,13 @@ service PersistentSubscriptions {
   // CONSUMER_LIMIT_REACHED, INVALID_ARGUMENT.
   rpc Read (stream PersistentReadRequest) returns (stream PersistentReadResponse);
 
-  // Puts parked messages back in front of the group: all of them, or one by
-  // its position. Errors: GROUP_NOT_FOUND, PARKED_MESSAGE_NOT_FOUND.
+  // Moves parked messages to the group's outbox, from which they are
+  // delivered again ahead of the stream: all of them, or one by its number.
+  // A consumer connected to the instance that serves the call receives them
+  // at once; otherwise they are delivered at the next connection. Idempotent:
+  // a message already on the outbox is counted and left there. A message
+  // that fails again goes back to parked. Errors: GROUP_NOT_FOUND,
+  // PARKED_MESSAGE_NOT_FOUND.
   rpc ReplayParked (ReplayParkedRequest) returns (ReplayParkedResponse);
 }
 

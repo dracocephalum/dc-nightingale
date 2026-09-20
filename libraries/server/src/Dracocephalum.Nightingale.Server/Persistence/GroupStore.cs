@@ -7,11 +7,11 @@ namespace Dracocephalum.Nightingale.Server.Persistence;
 
 /// <summary>
 /// The group store over the gateway's own tables through the context: groups with their settings
-/// as a JSON document and their checkpoint, parked messages one row each with a replay flag, and
-/// leases. Every operation is plain reads and writes, so it runs on any provider and the
-/// in-memory one stands in for a test; the one race that matters, two instances taking one
-/// lease, is settled by the lease row's concurrency tokens rather than by a statement only one
-/// database has.
+/// as a JSON document and their checkpoint, parked messages one row each, the outbox a replay
+/// moves them to, and leases. Every operation is plain reads and writes, so it runs on any
+/// provider and the in-memory one stands in for a test; the one race that matters, two
+/// instances taking one lease, is settled by the lease row's concurrency tokens rather than by a
+/// statement only one database has.
 /// </summary>
 /// <param name="contexts">Where a context comes from, one per operation.</param>
 /// <param name="tenantId">The tenant every group belongs to.</param>
@@ -77,6 +77,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         }
 
         context.Parked.RemoveRange(await ParkedOf(context, stream, group).ToListAsync(cancellationToken).ConfigureAwait(false));
+        context.Outbox.RemoveRange(await OutboxOf(context, stream, group).ToListAsync(cancellationToken).ConfigureAwait(false));
         context.Groups.Remove(row);
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return true;
@@ -126,15 +127,84 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         row.Reason = message.Reason;
         row.Attempts = message.Attempts;
         row.ParkedAt = message.ParkedAt;
-        row.Replay = message.Replay;
+
+        // Moved back: a message that was on the outbox is parked again, not in both places.
+        var queued = await context.Outbox
+            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == message.Stream && row.GroupName == message.Group && row.Position == message.Position, cancellationToken)
+            .ConfigureAwait(false);
+        if (queued is not null)
+        {
+            context.Outbox.Remove(queued);
+        }
+
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
-    public async Task UnparkAsync(string stream, string group, long position, CancellationToken cancellationToken)
+    public async Task<int> ReplayAsync(string stream, string group, long? number, ParkedNumber by, DateTimeOffset dueAt, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await context.Parked
+        var parked = ParkedOf(context, stream, group);
+        var queued = OutboxOf(context, stream, group);
+        if (number is { } wanted)
+        {
+            parked = by switch
+            {
+                ParkedNumber.Revision => parked.Where(row => row.Revision == wanted),
+                ParkedNumber.Ordinal => parked.Where(row => row.Ordinal == wanted),
+                _ => parked.Where(row => row.Position == wanted),
+            };
+            queued = by switch
+            {
+                ParkedNumber.Revision => queued.Where(row => row.Revision == wanted),
+                ParkedNumber.Ordinal => queued.Where(row => row.Ordinal == wanted),
+                _ => queued.Where(row => row.Position == wanted),
+            };
+        }
+
+        var toMove = await parked.ToListAsync(cancellationToken).ConfigureAwait(false);
+        var already = await queued.CountAsync(cancellationToken).ConfigureAwait(false);
+        var now = timeProvider.GetUtcNow();
+        foreach (var row in toMove)
+        {
+            context.Outbox.Add(new OutboxRow
+            {
+                TenantId = row.TenantId,
+                Stream = row.Stream,
+                GroupName = row.GroupName,
+                Position = row.Position,
+                Revision = row.Revision,
+                Ordinal = row.Ordinal,
+                EventId = row.EventId,
+                Reason = row.Reason,
+                Attempts = row.Attempts,
+                DueAt = dueAt,
+                QueuedAt = now,
+            });
+            context.Parked.Remove(row);
+        }
+
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return toMove.Count + already;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<OutboxMessage>> DueAsync(string stream, string group, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await OutboxOf(context, stream, group).AsNoTracking()
+            .Where(row => row.DueAt <= now)
+            .OrderBy(row => row.DueAt).ThenBy(row => row.Position)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(row => new OutboxMessage(stream, group, row.Position, row.Revision, row.Ordinal, row.EventId, row.Reason, row.Attempts, row.DueAt)).ToList();
+    }
+
+    /// <inheritdoc/>
+    public async Task DequeueAsync(string stream, string group, long position, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await context.Outbox
             .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.GroupName == group && row.Position == position, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
@@ -142,47 +212,8 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             return;
         }
 
-        context.Parked.Remove(row);
+        context.Outbox.Remove(row);
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc/>
-    public async Task<IReadOnlyList<ParkedMessage>> ReplayableAsync(string stream, string group, CancellationToken cancellationToken)
-    {
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = await ParkedOf(context, stream, group).AsNoTracking()
-            .Where(row => row.Replay)
-            .OrderBy(row => row.ParkedAt).ThenBy(row => row.Position)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-        return rows.Select(row => new ParkedMessage(stream, group, row.Position, row.Revision, row.Ordinal, row.EventId, row.Reason, row.Attempts, row.ParkedAt, true)).ToList();
-    }
-
-    /// <inheritdoc/>
-    public async Task<int> MarkForReplayAsync(string stream, string group, long? number, ParkedNumber by, CancellationToken cancellationToken)
-    {
-        // Marking is idempotent: a row already marked is matched and counted again, so replaying
-        // the same message twice is a no-op rather than a message not found.
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var query = ParkedOf(context, stream, group);
-        if (number is { } wanted)
-        {
-            query = by switch
-            {
-                ParkedNumber.Revision => query.Where(row => row.Revision == wanted),
-                ParkedNumber.Ordinal => query.Where(row => row.Ordinal == wanted),
-                _ => query.Where(row => row.Position == wanted),
-            };
-        }
-
-        var rows = await query.ToListAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var row in rows)
-        {
-            row.Replay = true;
-        }
-
-        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return rows.Count;
     }
 
     /// <inheritdoc/>
@@ -252,6 +283,9 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
 
     private IQueryable<ParkedRow> ParkedOf(NightingaleDbContext context, string stream, string group) =>
         context.Parked.Where(row => row.TenantId == tenantId && row.Stream == stream && row.GroupName == group);
+
+    private IQueryable<OutboxRow> OutboxOf(NightingaleDbContext context, string stream, string group) =>
+        context.Outbox.Where(row => row.TenantId == tenantId && row.Stream == stream && row.GroupName == group);
 
     /// <summary>The settings as stored: primitives only, so the document outlives the domain type's shape.</summary>
     private sealed record StoredSettings(long Start, long MessageTimeoutMs, int MaxRetryCount, int CheckpointUpperBound, long CheckpointAfterMs, int CheckpointLowerBound, int BufferSize, int MaxSubscriberCount, int Numbering = 0)

@@ -162,7 +162,16 @@ messages are rows, one per event, so one can be replayed by itself; the
 reference keeps them in a stream and can only replay them together. A parked
 row carries every number its event has, the global position as its key, the
 revision within its stream, and the ordinal when the group is numbered by
-ordinal, so a replay addresses it by whichever number the group speaks.
+ordinal, so a replay addresses it by whichever number the group speaks. A
+replay is a move, the shape of a service bus's dead-letter queue: the row
+goes from parked to the group's outbox, a message is always in exactly one of
+the two, and a delivery that fails again moves it back with its new reason
+and count. The group delivers what is due on its outbox ahead of the stream
+when its consumer connects and whenever it is woken, which the replay call
+does through the registry when the consumer is connected to the same
+instance; a message stays on the outbox while it is in flight, so a wake
+in the meantime never delivers it twice. The outbox row has a due time, so a
+retry with a delay is the same row with a later one.
 
 `IStoreTail` is the seam for liveness. One tailer per process runs the store's
 own high-water agent, the part of its async daemon that finds that mark, and
