@@ -114,8 +114,9 @@ point, and the client never learns the topology. Today an instance that does
 not own a group refuses the call with the owner named; the pending step is
 in-cluster forwarding, where that instance opens the same call to the owner
 and relays both directions, so any address serves any group through a dumb
-load balancer, at the cost of one hop. An instance registry table, id,
-address and last heartbeat, is what forwarding resolves the owner through.
+load balancer, at the cost of one hop. An instance registry, id, address and
+last heartbeat, one more table on the gateway's context, is what forwarding
+resolves the owner through.
 
 ## Parked messages as rows, replayable one at a time
 

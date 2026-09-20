@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="Polecat" />
+    <!-- The provider for the server library's model of the gateway's own tables. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
   </ItemGroup>
 
   <ItemGroup>

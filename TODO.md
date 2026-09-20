@@ -45,25 +45,32 @@ undecided adds it here rather than mentioning it once in a conversation.
   unimplemented), group info, listing and updating, competing consumers,
   in-cluster forwarding and the ordinal backfill, all in `PENDING.md`. Close
   by: forwarding next.
-- **The gateway's own tables are read and written as SQL text.** The group
-  store, the sequencer, the tail's refresh and the initializer's marker are
-  raw statements in strings; the virtual-stream reader too. The decision
-  (2026-09-21): move the gateway's own tables, groups, parked messages,
-  leases, the sequencing progress and the marker, and the instance registry
-  forwarding adds, to an EF Core `DbContext`, because it is one model that
-  the later Marten backend shares with a provider swap instead of a second
-  raw-SQL group store, and it takes the plain reads and writes out of
-  strings. Three statements stay raw through it: the lease merge, the
-  sequencing batch and the tail's contiguous-prefix query, because their
-  shape is the point. The events table stays the store's, read through a
-  keyless entity or the raw reader, never mapped for writing. Weasel keeps
-  creating the tables, so one initializer applies one schema; a test holds
-  the EF model to the Weasel definition. The unit-test gain is bounded: the
-  in-memory provider has no transactions, merges, collations or filtered
-  indexes, so it can stand in for the plain reads and writes only, and the
-  integration suite stays the truth for the three raw statements and the
-  sequencer. Close by: a slice before in-cluster forwarding, so the instance
-  registry is born on the context.
+- **Replay as a move to an outbox, not a flag (proposed 2026-09-22).** A
+  parked message is replayed today by a flag on its row, which the group
+  reads once when a consumer connects; a message that fails again is parked
+  again under the same row. The proposal, the shape of a service bus's
+  dead-letter queue: replay moves the row to a per-group outbox of pending
+  deliveries, the group drains the outbox ahead of the stream and whenever it
+  is woken, a delivery that fails again moves the row back to parked, and
+  the flag goes. The outbox is also where a retry with a delay, or any other
+  deferred delivery, would live. Close by: deciding, then one slice: the
+  outbox table on the context, the move in both directions, the drain in the
+  group's loop, and the wake from the replay call; it also closes the item
+  below.
+- **A replay reaches a connected consumer only on its next connection.** A
+  group reads its replayable parked messages once, when a consumer connects,
+  and delivers them before the stream; a replay asked for while the consumer
+  is connected waits for the next connection. The reference delivers it at
+  once. Close by: the registry holding the live group of this instance so the
+  replay call can hand the marked rows to its delivery loop, with the
+  in-cluster forwarding work, which is where the registry grows and where a
+  group owned elsewhere is reached.
+- **The sequencer's progress is read as SQL text beside the context.** The
+  sequencer's batch is raw by design, and its progress row is read raw by the
+  virtual-stream reader too, although the context maps that row. Close by:
+  reading the progress through the context once the backend's stream store
+  takes the context factory, which the in-cluster forwarding work will do
+  for the instance registry anyway.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,

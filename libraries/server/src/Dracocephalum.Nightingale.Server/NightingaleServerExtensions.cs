@@ -1,5 +1,7 @@
+using Dracocephalum.Nightingale.Server.Persistence;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -38,6 +40,32 @@ public static class NightingaleServerExtensions
         ArgumentNullException.ThrowIfNull(options);
         services.AddSingleton(options);
         services.AddSingleton<NightingaleOptionsBase>(options);
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the gateway's own tables through the context, and the group store over it. A
+    /// backend calls this with its provider and the schema its store keeps its tables in, so the
+    /// gateway's sit beside them; the backend's schema feature creates the tables, the context
+    /// never migrates.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="schema">The schema the tables live in.</param>
+    /// <param name="tenantId">The tenant every group belongs to.</param>
+    /// <param name="configure">The provider and connection.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    public static IServiceCollection AddNightingaleGroupStore(this IServiceCollection services, string schema, string tenantId, Action<DbContextOptionsBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentNullException.ThrowIfNull(configure);
+        services.AddSingleton(new NightingaleTables(schema));
+        services.AddDbContextFactory<NightingaleDbContext>(configure);
+        services.AddSingleton<IGroupStore>(provider => new GroupStore(
+            provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
+            tenantId,
+            provider.GetService<TimeProvider>() ?? TimeProvider.System));
         return services;
     }
 

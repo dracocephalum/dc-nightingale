@@ -39,9 +39,9 @@ public sealed class PersistentGroupTests
         // Act
         var first = await Next(sut);
         var second = await Next(sut);
-        await sut.AcknowledgeAsync([first.Record.Id], TestContext.Current.CancellationToken);
+        await sut.AcknowledgeAsync([first.Record.Id]);
         var third = await Next(sut);
-        await sut.AcknowledgeAsync([second.Record.Id], TestContext.Current.CancellationToken);
+        await sut.AcknowledgeAsync([second.Record.Id]);
 
         // Assert
         first.RetryCount.ShouldBe(0);
@@ -61,9 +61,9 @@ public sealed class PersistentGroupTests
         var second = await Next(sut);
 
         // Act
-        await sut.AcknowledgeAsync([second.Record.Id], TestContext.Current.CancellationToken);
+        await sut.AcknowledgeAsync([second.Record.Id]);
         var afterSecond = sut.Checkpoint;
-        await sut.AcknowledgeAsync([first.Record.Id], TestContext.Current.CancellationToken);
+        await sut.AcknowledgeAsync([first.Record.Id]);
 
         // Assert
         afterSecond.ShouldBe(-1);
@@ -80,14 +80,14 @@ public sealed class PersistentGroupTests
         var first = await Next(sut);
 
         // Act
-        await sut.RefuseAsync([first.Record.Id], NackAction.Retry, "not yet", TestContext.Current.CancellationToken);
+        await sut.RefuseAsync([first.Record.Id], NackAction.Retry, "not yet");
         var again = await Next(sut);
-        await sut.RefuseAsync([again.Record.Id], NackAction.Retry, "still not", TestContext.Current.CancellationToken);
+        await sut.RefuseAsync([again.Record.Id], NackAction.Retry, "still not");
 
         // Assert
         again.RetryCount.ShouldBe(1);
         again.Record.Id.ShouldBe(first.Record.Id);
-        A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.Position == 0 && parked.Attempts == 1 && parked.Reason == "still not"), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.Position == 10 && parked.Revision == 0 && parked.Ordinal == null && parked.Attempts == 1 && parked.Reason == "still not"), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         sut.Checkpoint.ShouldBe(0);
     }
 
@@ -101,7 +101,7 @@ public sealed class PersistentGroupTests
         var first = await Next(sut);
 
         // Act
-        await sut.RefuseAsync([first.Record.Id], NackAction.Park, "poison", TestContext.Current.CancellationToken);
+        await sut.RefuseAsync([first.Record.Id], NackAction.Park, "poison");
 
         // Assert
         A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.EventId == first.Record.Id && parked.Reason == "poison" && !parked.Replay), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
@@ -119,7 +119,7 @@ public sealed class PersistentGroupTests
 
         // Act
         _time.Advance(TimeSpan.FromSeconds(31));
-        await sut.ExpireAsync(TestContext.Current.CancellationToken);
+        await sut.ExpireAsync();
         var again = await Next(sut);
 
         // Assert
@@ -133,7 +133,7 @@ public sealed class PersistentGroupTests
         // Arrange: a parked event at revision 5 marked for replay; the stream itself is followed from the checkpoint after it.
         var parked = Record("orders-1", 5, 50);
         A.CallTo(() => _groups.ReplayableAsync("orders-1", "g", A<CancellationToken>._))
-            .Returns(new List<ParkedMessage> { new("orders-1", "g", 5, parked.Id, "poison", 3, Now, true) });
+            .Returns(new List<ParkedMessage> { new("orders-1", "g", 50, 5, null, parked.Id, "poison", 3, Now, true) });
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 5, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 8), [parked]));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 9, 500, A<CancellationToken>._))
@@ -143,13 +143,14 @@ public sealed class PersistentGroupTests
         // Act
         var first = await Next(sut);
         var second = await Next(sut);
-        await sut.AcknowledgeAsync([first.Record.Id], TestContext.Current.CancellationToken);
+        await sut.AcknowledgeAsync([first.Record.Id]);
 
         // Assert
         first.Record.Revision.ShouldBe(5);
         first.RetryCount.ShouldBe(3);
         second.Record.Revision.ShouldBe(9);
-        A.CallTo(() => _groups.UnparkAsync("orders-1", "g", 5, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.UnparkAsync("orders-1", "g", 50, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        sut.Checkpoint.ShouldBe(8, "acknowledging a replayed message below the checkpoint must not move it back");
     }
 
     [Fact]
@@ -177,7 +178,7 @@ public sealed class PersistentGroupTests
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10)]));
         var sut = Group("orders-1", -1, 1, settings => settings with { Start = StreamPosition.Start });
         var first = await Next(sut);
-        await sut.AcknowledgeAsync([first.Record.Id], TestContext.Current.CancellationToken);
+        await sut.AcknowledgeAsync([first.Record.Id]);
 
         // Act
         await sut.DisposeAsync();
@@ -201,15 +202,15 @@ public sealed class PersistentGroupTests
         // Act
         var first = await Next(sut);
         var second = await Next(sut);
-        await sut.AcknowledgeAsync([first.Record.Id], TestContext.Current.CancellationToken);
-        await sut.RefuseAsync([second.Record.Id], NackAction.Park, "no", TestContext.Current.CancellationToken);
+        await sut.AcknowledgeAsync([first.Record.Id]);
+        await sut.RefuseAsync([second.Record.Id], NackAction.Park, "no");
 
         // Assert: every number the group keeps is an ordinal, never the position.
         first.Record.Ordinal.ShouldBe(0);
         second.Record.Ordinal.ShouldBe(1);
         sut.Checkpoint.ShouldBe(1);
         A.CallTo(() => _groups.SaveCheckpointAsync("$ce-orders", "g", 1, A<CancellationToken>._)).MustHaveHappened();
-        A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.Position == 1 && parked.EventId == second.Record.Id), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.Position == 17 && parked.Ordinal == 1 && parked.Revision == 0 && parked.EventId == second.Record.Id), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]

@@ -9,6 +9,8 @@
     <!-- Rich error statuses: google.rpc.Status with an ErrorInfo detail, as the contract promises. -->
     <PackageReference Include="Grpc.StatusProto" />
     <PackageReference Include="Google.Api.CommonProtos" />
+    <!-- The gateway's own tables as one model every backend shares; a backend brings the provider. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
   </ItemGroup>
 
   <!-- TEMPORARY: cross-component project reference. Components reference each

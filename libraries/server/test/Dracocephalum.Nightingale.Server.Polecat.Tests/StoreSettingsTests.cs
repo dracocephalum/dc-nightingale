@@ -31,6 +31,35 @@ public sealed class StoreSettingsTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("1events")]
+    [InlineData("events]; DROP SCHEMA x; --")]
+    public void Validate_WhenSchemaIsNotAName_ShouldRefuse(string schema)
+    {
+        // Arrange
+        var sut = new NightingaleOptions.StoreSettings { Schema = schema };
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(sut.Validate);
+
+        // Assert
+        exception.Message.ShouldContain("not a schema name");
+    }
+
+    [Theory]
+    [InlineData("dbo")]
+    [InlineData("events_v2")]
+    [InlineData("_private")]
+    public void Validate_WhenSchemaIsAName_ShouldAccept(string schema)
+    {
+        // Arrange
+        var sut = new NightingaleOptions.StoreSettings { Schema = schema };
+
+        // Act & Assert
+        Should.NotThrow(sut.Validate);
+    }
+
+    [Theory]
     [InlineData("Latin1_General_100_BIN2")]
     [InlineData("SQL_Latin1_General_CP1_CI_AS")]
     [InlineData(null)]

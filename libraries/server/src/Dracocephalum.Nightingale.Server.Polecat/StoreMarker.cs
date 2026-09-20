@@ -9,6 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="SchemaVersion">The version of the gateway's schema additions.</param>
 /// <param name="Partitioning">How the events table is partitioned.</param>
 /// <param name="AssignOrdinals">Whether the events table carries the ordinal columns; false for a store initialized before the feature existed.</param>
+/// <param name="Schema">The schema the store was initialized in; the default for a store initialized before the setting existed.</param>
 /// <param name="Collation">The database's collation, as SQL Server reports it.</param>
 /// <param name="CreatedAt">When the store was initialized.</param>
 /// <param name="CreatedBy">The informational version of the server that initialized it.</param>
@@ -16,18 +17,19 @@ internal sealed record StoreMarker(
     int SchemaVersion,
     NightingaleOptions.StoreSettings.PartitioningMode Partitioning,
     bool AssignOrdinals,
+    string Schema,
     string Collation,
     DateTimeOffset CreatedAt,
     string CreatedBy)
 {
     /// <summary>The schema version this server builds and understands.</summary>
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     /// <summary>
     /// Compares the record with a configuration and names each setting that cannot be reconciled:
-    /// a partitioning mode that differs, ordinals turned on or off since, a configured collation the
-    /// database does not have, or a schema version newer than this server. An empty result means
-    /// the store can be served.
+    /// a partitioning mode that differs, ordinals turned on or off since, a schema that differs, a
+    /// configured collation the database does not have, or a schema version newer than this
+    /// server. An empty result means the store can be served.
     /// </summary>
     /// <param name="settings">The configured settings.</param>
     /// <returns>One sentence per difference; empty when compatible.</returns>
@@ -50,6 +52,11 @@ internal sealed record StoreMarker(
             differences.Add(AssignOrdinals
                 ? "Nightingale:Store:AssignOrdinals is false but the store was initialized with ordinals"
                 : "Nightingale:Store:AssignOrdinals is true but the store was initialized without ordinals, and there is no backfill yet");
+        }
+
+        if (!string.Equals(Schema, settings.Schema, StringComparison.OrdinalIgnoreCase))
+        {
+            differences.Add($"Nightingale:Store:Schema is {settings.Schema} but the store was initialized in {Schema}");
         }
 
         if (settings.Collation is not null && !string.Equals(settings.Collation, Collation, StringComparison.OrdinalIgnoreCase))

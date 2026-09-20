@@ -49,7 +49,7 @@ public interface IGroupStore
     /// <summary>Removes a parked message: it was replayed and acknowledged, or skipped.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="group">The group.</param>
-    /// <param name="position">The message's position.</param>
+    /// <param name="position">The event's global position, the row's key.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the row is gone.</returns>
     Task UnparkAsync(string stream, string group, long position, CancellationToken cancellationToken);
@@ -61,13 +61,14 @@ public interface IGroupStore
     /// <returns>The messages.</returns>
     Task<IReadOnlyList<ParkedMessage>> ReplayableAsync(string stream, string group, CancellationToken cancellationToken);
 
-    /// <summary>Marks parked messages for replay: all of the group's, or the one at a position.</summary>
+    /// <summary>Marks parked messages for replay: all of the group's, or the one with a number.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="group">The group.</param>
-    /// <param name="position">The position, or <see langword="null"/> for all.</param>
+    /// <param name="number">The message's number, or <see langword="null"/> for all.</param>
+    /// <param name="by">Which of the message's numbers <paramref name="number"/> is: the one the group speaks.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>How many messages were marked.</returns>
-    Task<int> MarkForReplayAsync(string stream, string group, long? position, CancellationToken cancellationToken);
+    Task<int> MarkForReplayAsync(string stream, string group, long? number, ParkedNumber by, CancellationToken cancellationToken);
 
     /// <summary>
     /// Takes or renews a lease. A lease that is free, expired, or already the owner's is granted;

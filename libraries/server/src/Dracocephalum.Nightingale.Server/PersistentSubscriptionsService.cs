@@ -92,13 +92,16 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
 
         var stream = ReadableStreamName(request.Stream);
         var group = GroupName(request.Group);
-        if (await groups.GetAsync(stream, group, context.CancellationToken).ConfigureAwait(false) is null)
-        {
-            throw NightingaleErrors.GroupNotFound(stream, group);
-        }
+        var definition = await groups.GetAsync(stream, group, context.CancellationToken).ConfigureAwait(false)
+            ?? throw NightingaleErrors.GroupNotFound(stream, group);
 
+        // The caller's number is in the group's numbering: a revision for a plain stream, a
+        // position for $all or a virtual stream, an ordinal for a group created under it.
+        var by = definition.Settings.Numbering == Numbering.Ordinal ? ParkedNumber.Ordinal
+            : StreamNames.IsReserved(stream) ? ParkedNumber.Position
+            : ParkedNumber.Revision;
         long? position = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Position ? request.Position : null;
-        var replayed = await groups.MarkForReplayAsync(stream, group, position, context.CancellationToken).ConfigureAwait(false);
+        var replayed = await groups.MarkForReplayAsync(stream, group, position, by, context.CancellationToken).ConfigureAwait(false);
         if (position is { } wanted && replayed == 0)
         {
             throw NightingaleErrors.ParkedMessageNotFound(stream, group, wanted);
@@ -255,7 +258,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
             switch (requestStream.Current.ContentCase)
             {
                 case PersistentReadRequest.ContentOneofCase.Ack:
-                    await live.AcknowledgeAsync(Ids(requestStream.Current.Ack.Ids), cancellationToken).ConfigureAwait(false);
+                    await live.AcknowledgeAsync(Ids(requestStream.Current.Ack.Ids)).ConfigureAwait(false);
                     break;
                 case PersistentReadRequest.ContentOneofCase.Nack:
                     var nack = requestStream.Current.Nack;
@@ -265,7 +268,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
                         Protocol.V1.NackAction.Skip => Nightingale.NackAction.Skip,
                         _ => Nightingale.NackAction.Retry,
                     };
-                    await live.RefuseAsync(Ids(nack.Ids), action, nack.Reason, cancellationToken).ConfigureAwait(false);
+                    await live.RefuseAsync(Ids(nack.Ids), action, nack.Reason).ConfigureAwait(false);
                     break;
                 default:
                     throw NightingaleErrors.InvalidArgument("After the options, every message of a persistent read acknowledges or refuses events.");
@@ -286,7 +289,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
                 throw NightingaleErrors.GroupOwnedElsewhere(live.ToString() ?? string.Empty, lease, owner);
             }
 
-            await live.ExpireAsync(cancellationToken).ConfigureAwait(false);
+            await live.ExpireAsync().ConfigureAwait(false);
         }
     }
 }

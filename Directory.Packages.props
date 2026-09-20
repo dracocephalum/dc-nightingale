@@ -104,6 +104,9 @@
     <PackageVersion Include="Serilog.Sinks.TestCorrelator" Version="4.0.2" />
     <!-- Tracks the EF Core major the application uses. -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.11" />
+    <!-- The gateway's own tables: the model in the server library, the provider in each backend. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
   </ItemGroup>
 
   <!-- Application packages: the gRPC stack and the event-store backend. -->

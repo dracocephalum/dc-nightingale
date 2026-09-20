@@ -14,7 +14,9 @@ namespace Dracocephalum.Nightingale.Server;
 /// <c>$all</c> or a virtual stream in positions, or in ordinals when it was created under ordinal
 /// numbering, which then keys its checkpoint and its parked messages too. Replays come first: a parked message marked for
 /// replay is delivered before the stream is read on, and a retry goes straight back, ahead of
-/// anything new.
+/// anything new. What a consumer asks for, an acknowledgement, a refusal, is applied to the
+/// store to completion even when the consumer leaves the moment it asked: its departure ends
+/// the delivery, never the bookkeeping.
 /// </summary>
 internal sealed class PersistentGroup : IAsyncDisposable
 {
@@ -92,9 +94,8 @@ internal sealed class PersistentGroup : IAsyncDisposable
 
     /// <summary>The consumer is done with these events.</summary>
     /// <param name="ids">The event ids.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the checkpoint policy has been applied.</returns>
-    public async Task AcknowledgeAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken)
+    public async Task AcknowledgeAsync(IEnumerable<Guid> ids)
     {
         var toUnpark = new List<long>();
         lock (_gate)
@@ -110,26 +111,25 @@ internal sealed class PersistentGroup : IAsyncDisposable
                 MarkDone(Key(flight.Record));
                 if (flight.Replayed)
                 {
-                    toUnpark.Add(Key(flight.Record));
+                    toUnpark.Add(flight.Record.Position);
                 }
             }
         }
 
         foreach (var key in toUnpark)
         {
-            await _groups.UnparkAsync(_definition.Stream, _definition.Group, key, cancellationToken).ConfigureAwait(false);
+            await _groups.UnparkAsync(_definition.Stream, _definition.Group, key, CancellationToken.None).ConfigureAwait(false);
         }
 
-        await WriteCheckpointIfDueAsync(false, cancellationToken).ConfigureAwait(false);
+        await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>The consumer could not process these events.</summary>
     /// <param name="ids">The event ids.</param>
     /// <param name="action">What to do with them.</param>
     /// <param name="reason">The consumer's reason, kept with a parked message.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the events are redelivered, parked or dropped.</returns>
-    public async Task RefuseAsync(IEnumerable<Guid> ids, NackAction action, string reason, CancellationToken cancellationToken)
+    public async Task RefuseAsync(IEnumerable<Guid> ids, NackAction action, string reason)
     {
         var toPark = new List<InFlight>();
         var toUnpark = new List<long>();
@@ -150,7 +150,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
                         MarkDone(Key(flight.Record));
                         if (flight.Replayed)
                         {
-                            toUnpark.Add(Key(flight.Record));
+                            toUnpark.Add(flight.Record.Position);
                         }
 
                         break;
@@ -166,19 +166,18 @@ internal sealed class PersistentGroup : IAsyncDisposable
             }
         }
 
-        await SettleAsync(toRedeliver, toPark, reason, cancellationToken).ConfigureAwait(false);
+        await SettleAsync(toRedeliver, toPark, reason, CancellationToken.None).ConfigureAwait(false);
         foreach (var key in toUnpark)
         {
-            await _groups.UnparkAsync(_definition.Stream, _definition.Group, key, cancellationToken).ConfigureAwait(false);
+            await _groups.UnparkAsync(_definition.Stream, _definition.Group, key, CancellationToken.None).ConfigureAwait(false);
         }
 
-        await WriteCheckpointIfDueAsync(false, cancellationToken).ConfigureAwait(false);
+        await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>Redelivers whatever has been in flight longer than the group's message timeout.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the expired events are redelivered or parked.</returns>
-    public async Task ExpireAsync(CancellationToken cancellationToken)
+    public async Task ExpireAsync()
     {
         var toPark = new List<InFlight>();
         var toRedeliver = new List<InFlight>();
@@ -192,8 +191,8 @@ internal sealed class PersistentGroup : IAsyncDisposable
             }
         }
 
-        await SettleAsync(toRedeliver, toPark, "Retry limit reached after the message timeout.", cancellationToken).ConfigureAwait(false);
-        await WriteCheckpointIfDueAsync(false, cancellationToken).ConfigureAwait(false);
+        await SettleAsync(toRedeliver, toPark, "Retry limit reached after the message timeout.", CancellationToken.None).ConfigureAwait(false);
+        await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -231,8 +230,10 @@ internal sealed class PersistentGroup : IAsyncDisposable
                 break;
             }
 
+            // A replayed message is done for the second time, below a checkpoint it once moved;
+            // the checkpoint only ever advances.
             _delivered.Remove(first.Key);
-            _checkpoint = first.Key;
+            _checkpoint = Math.Max(_checkpoint, first.Key);
         }
     }
 
@@ -261,10 +262,12 @@ internal sealed class PersistentGroup : IAsyncDisposable
         {
             if (flight.Replayed)
             {
-                await _groups.UnparkAsync(_definition.Stream, _definition.Group, Key(flight.Record), cancellationToken).ConfigureAwait(false);
+                await _groups.UnparkAsync(_definition.Stream, _definition.Group, flight.Record.Position, cancellationToken).ConfigureAwait(false);
             }
 
-            await _groups.ParkAsync(new ParkedMessage(_definition.Stream, _definition.Group, Key(flight.Record), flight.Record.Id, reason, flight.Attempts, _time.GetUtcNow(), false), cancellationToken).ConfigureAwait(false);
+            await _groups.ParkAsync(
+                new ParkedMessage(_definition.Stream, _definition.Group, flight.Record.Position, flight.Record.Revision, flight.Record.Ordinal, flight.Record.Id, reason, flight.Attempts, _time.GetUtcNow(), false),
+                cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -358,8 +361,13 @@ internal sealed class PersistentGroup : IAsyncDisposable
     {
         if (_byOrdinal)
         {
-            var page = await _store.ReadByOrdinalAsync(_virtual, Direction.Forwards, parked.Position, 1, cancellationToken).ConfigureAwait(false);
-            return page.Count == 1 && page[0].Ordinal == parked.Position ? page[0] : null;
+            if (parked.Ordinal is not { } ordinal)
+            {
+                return null;
+            }
+
+            var page = await _store.ReadByOrdinalAsync(_virtual, Direction.Forwards, ordinal, 1, cancellationToken).ConfigureAwait(false);
+            return page.Count == 1 && page[0].Ordinal == ordinal ? page[0] : null;
         }
 
         if (_definition.Stream == StreamNames.All)
@@ -374,8 +382,8 @@ internal sealed class PersistentGroup : IAsyncDisposable
             return page.Count == 1 ? page[0] : null;
         }
 
-        var slice = await _store.ReadAsync(_definition.Stream, Direction.Forwards, parked.Position, 1, cancellationToken).ConfigureAwait(false);
-        return slice is { Events.Count: 1 } && slice.Events[0].Revision == parked.Position ? slice.Events[0] : null;
+        var slice = await _store.ReadAsync(_definition.Stream, Direction.Forwards, parked.Revision, 1, cancellationToken).ConfigureAwait(false);
+        return slice is { Events.Count: 1 } && slice.Events[0].Revision == parked.Revision ? slice.Events[0] : null;
     }
 
     /// <summary>A delivered event the consumer has not answered for yet.</summary>

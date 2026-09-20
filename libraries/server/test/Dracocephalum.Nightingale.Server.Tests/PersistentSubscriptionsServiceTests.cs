@@ -155,8 +155,8 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
-        A.CallTo(() => _groups.MarkForReplayAsync("orders-1", "billing", null, A<CancellationToken>._)).Returns(3);
-        A.CallTo(() => _groups.MarkForReplayAsync("orders-1", "billing", 7, A<CancellationToken>._)).Returns(0);
+        A.CallTo(() => _groups.MarkForReplayAsync("orders-1", "billing", null, ParkedNumber.Revision, A<CancellationToken>._)).Returns(3);
+        A.CallTo(() => _groups.MarkForReplayAsync("orders-1", "billing", 7, ParkedNumber.Revision, A<CancellationToken>._)).Returns(0);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act

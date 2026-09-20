@@ -84,7 +84,7 @@ public static class Scenario
             await output.WriteLineAsync($"6. Delivered {string.Join(", ", delivered)}: all three were in flight before the payment was refused, so it came back after the shipment with retry count {retryOnRedelivery}, and was parked on the second refusal.").ConfigureAwait(false);
         }
 
-        var replayed = await client.ReplayParkedMessagesAsync(stream, group, position: 1, cancellationToken).ConfigureAwait(false);
+        var replayed = await ReplayOnceParkedAsync(client, stream, group, position: 1, cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"7. Replayed the one parked message at revision 1, by itself: {replayed} put back.").ConfigureAwait(false);
 
         string replayedType;
@@ -112,4 +112,24 @@ public static class Scenario
 
     private static EventData Event(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
+
+    /// <summary>
+    /// Replays one parked message. A refusal is one-way: it is on the wire when NackAsync returns,
+    /// and the server parks the message a moment later, so a replay asked for at once may find no
+    /// parked message yet; it asks again shortly, as an operator's tool would.
+    /// </summary>
+    private static async Task<int> ReplayOnceParkedAsync(NightingaleClient client, string stream, string group, long position, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await client.ReplayParkedMessagesAsync(stream, group, position, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ParkedMessageNotFoundException) when (attempt < 50)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
 }

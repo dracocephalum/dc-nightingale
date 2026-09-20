@@ -134,6 +134,20 @@ public sealed class StoreMarkerTests
         differences.ShouldHaveSingleItem().ShouldContain("initialized with ordinals");
     }
 
-    private static StoreMarker Marker(int schemaVersion = StoreMarker.CurrentSchemaVersion, NightingaleOptions.StoreSettings.PartitioningMode partitioning = NightingaleOptions.StoreSettings.PartitioningMode.None, string collation = "SQL_Latin1_General_CP1_CI_AS", bool assignOrdinals = false) =>
-        new(schemaVersion, partitioning, assignOrdinals, collation, Created, "1.0.0+abcdef12");
+    [Fact]
+    public void DifferencesFrom_WhenSchemaChanged_ShouldNameBoth()
+    {
+        // Arrange
+        var sut = Marker(schema: "events");
+        var settings = new NightingaleOptions.StoreSettings { Schema = "dbo" };
+
+        // Act
+        var differences = sut.DifferencesFrom(settings);
+
+        // Assert
+        differences.ShouldHaveSingleItem().ShouldContain("Schema is dbo but the store was initialized in events");
+    }
+
+    private static StoreMarker Marker(int schemaVersion = StoreMarker.CurrentSchemaVersion, NightingaleOptions.StoreSettings.PartitioningMode partitioning = NightingaleOptions.StoreSettings.PartitioningMode.None, string collation = "SQL_Latin1_General_CP1_CI_AS", bool assignOrdinals = false, string schema = "dbo") =>
+        new(schemaVersion, partitioning, assignOrdinals, schema, collation, Created, "1.0.0+abcdef12");
 }
