@@ -29,6 +29,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="logger">The logger.</param>
 internal sealed partial class StoreInitializer(IDocumentStore store, string connectionString, NightingaleOptions options, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
 {
+    /// <summary>The schema a store initialized before the setting existed lives in: the store's default.</summary>
+    private const string DefaultSchema = "dbo";
+
     /// <inheritdoc/>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -179,6 +182,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
             StoreMarker.CurrentSchemaVersion,
             options.Store.Partitioning,
             options.Store.AssignOrdinals,
+            options.Store.Schema,
             collation,
             timeProvider.GetUtcNow(),
             typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown");
@@ -186,18 +190,19 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         {
             insert.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
-                "INSERT INTO {0} (id, schema_version, partitioning, assign_ordinals, collation, created_at, created_by) VALUES (1, @version, @partitioning, @ordinals, @collation, @created_at, @created_by)",
+                "INSERT INTO {0} (id, schema_version, partitioning, assign_ordinals, schema_name, collation, created_at, created_by) VALUES (1, @version, @partitioning, @ordinals, @schema, @collation, @created_at, @created_by)",
                 MarkerTable);
             insert.Parameters.AddWithValue("@version", marker.SchemaVersion);
             insert.Parameters.AddWithValue("@partitioning", marker.Partitioning.ToString());
             insert.Parameters.AddWithValue("@ordinals", marker.AssignOrdinals);
+            insert.Parameters.AddWithValue("@schema", marker.Schema);
             insert.Parameters.AddWithValue("@collation", marker.Collation);
             insert.Parameters.AddWithValue("@created_at", marker.CreatedAt);
             insert.Parameters.AddWithValue("@created_by", marker.CreatedBy);
             await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        LogInitializedStore(name, collation, marker.Partitioning, marker.AssignOrdinals);
+        LogInitializedStore(name, marker.Schema, collation, marker.Partitioning, marker.AssignOrdinals);
     }
 
     /// <summary>After a change is applied, the marker says which version of the schema the store now has.</summary>
@@ -230,9 +235,10 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         await using var select = connection.CreateCommand();
         select.CommandText = string.Format(
             CultureInfo.InvariantCulture,
-            "SELECT schema_version, partitioning, collation, created_at, created_by, {1} FROM {0} WHERE id = 1",
+            "SELECT schema_version, partitioning, collation, created_at, created_by, {1}, {2} FROM {0} WHERE id = 1",
             MarkerTable,
-            await HasColumnAsync(connection, "assign_ordinals", cancellationToken).ConfigureAwait(false) ? "assign_ordinals" : "CAST(NULL AS bit)");
+            await HasColumnAsync(connection, "assign_ordinals", cancellationToken).ConfigureAwait(false) ? "assign_ordinals" : "CAST(NULL AS bit)",
+            await HasColumnAsync(connection, "schema_name", cancellationToken).ConfigureAwait(false) ? "schema_name" : "CAST(NULL AS varchar(128))");
         await using var reader = await select.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -243,6 +249,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
             reader.GetInt32(0),
             Enum.Parse<NightingaleOptions.StoreSettings.PartitioningMode>(reader.GetString(1)),
             !reader.IsDBNull(5) && reader.GetBoolean(5),
+            reader.IsDBNull(6) ? DefaultSchema : reader.GetString(6),
             reader.GetString(2),
             reader.GetFieldValue<DateTimeOffset>(3),
             reader.GetString(4));
@@ -269,8 +276,8 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
     [LoggerMessage(Level = LogLevel.Information, Message = "Created database {Database} with collation {Collation}.")]
     private partial void LogCreatedDatabase(string database, string collation);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Initialized the store in database {Database}: collation {Collation}, partitioning {Partitioning}, ordinals {Ordinals}.")]
-    private partial void LogInitializedStore(string database, string collation, NightingaleOptions.StoreSettings.PartitioningMode partitioning, bool ordinals);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Initialized the store in database {Database}, schema {Schema}: collation {Collation}, partitioning {Partitioning}, ordinals {Ordinals}.")]
+    private partial void LogInitializedStore(string database, string schema, string collation, NightingaleOptions.StoreSettings.PartitioningMode partitioning, bool ordinals);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Serving the store in database {Database}, schema version {SchemaVersion}, initialized by {CreatedBy}.")]
     private partial void LogServingStore(string database, int schemaVersion, string createdBy);

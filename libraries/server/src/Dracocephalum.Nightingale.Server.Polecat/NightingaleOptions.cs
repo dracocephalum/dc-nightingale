@@ -87,6 +87,14 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
         public PartitioningMode Partitioning { get; set; } = PartitioningMode.None;
 
         /// <summary>
+        /// Gets or sets the schema every table lives in, the store's and the gateway's alike, so the
+        /// gateway's indexes and the sequencer's batch stay within one schema. The store's default,
+        /// <c>dbo</c>. Created by the server with the tables when it does not exist. Fixed at
+        /// initialization: a store initialized in one schema is found nowhere else.
+        /// </summary>
+        public string Schema { get; set; } = "dbo";
+
+        /// <summary>
         /// Gets or sets a value indicating whether the virtual streams are numbered: two columns on
         /// the events table hold each event's dense, zero-based place within its category stream and
         /// its event-type stream, assigned after commit by one sequencer per cluster, so a consumer
@@ -120,9 +128,18 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
                 throw new InvalidOperationException(
                     $"Nightingale:Store:Collation '{Collation}' is not a collation name; a name has letters, digits and underscores only.");
             }
+
+            if (Schema is null || !SchemaName().IsMatch(Schema))
+            {
+                throw new InvalidOperationException(
+                    $"Nightingale:Store:Schema '{Schema}' is not a schema name; a name starts with a letter or underscore and has letters, digits and underscores only.");
+            }
         }
 
         [GeneratedRegex("^[A-Za-z0-9_]{1,128}$")]
         private static partial Regex CollationName();
+
+        [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+        private static partial Regex SchemaName();
     }
 }

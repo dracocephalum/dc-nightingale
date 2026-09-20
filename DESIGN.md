@@ -117,12 +117,16 @@ store while serving it.
 - A database with tables and no row is refused outright: it is not ours.
 
 The settings under `Nightingale:Store` are the ones fixed at initialization
-because each shapes the events table: the collation, which decides whether
-stream names are case-sensitive; and the partitioning mode, one of none, by
-tenant, which gives each tenant its own sequence, or by the archived flag,
-which keeps deleted streams' events out of every live read. It is one mode
-rather than one switch per scheme because a table has one partition scheme.
-Changing either setting means a new database.
+because each shapes the tables or where they live: the schema, the store's
+and the gateway's alike, `dbo` unless said otherwise, created with the tables
+when it is missing; the collation, which decides whether stream names are
+case-sensitive; the partitioning mode, one of none, by tenant, which gives
+each tenant its own sequence, or by the archived flag, which keeps deleted
+streams' events out of every live read, one mode rather than one switch per
+scheme because a table has one partition scheme; and whether ordinals are
+assigned (seam 6). Changing any of them means a new database: a store
+initialized in one schema is found nowhere else, and the marker records each
+so a changed configuration is refused rather than served.
 
 ### 4. Positions are the store's sequence
 
@@ -145,15 +149,20 @@ refused there and everything else still works.
 A persistent-subscription group is a checkpoint the server keeps and a set of
 events in flight to one consumer. The checkpoint, the group's settings and its
 parked messages are rows in the gateway's own tables, through the `IGroupStore`
-port; the in-flight events, their retry counts and their deadlines are in
+port and its one implementation, `GroupStore`, over the context of seam 7;
+the in-flight events, their retry counts and their deadlines are in
 memory, in `PersistentGroup`, in the one instance that holds the group's lease.
-The lease is a row taken with a merge that only a free, expired or already
-owned lease lets through, renewed while the consumer stays, released when it
+The lease is a row that only a free, expired or already owned lease lets an
+instance write, two instances racing for it told apart by the row's
+concurrency tokens, renewed while the consumer stays, released when it
 leaves; a second instance asked for the group learns who owns it and refuses,
 until in-cluster forwarding lands. The checkpoint is the last position every
 delivered event up to which is done: acknowledged, skipped, or parked. Parked
 messages are rows, one per event, so one can be replayed by itself; the
-reference keeps them in a stream and can only replay them together.
+reference keeps them in a stream and can only replay them together. A parked
+row carries every number its event has, the global position as its key, the
+revision within its stream, and the ordinal when the group is numbered by
+ordinal, so a replay addresses it by whichever number the group speaks.
 
 `IStoreTail` is the seam for liveness. One tailer per process runs the store's
 own high-water agent, the part of its async daemon that finds that mark, and
@@ -214,6 +223,36 @@ Ordinals are per tenant by construction, the sequencer partitions by tenant and
 the indexes lead with the tenant column, so a read across all tenants has no
 single ordinal sequence and is served under global numbering only.
 
+### 7. The gateway's own tables are one model
+
+The tables the gateway adds beside the store's, groups, parked messages,
+leases, the sequencer's progress and the marker, are read and written
+through one EF Core context, `NightingaleDbContext`, in the server library.
+It is one model every backend shares with a provider swap, so the Marten
+backend brings Npgsql rather than a second group store, and it takes the
+plain reads and writes out of SQL strings. Three things stay raw in the
+backend because their shape is the point: the sequencer's batch, the tail's
+contiguous-prefix query, and the initializer's marker access, which runs
+before the schema has been brought up to date, when a column the model
+expects may not exist yet. The virtual-stream reader stays raw too: its SQL
+is what the filtered indexes were declared for.
+
+The context deviates on purpose from the toolkit's EF rules for a context
+that owns its tables. It owns nothing: the backend's schema feature creates
+the tables, so one initializer applies one schema under the marker protocol
+and the context never migrates; the keys are the natural ones the contract
+addresses a group by, tenant, stream and group; the names follow the store's
+convention and the tables sit in the store's schema. A unit test builds the
+model with the provider's type mappings and holds it equal to the schema
+feature's definition, column for column, so the two cannot drift apart.
+
+The group store's plain reads and writes run on the in-memory provider in
+unit tests. That provider has no transactions, no merge, no collation and no
+filtered indexes, so it stands in for exactly those reads and writes and for
+nothing else; the lease is written so that it needs nothing else, an
+optimistic write settled by the row's concurrency tokens, and the integration
+suite still runs the same tests on SQL Server.
+
 ## Conventions the code relies on
 
 - **Expected states** are the reference client's: any, no stream, stream
@@ -238,7 +277,9 @@ single ordinal sequence and is served under global numbering only.
 
 - `*.Tests` projects are unit tests and need nothing running: the service
   against a strict fake of the port and a tail a test moves by hand, the
-  client against a scripted call, the conversions, the marker comparison.
+  client against a scripted call, the conversions, the marker comparison, the
+  group store on the in-memory provider, and the model against the schema
+  feature.
 - `*.Tests.Integration` projects need the local SQL Server and run only with
   `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
   path, and the two guards above. Each creates its databases and drops them.

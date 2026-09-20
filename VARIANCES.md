@@ -79,8 +79,11 @@ cannot, and the store keeps headers as a JSON object already.
 back all of them, or the first so many; one cannot be picked out.
 
 **Nightingale:** parked messages are rows, one per group and event, and
-replay puts back all of them or the one at a position; a replayed message
-keeps its retry count.
+replay puts back all of them or the one at a number in the group's numbering,
+a revision for a group over a plain stream, a position over `$all` or a
+virtual stream, an ordinal for a group created under ordinal numbering; the
+row keeps all three, so the same message is addressable whichever way the
+group counts. A replayed message keeps its retry count.
 
 **Why:** rows have keys; a log does not. Nothing is lost by the difference.
 

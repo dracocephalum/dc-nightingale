@@ -121,6 +121,32 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Start_WithASchema_ShouldPutEveryTableInItServeItAgainAndRefuseAnotherSchema()
+    {
+        // Arrange & Act: the store's tables and the gateway's alike land in the configured schema,
+        // a second start finds the store there, and a start configured for another schema does not.
+        using (var first = await TestDatabases.StartHostAsync(_name, options => options.Store.Schema = "events"))
+        {
+            var appended = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", Body)], TestContext.Current.CancellationToken);
+            appended.Position.ShouldBe(1);
+            await first.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (var second = await TestDatabases.StartHostAsync(_name, options => options.Store.Schema = "events"))
+        {
+            await second.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
+
+        // Assert
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'events' AND name IN ('pc_events', 'nightingale_store', 'nightingale_groups')")).ShouldBe(3);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'dbo'")).ShouldBe(0);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT schema_name FROM events.nightingale_store")).ShouldBe("events");
+        refused.Message.ShouldContain("not initialized by Nightingale");
+    }
+
+    [Fact]
     public async Task Start_WithACollation_ShouldCreateTheDatabaseWithItAndMakeStreamNamesCaseSensitive()
     {
         // Arrange

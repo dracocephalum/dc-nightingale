@@ -44,6 +44,9 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         // Nullable, and read as false when null: a store initialized before the feature existed
         // has no value, and the column is added to it by the ordinary schema migration.
         store.AddColumn("assign_ordinals", "bit");
+
+        // Nullable for the same reason: null reads as the store's default schema.
+        store.AddColumn("schema_name", "varchar(128)");
         store.AddColumn("collation", "varchar(128)").NotNull();
         store.AddColumn("created_at", "datetimeoffset").NotNull();
         store.AddColumn("created_by", "varchar(200)").NotNull();
@@ -63,6 +66,8 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         parked.AddColumn("stream", "varchar(250)").NotNull().AsPrimaryKey();
         parked.AddColumn("group_name", "varchar(250)").NotNull().AsPrimaryKey();
         parked.AddColumn("position", "bigint").NotNull().AsPrimaryKey();
+        parked.AddColumn("revision", "bigint").NotNull();
+        parked.AddColumn("ordinal", "bigint");
         parked.AddColumn("event_id", "uniqueidentifier").NotNull();
         parked.AddColumn("reason", "nvarchar(1000)").NotNull();
         parked.AddColumn("attempts", "int").NotNull();

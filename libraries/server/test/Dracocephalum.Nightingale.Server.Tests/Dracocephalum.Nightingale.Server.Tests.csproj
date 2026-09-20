@@ -8,4 +8,10 @@
     <ProjectReference Include="../../src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
   </ItemGroup>
 
+  <!-- The group store's plain reads and writes run against the in-memory provider here; the
+       statements whose shape matters run against SQL Server in the integration project. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+  </ItemGroup>
+
 </Project>

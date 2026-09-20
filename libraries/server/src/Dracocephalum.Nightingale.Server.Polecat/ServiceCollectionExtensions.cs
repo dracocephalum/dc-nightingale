@@ -1,6 +1,7 @@
 using JasperFx;
 using JasperFx.Events;
 using JasperFx.MultiTenancy;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -73,6 +74,7 @@ public static class ServiceCollectionExtensions
         services.AddPolecat((StoreOptions store) =>
         {
             store.Connection(connectionString);
+            store.DatabaseSchemaName = options.Store.Schema;
             store.Events.StreamIdentity = StreamIdentity.AsString;
             store.Events.TenancyStyle = TenancyStyle.Conjoined;
             store.EventGraph.UseTenantPartitionedEvents = options.Store.Partitioning == NightingaleOptions.StoreSettings.PartitioningMode.Tenant;
@@ -87,11 +89,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString, options.Store.AssignOrdinals));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
-        services.AddSingleton<IGroupStore>(provider => new PolecatGroupStore(
-            connectionString,
-            provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
-            JasperFx.StorageConstants.DefaultTenantId,
-            provider.GetService<TimeProvider>() ?? TimeProvider.System));
+        services.AddNightingaleGroupStore(options.Store.Schema, JasperFx.StorageConstants.DefaultTenantId, context => context.UseSqlServer(connectionString));
         services.AddSingleton<IHostedService>(provider => new StoreInitializer(
             provider.GetRequiredService<IDocumentStore>(),
             connectionString,
