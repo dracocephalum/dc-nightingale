@@ -19,5 +19,5 @@ public sealed class ServerFeaturesService(IStreamStore store) : ServerFeatures.S
 
     /// <inheritdoc/>
     public override Task<PingResponse> Ping(PingRequest request, ServerCallContext context) =>
-        Task.FromResult(new PingResponse { Version = Version, Ordinals = store.OrdinalsEnabled });
+        Task.FromResult(new PingResponse { Version = Version, SupportsOrdinals = store.OrdinalsEnabled });
 }

@@ -178,7 +178,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         var marker = new StoreMarker(
             StoreMarker.CurrentSchemaVersion,
             options.Store.Partitioning,
-            options.Store.Ordinals,
+            options.Store.AssignOrdinals,
             collation,
             timeProvider.GetUtcNow(),
             typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown");
@@ -186,18 +186,18 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         {
             insert.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
-                "INSERT INTO {0} (id, schema_version, partitioning, ordinals, collation, created_at, created_by) VALUES (1, @version, @partitioning, @ordinals, @collation, @created_at, @created_by)",
+                "INSERT INTO {0} (id, schema_version, partitioning, assign_ordinals, collation, created_at, created_by) VALUES (1, @version, @partitioning, @ordinals, @collation, @created_at, @created_by)",
                 MarkerTable);
             insert.Parameters.AddWithValue("@version", marker.SchemaVersion);
             insert.Parameters.AddWithValue("@partitioning", marker.Partitioning.ToString());
-            insert.Parameters.AddWithValue("@ordinals", marker.Ordinals);
+            insert.Parameters.AddWithValue("@ordinals", marker.AssignOrdinals);
             insert.Parameters.AddWithValue("@collation", marker.Collation);
             insert.Parameters.AddWithValue("@created_at", marker.CreatedAt);
             insert.Parameters.AddWithValue("@created_by", marker.CreatedBy);
             await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        LogInitializedStore(name, collation, marker.Partitioning, marker.Ordinals);
+        LogInitializedStore(name, collation, marker.Partitioning, marker.AssignOrdinals);
     }
 
     /// <summary>After a change is applied, the marker says which version of the schema the store now has.</summary>
@@ -232,7 +232,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
             CultureInfo.InvariantCulture,
             "SELECT schema_version, partitioning, collation, created_at, created_by, {1} FROM {0} WHERE id = 1",
             MarkerTable,
-            await HasColumnAsync(connection, "ordinals", cancellationToken).ConfigureAwait(false) ? "ordinals" : "CAST(NULL AS bit)");
+            await HasColumnAsync(connection, "assign_ordinals", cancellationToken).ConfigureAwait(false) ? "assign_ordinals" : "CAST(NULL AS bit)");
         await using var reader = await select.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {

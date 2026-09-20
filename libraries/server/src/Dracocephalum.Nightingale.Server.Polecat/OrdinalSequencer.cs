@@ -7,31 +7,31 @@ using Microsoft.Extensions.Logging;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// The numberer: one per cluster, on the same lease persistent-subscription groups use, walking
+/// The sequencer: one per cluster, on the same lease persistent-subscription groups use, walking
 /// the events table behind the high-water mark in batches and giving every event its place within
 /// its category stream and its event-type stream, each batch continuing from the last ordinal of
 /// each key. The append path is untouched, because numbering at append time would serialize every
 /// append to a category; the price is that ordinals lag the high-water mark by this loop's cadence,
 /// which is the tail's. A batch and the progress row are one transaction, and the progress row is
-/// read under an update lock, so a second numberer whose lease overlapped a takeover continues
+/// read under an update lock, so a second sequencer whose lease overlapped a takeover continues
 /// from what the first committed rather than numbering anything twice. An event archived or removed
 /// after numbering keeps or vacates its ordinal, and the next ordinal of the key is never reused.
 /// </summary>
 /// <param name="leases">Where the lease is taken.</param>
-/// <param name="tail">The head the numberer never passes.</param>
+/// <param name="tail">The head the sequencer never passes.</param>
 /// <param name="registry">The instance id the lease is taken under.</param>
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="schemaName">The schema the tables live in.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class OrdinalLinker(
+internal sealed partial class OrdinalSequencer(
     IGroupStore leases,
     IStoreTail tail,
     GroupRegistry registry,
     string connectionString,
     string schemaName,
     TimeProvider timeProvider,
-    ILogger<OrdinalLinker> logger) : IHostedService, IDisposable
+    ILogger<OrdinalSequencer> logger) : IHostedService, IDisposable
 {
     /// <summary>The lease every instance competes for.</summary>
     public const string LeaseName = "ordinals";

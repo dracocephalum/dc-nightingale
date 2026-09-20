@@ -3,4 +3,4 @@
 using Dracocephalum.Nightingale.Examples.CategoryOrdinals;
 using Dracocephalum.Nightingale.Examples.Common;
 
-return await ExampleProgram.RunAsync(Scenario.RunAsync, report => $"Done: ordinals {string.Join(", ", report.Ordinals)} read, {string.Join(", ", report.AfterDelete)} after the delete; live ordinal {report.LiveOrdinal}.");
+return await ExampleProgram.RunAsync(Scenario.RunAsync, report => $"Done: ordinals {string.Join(", ", report.Ordinals)} read, {string.Join(", ", report.AfterDelete)} after the delete; live ordinal {report.LiveOrdinal}; the group's checkpoint {report.GroupCheckpoint}.");

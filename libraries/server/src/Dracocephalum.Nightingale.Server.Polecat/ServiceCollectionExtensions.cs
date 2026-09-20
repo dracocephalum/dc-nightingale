@@ -81,10 +81,10 @@ public static class ServiceCollectionExtensions
             store.Events.EnableCausationId = true;
             store.Events.EnableHeaders = true;
             store.AutoCreateSchemaObjects = AutoCreate.None;
-            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.Ordinals), connectionString);
+            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals), connectionString);
         }).UseLightweightSessions();
 
-        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString, options.Store.Ordinals));
+        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString, options.Store.AssignOrdinals));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddSingleton<IGroupStore>(provider => new PolecatGroupStore(
@@ -99,19 +99,19 @@ public static class ServiceCollectionExtensions
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetRequiredService<ILogger<StoreInitializer>>()));
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
-        if (options.Store.Ordinals)
+        if (options.Store.AssignOrdinals)
         {
-            // After the tailer, so the numberer's first look at the head is a real one. The
+            // After the tailer, so the sequencer's first look at the head is a real one. The
             // registry is the server's, but a host that registers only the backend still numbers.
             services.TryAddSingleton<GroupRegistry>();
-            services.AddSingleton<IHostedService>(provider => new OrdinalLinker(
+            services.AddSingleton<IHostedService>(provider => new OrdinalSequencer(
                 provider.GetRequiredService<IGroupStore>(),
                 provider.GetRequiredService<IStoreTail>(),
                 provider.GetRequiredService<GroupRegistry>(),
                 connectionString,
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
-                provider.GetRequiredService<ILogger<OrdinalLinker>>()));
+                provider.GetRequiredService<ILogger<OrdinalSequencer>>()));
         }
 
         return services;

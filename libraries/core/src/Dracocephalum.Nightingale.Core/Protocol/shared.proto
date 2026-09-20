@@ -14,7 +14,7 @@
 //             two ordinals subtracted are a count. Only under ordinal
 //             numbering (see Numbering), only for $ce- and $et-, and only
 //             on a store initialized with the feature. Ordinals are assigned
-//             after commit by one numberer per cluster, so they lag the
+//             after commit by one sequencer per cluster, so they lag the
 //             global head by its cadence; a removed event leaves a hole the
 //             reader skips.
 //

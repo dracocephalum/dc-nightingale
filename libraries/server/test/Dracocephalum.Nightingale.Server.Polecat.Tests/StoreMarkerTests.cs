@@ -110,8 +110,8 @@ public sealed class StoreMarkerTests
     public void DifferencesFrom_WhenOrdinalsWereTurnedOnSince_ShouldSayThereIsNoBackfill()
     {
         // Arrange
-        var sut = Marker(ordinals: false);
-        var settings = new NightingaleOptions.StoreSettings { Ordinals = true };
+        var sut = Marker(assignOrdinals: false);
+        var settings = new NightingaleOptions.StoreSettings { AssignOrdinals = true };
 
         // Act
         var differences = sut.DifferencesFrom(settings);
@@ -124,8 +124,8 @@ public sealed class StoreMarkerTests
     public void DifferencesFrom_WhenOrdinalsWereTurnedOffSince_ShouldRefuse()
     {
         // Arrange
-        var sut = Marker(ordinals: true);
-        var settings = new NightingaleOptions.StoreSettings { Ordinals = false };
+        var sut = Marker(assignOrdinals: true);
+        var settings = new NightingaleOptions.StoreSettings { AssignOrdinals = false };
 
         // Act
         var differences = sut.DifferencesFrom(settings);
@@ -134,6 +134,6 @@ public sealed class StoreMarkerTests
         differences.ShouldHaveSingleItem().ShouldContain("initialized with ordinals");
     }
 
-    private static StoreMarker Marker(int schemaVersion = StoreMarker.CurrentSchemaVersion, NightingaleOptions.StoreSettings.PartitioningMode partitioning = NightingaleOptions.StoreSettings.PartitioningMode.None, string collation = "SQL_Latin1_General_CP1_CI_AS", bool ordinals = false) =>
-        new(schemaVersion, partitioning, ordinals, collation, Created, "1.0.0+abcdef12");
+    private static StoreMarker Marker(int schemaVersion = StoreMarker.CurrentSchemaVersion, NightingaleOptions.StoreSettings.PartitioningMode partitioning = NightingaleOptions.StoreSettings.PartitioningMode.None, string collation = "SQL_Latin1_General_CP1_CI_AS", bool assignOrdinals = false) =>
+        new(schemaVersion, partitioning, assignOrdinals, collation, Created, "1.0.0+abcdef12");
 }

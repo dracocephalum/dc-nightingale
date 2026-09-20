@@ -21,8 +21,8 @@ option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
 
 service PersistentSubscriptions {
   // Creates a group over a stream, $all or a virtual stream, with its
-  // settings and its starting position. Errors: GROUP_EXISTS,
-  // INVALID_STREAM_NAME, INVALID_ARGUMENT.
+  // settings, its starting position and its numbering. Errors: GROUP_EXISTS,
+  // INVALID_STREAM_NAME, ORDINALS_NOT_ENABLED, INVALID_ARGUMENT.
   rpc Create (CreateRequest) returns (CreateResponse);
 
   // Deletes a group: its checkpoint and its parked messages go with it, and a
@@ -83,6 +83,15 @@ message GroupSettings {
   // How many consumers may connect at once. Only 1 is served today; see
   // PENDING.md for competing consumers.
   int32 max_subscriber_count = 10;
+
+  // How the group's numbers are meant, fixed when the group is created: its
+  // start position, its checkpoint, and the position a parked message is
+  // replayed by are all in this numbering, and every event it delivers
+  // carries its ordinal under ORDINAL. See "Numbering" in shared.proto.
+  // ORDINAL is refused with INVALID_ARGUMENT on a plain stream or $all and
+  // with ORDINALS_NOT_ENABLED on a store without ordinals. A consumer that
+  // wants the other numbering creates another group.
+  Numbering numbering = 11;
 }
 
 message DeleteGroupRequest {
@@ -144,7 +153,9 @@ message PersistentReadResponse {
 message PersistentSubscriptionConfirmed {
   string subscription_id = 1;
   // The group's checkpoint at that moment: the last position every event up
-  // to which is acknowledged, or -1 when nothing is yet.
+  // to which is acknowledged, or -1 when nothing is yet. In the group's
+  // numbering: a revision for a stream, a position for $all, a position or
+  // an ordinal for a virtual stream as the group was created.
   sint64 checkpoint = 2;
 }
 
@@ -161,7 +172,7 @@ message ReplayParkedRequest {
   oneof which {
     // Every parked message, in the order they were parked.
     google.protobuf.Empty all = 3;
-    // The parked message with this position.
+    // The parked message with this position, in the group's numbering.
     sint64 position = 4;
   }
 }

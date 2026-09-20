@@ -95,7 +95,7 @@ public interface IStreamStore
     /// <summary>
     /// Finds the bounds of a virtual stream under ordinal numbering: the lowest and highest ordinal
     /// assigned so far. Ordinals are assigned after commit, so the last one lags the stream's last
-    /// event by the numberer's cadence; a numbered event that was since removed is still counted
+    /// event by the sequencer's cadence; a numbered event that was since removed is still counted
     /// in the bounds and read as a hole.
     /// </summary>
     /// <param name="stream">The virtual stream.</param>

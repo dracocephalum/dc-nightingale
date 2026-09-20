@@ -9,8 +9,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// The gateway's own tables in the store, declared as one feature beside the store's so the same
 /// migration creates them and the same assertion notices when one is missing: the marker row that
 /// says the store is ours, the persistent-subscription groups with their checkpoints, their parked
-/// messages one row each, the leases that say which instance runs a group or the numberer, and the
-/// numberer's progress, the position every event up to which has its ordinals.
+/// messages one row each, the leases that say which instance runs a group or the sequencer, and the
+/// sequencer's progress, the position every event up to which has its ordinals.
 /// </summary>
 /// <param name="schemaName">The schema the store's tables live in.</param>
 internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchemaBase(Identifier, new SqlServerMigrator())
@@ -30,7 +30,7 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
     /// <summary>The leases table.</summary>
     public const string LeasesTable = "nightingale_leases";
 
-    /// <summary>The numberer's progress table: one row, the position numbered through.</summary>
+    /// <summary>The sequencer's progress table: one row, the position numbered through.</summary>
     public const string OrdinalsTable = "nightingale_ordinals";
 
     /// <inheritdoc/>
@@ -43,7 +43,7 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
 
         // Nullable, and read as false when null: a store initialized before the feature existed
         // has no value, and the column is added to it by the ordinary schema migration.
-        store.AddColumn("ordinals", "bit");
+        store.AddColumn("assign_ordinals", "bit");
         store.AddColumn("collation", "varchar(128)").NotNull();
         store.AddColumn("created_at", "datetimeoffset").NotNull();
         store.AddColumn("created_by", "varchar(200)").NotNull();

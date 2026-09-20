@@ -50,6 +50,6 @@ public sealed class ServerFeaturesServiceTests : IAsyncLifetime
 
         // Assert
         response.Version.ShouldNotBeNullOrWhiteSpace();
-        response.Ordinals.ShouldBeTrue();
+        response.SupportsOrdinals.ShouldBeTrue();
     }
 }

@@ -30,7 +30,7 @@ twenty terabytes, about a hundred services connected over gRPC.
 | `core` | the wire contract (`Protocol/*.proto`) and the domain types both sides share: positions, expected states, event data and records, exceptions | any store, any transport detail |
 | `client` | `NightingaleClient` over the generated stub, and the mapping from wire failure reasons to the shared exceptions | the server's internals |
 | `server` | the service implementations, the port a backend implements, `IStreamStore`, and the tail every subscription waits on, `IStoreTail` | any particular store |
-| `server` (Polecat backend) | `PolecatStreamStore`, the tailer over the store's high-water agent, the numberer that assigns ordinals, the schema additions, the initializer that owns the database, and the default host | the wire |
+| `server` (Polecat backend) | `PolecatStreamStore`, the tailer over the store's high-water agent, the sequencer that assigns ordinals, the schema additions, the initializer that owns the database, and the default host | the wire |
 
 The port is deliberately small: append with an expected state, read a bounded
 slice. Everything the contract adds, paging, the head-first read order, error
@@ -168,31 +168,31 @@ follow the mark without a gap, so an append that has returned is never on the
 wrong side of "now". It never passes a gap; giving up an abandoned gap is the
 poller's call, after the store's threshold.
 
-### 6. Ordinals are assigned after commit, by one numberer
+### 6. Ordinals are assigned after commit, by one sequencer
 
 A virtual stream's positions are sparse, so two of them subtracted are not a
 count. The reference gets dense numbers from link events with their own
 revisions; ours are two nullable columns on the events table, the category
 ordinal and the type ordinal, on a store initialized with
-`Nightingale:Store:Ordinals`. Each has a filtered index over the numbered rows
+`Nightingale:Store:AssignOrdinals`. Each has a filtered index over the numbered rows
 only, leading with the tenant column, so a read by ordinal is one seek and can
 never return an unnumbered row. The columns are declared through the same
 patched schema as the category column and recorded in the marker row, because
 they shape the table: a store initialized without them refuses the setting
 until a backfill exists, and one initialized with them refuses to run without.
 
-`OrdinalLinker` is the numberer: one per cluster, on the same lease rows the
+`OrdinalSequencer` is the sequencer: one per cluster, on the same lease rows the
 persistent-subscription groups use, walking the events table behind the
 high-water mark in batches and giving each event its place within its
 category and its type, each batch continuing from the last ordinal of each
 key found with one backward seek. The append path is untouched, because
 numbering at append time would serialize every append to a category. A batch
 and the progress row, the position numbered through, are one transaction, and
-the progress row is read under an update lock, so a numberer whose lease
+the progress row is read under an update lock, so a sequencer whose lease
 overlapped a takeover continues from what the other committed. The price is
-lag: ordinals trail the high-water mark by the numberer's cadence, which is
+lag: ordinals trail the high-water mark by the sequencer's cadence, which is
 the tail's, and a removed event leaves a numbered hole the reader skips and
-the numberer never reuses, which is what a link whose event is gone does in
+the sequencer never reuses, which is what a link whose event is gone does in
 the reference.
 
 The numbering is the caller's explicit choice per read or subscription,
@@ -204,8 +204,15 @@ position it always carries; a consumer keeps the numbering with its checkpoint
 and never resumes under the other. A bounded read is a snapshot of what is
 numbered and needs no head, because a batch is atomic. A subscription waits
 on the tail like every other, then looks for newly numbered rows; while the
-numberer is behind the head it woke for, it looks again on a short interval
-rather than waiting for an advance a quiet store would never bring.
+sequencer is behind the head it woke for, it looks again on a short interval
+rather than waiting for an advance a quiet store would never bring. A
+persistent-subscription group chooses its numbering once, when it is created,
+and keeps it for life: its start, its checkpoint and the key of a parked
+message are all in that numbering, so a consumer resuming the group can never
+mix the two, and one that wants the other numbering creates another group.
+Ordinals are per tenant by construction, the sequencer partitions by tenant and
+the indexes lead with the tenant column, so a read across all tenants has no
+single ordinal sequence and is served under global numbering only.
 
 ## Conventions the code relies on
 

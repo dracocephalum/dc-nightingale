@@ -42,6 +42,20 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
             throw NightingaleErrors.InvalidArgument($"Group settings: {exception.ParamName} is out of range.");
         }
 
+        // The numbering is the group's for life, so it is checked once, here, the way a read checks it.
+        if (settings.Numbering == Numbering.Ordinal)
+        {
+            if (!StreamNames.TryParseVirtual(stream, out _))
+            {
+                throw NightingaleErrors.InvalidArgument("Ordinal numbering applies to $ce- and $et- streams only.");
+            }
+
+            if (!store.OrdinalsEnabled)
+            {
+                throw NightingaleErrors.OrdinalsNotEnabled(stream);
+            }
+        }
+
         try
         {
             await groups.CreateAsync(new GroupDefinition(stream, group, settings, -1), context.CancellationToken).ConfigureAwait(false);

@@ -22,7 +22,7 @@ public sealed class PolecatGroupStoreTests(SqlServerTestDatabase database)
         // Arrange
         var sut = Store();
         var (stream, group) = Names();
-        var settings = GroupSettings.Default with { Start = StreamPosition.From(3), MaxRetryCount = 4, MessageTimeout = TimeSpan.FromSeconds(7) };
+        var settings = GroupSettings.Default with { Start = StreamPosition.From(3), MaxRetryCount = 4, MessageTimeout = TimeSpan.FromSeconds(7), Numbering = Numbering.Ordinal };
 
         // Act
         await sut.CreateAsync(new GroupDefinition(stream, group, settings, -1), TestContext.Current.CancellationToken);

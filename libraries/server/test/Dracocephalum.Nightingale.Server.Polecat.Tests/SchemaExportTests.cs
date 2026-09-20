@@ -76,7 +76,7 @@ public sealed class SchemaExportTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.Ordinals = true);
+        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.AssignOrdinals = true);
         using var provider = services.BuildServiceProvider();
         var store = provider.GetRequiredService<IDocumentStore>();
         var path = Path.Combine(Path.GetTempPath(), "nightingale-schema-" + Guid.NewGuid().ToString("N") + ".sql");

@@ -21,7 +21,7 @@ public sealed class StoreSettingsTests
     public void Validate_WhenOrdinalsMeetTenantPartitioning_ShouldRefuse()
     {
         // Arrange: ordinals number one global sequence; a sequence per tenant has none.
-        var sut = new NightingaleOptions.StoreSettings { Ordinals = true, Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant };
+        var sut = new NightingaleOptions.StoreSettings { AssignOrdinals = true, Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant };
 
         // Act
         var exception = Should.Throw<InvalidOperationException>(sut.Validate);

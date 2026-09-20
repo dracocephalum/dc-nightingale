@@ -14,6 +14,9 @@ namespace Dracocephalum.Nightingale;
 /// <param name="CheckpointLowerBound">The fewest acknowledgements a timed checkpoint write needs.</param>
 /// <param name="BufferSize">How many events the server reads ahead of the consumer.</param>
 /// <param name="MaxSubscriberCount">How many consumers may connect at once; only one is served today.</param>
+/// <param name="Numbering">How the group's numbers are meant, fixed when it is created: its start, its checkpoint and
+/// the position a parked message is replayed by. <see cref="Numbering.Ordinal"/> only over a virtual stream on a
+/// store with ordinals; a consumer that wants the other numbering creates another group.</param>
 public sealed record GroupSettings(
     StreamPosition Start,
     TimeSpan MessageTimeout,
@@ -22,7 +25,8 @@ public sealed record GroupSettings(
     TimeSpan CheckpointAfter,
     int CheckpointLowerBound,
     int BufferSize,
-    int MaxSubscriberCount)
+    int MaxSubscriberCount,
+    Numbering Numbering = Numbering.Global)
 {
     /// <summary>The defaults.</summary>
     public static GroupSettings Default { get; } = new(

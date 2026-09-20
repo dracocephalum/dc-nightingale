@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 
 /// <summary>
 /// The virtual streams under ordinal numbering, against a store initialized with ordinals: the
-/// numberer runs in the host exactly as it would in production, behind the tail, on its lease,
+/// sequencer runs in the host exactly as it would in production, behind the tail, on its lease,
 /// and the tests wait for its progress rather than numbering anything themselves. Every test uses
 /// a database of its own, dropped at the end whatever happened, one at a time.
 /// </summary>
@@ -25,7 +25,7 @@ public sealed class OrdinalTests : IAsyncLifetime
     {
         _host = await TestDatabases.StartHostAsync(_name, options =>
         {
-            options.Store.Ordinals = true;
+            options.Store.AssignOrdinals = true;
             options.Deletion.AllowDelete = true;
             options.Deletion.AllowTombstone = true;
         });
@@ -43,7 +43,7 @@ public sealed class OrdinalTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Numberer_ShouldNumberEachCategoryAndTypeDenselyInPositionOrder()
+    public async Task Sequencer_ShouldNumberEachCategoryAndTypeDenselyInPositionOrder()
     {
         // Arrange
         var sut = Store;
@@ -72,7 +72,7 @@ public sealed class OrdinalTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Numberer_WhenAStreamIsRemoved_ShouldLeaveAHoleAndNeverReuseItsOrdinals()
+    public async Task Sequencer_WhenAStreamIsRemoved_ShouldLeaveAHoleAndNeverReuseItsOrdinals()
     {
         // Arrange: three orders numbered 0, 1, 2; the middle one is deleted, then a fourth arrives.
         var sut = Store;
@@ -109,7 +109,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         _host = null;
 
         // Act
-        using (var again = await TestDatabases.StartHostAsync(_name, options => options.Store.Ordinals = true))
+        using (var again = await TestDatabases.StartHostAsync(_name, options => options.Store.AssignOrdinals = true))
         {
             await again.StopAsync(TestContext.Current.CancellationToken);
         }
@@ -117,7 +117,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
 
         // Assert
-        (await TestDatabases.ScalarAsync<bool>(_name, "SELECT ordinals FROM dbo.nightingale_store")).ShouldBeTrue();
+        (await TestDatabases.ScalarAsync<bool>(_name, "SELECT assign_ordinals FROM dbo.nightingale_store")).ShouldBeTrue();
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name IN ('ix_pc_events_category_ordinal', 'ix_pc_events_type_ordinal')")).ShouldBe(2);
         refused.Message.ShouldContain("initialized with ordinals");
     }
@@ -126,7 +126,7 @@ public sealed class OrdinalTests : IAsyncLifetime
 
     private static EventData Event(string type) => new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
-    /// <summary>Waits for the numberer to pass a position, which it does on the tail's cadence.</summary>
+    /// <summary>Waits for the sequencer to pass a position, which it does on the tail's cadence.</summary>
     private async Task NumberedAsync(long position)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);

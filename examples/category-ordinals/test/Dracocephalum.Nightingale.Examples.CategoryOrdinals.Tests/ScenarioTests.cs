@@ -29,5 +29,7 @@ public sealed class ScenarioTests
         report.LiveOrdinal.ShouldBe(3);
         report.AfterDelete.ShouldBe([2L, 3L]);
         report.AfterDeleteHead.ShouldBe(new StreamHead(0, 3));
+        report.GroupOrdinals.ShouldBe([2L, 3L]);
+        report.GroupCheckpoint.ShouldBe(3);
     }
 }

@@ -186,6 +186,51 @@ public sealed class PersistentGroupTests
         A.CallTo(() => _groups.SaveCheckpointAsync("orders-1", "g", 0, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
+    [Fact]
+    public async Task Delivery_OfAnOrdinalGroup_ShouldKeyTheCheckpointAndTheParkedRowByOrdinal()
+    {
+        // Arrange: a category group created under ordinal numbering, from the start; two numbered
+        // events at sparse positions, and the sequencer level with the tail so the feed waits on it.
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 5) with { Ordinal = 0 }, Record("orders-2", 0, 17) with { Ordinal = 1 }]);
+        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).Returns(20L);
+        await using var sut = Group("$ce-orders", -1, 2, settings => settings with { Start = StreamPosition.Start, Numbering = Numbering.Ordinal, CheckpointUpperBound = 1 });
+
+        // Act
+        var first = await Next(sut);
+        var second = await Next(sut);
+        await sut.AcknowledgeAsync([first.Record.Id], TestContext.Current.CancellationToken);
+        await sut.RefuseAsync([second.Record.Id], NackAction.Park, "no", TestContext.Current.CancellationToken);
+
+        // Assert: every number the group keeps is an ordinal, never the position.
+        first.Record.Ordinal.ShouldBe(0);
+        second.Record.Ordinal.ShouldBe(1);
+        sut.Checkpoint.ShouldBe(1);
+        A.CallTo(() => _groups.SaveCheckpointAsync("$ce-orders", "g", 1, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.Position == 1 && parked.EventId == second.Record.Id), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task Delivery_OfAnOrdinalGroupFromTheEnd_ShouldStartAfterTheLastOrdinal()
+    {
+        // Arrange: the category's last ordinal is 4 when the group starts, so the feed begins at 5.
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 4));
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 5, 500, A<CancellationToken>._))
+            .Returns([Record("orders-9", 0, 33) with { Ordinal = 5 }]);
+        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).Returns(20L);
+        await using var sut = Group("$ce-orders", -1, 1, settings => settings with { Numbering = Numbering.Ordinal });
+
+        // Act
+        var first = await Next(sut);
+
+        // Assert
+        first.Record.Ordinal.ShouldBe(5);
+    }
+
     private static EventRecord Record(string stream, long revision, long position) =>
         new(Guid.NewGuid(), stream, revision, position, "order_placed", Now, Encoding.UTF8.GetBytes("{}"), new JsonObject());
 

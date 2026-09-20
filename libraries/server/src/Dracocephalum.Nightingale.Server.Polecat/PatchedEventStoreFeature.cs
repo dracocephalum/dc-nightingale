@@ -59,7 +59,7 @@ internal sealed class PatchedEventStoreFeature(IFeatureSchema inner, bool ordina
                     continue;
                 }
 
-                // The ordinal indexes are not filtered on the archived flag: the numberer finds the
+                // The ordinal indexes are not filtered on the archived flag: the sequencer finds the
                 // last ordinal of a key through them, and an archived event keeps its ordinal so
                 // the next one is never reused. The reader skips archived rows as holes.
                 table.AddColumn(CategoryOrdinalColumn, "bigint");

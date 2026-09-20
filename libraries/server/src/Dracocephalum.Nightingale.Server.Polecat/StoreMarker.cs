@@ -8,14 +8,14 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="SchemaVersion">The version of the gateway's schema additions.</param>
 /// <param name="Partitioning">How the events table is partitioned.</param>
-/// <param name="Ordinals">Whether the events table carries the ordinal columns; false for a store initialized before the feature existed.</param>
+/// <param name="AssignOrdinals">Whether the events table carries the ordinal columns; false for a store initialized before the feature existed.</param>
 /// <param name="Collation">The database's collation, as SQL Server reports it.</param>
 /// <param name="CreatedAt">When the store was initialized.</param>
 /// <param name="CreatedBy">The informational version of the server that initialized it.</param>
 internal sealed record StoreMarker(
     int SchemaVersion,
     NightingaleOptions.StoreSettings.PartitioningMode Partitioning,
-    bool Ordinals,
+    bool AssignOrdinals,
     string Collation,
     DateTimeOffset CreatedAt,
     string CreatedBy)
@@ -45,11 +45,11 @@ internal sealed record StoreMarker(
             differences.Add($"Nightingale:Store:Partitioning is {settings.Partitioning} but the store was initialized with {Partitioning}");
         }
 
-        if (Ordinals != settings.Ordinals)
+        if (AssignOrdinals != settings.AssignOrdinals)
         {
-            differences.Add(Ordinals
-                ? "Nightingale:Store:Ordinals is false but the store was initialized with ordinals"
-                : "Nightingale:Store:Ordinals is true but the store was initialized without ordinals, and there is no backfill yet");
+            differences.Add(AssignOrdinals
+                ? "Nightingale:Store:AssignOrdinals is false but the store was initialized with ordinals"
+                : "Nightingale:Store:AssignOrdinals is true but the store was initialized without ordinals, and there is no backfill yet");
         }
 
         if (settings.Collation is not null && !string.Equals(settings.Collation, Collation, StringComparison.OrdinalIgnoreCase))

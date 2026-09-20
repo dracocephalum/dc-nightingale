@@ -123,7 +123,8 @@ public static class WireConversions
             settings.CheckpointAfter?.ToTimeSpan() ?? defaults.CheckpointAfter,
             settings.CheckpointLowerBound > 0 ? settings.CheckpointLowerBound : defaults.CheckpointLowerBound,
             settings.BufferSize > 0 ? settings.BufferSize : defaults.BufferSize,
-            settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount);
+            settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount,
+            settings.Numbering.ToNumbering());
     }
 
     /// <summary>Maps group settings to their wire form.</summary>
@@ -141,6 +142,7 @@ public static class WireConversions
             CheckpointLowerBound = settings.CheckpointLowerBound,
             BufferSize = settings.BufferSize,
             MaxSubscriberCount = settings.MaxSubscriberCount,
+            Numbering = settings.Numbering.ToWire(),
         };
         if (settings.Start.IsEnd)
         {

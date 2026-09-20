@@ -25,6 +25,8 @@ public static class Scenario
     /// <param name="LiveOrdinal">The ordinal the subscription delivered live.</param>
     /// <param name="AfterDelete">The ordinals the category read returned after a stream was deleted.</param>
     /// <param name="AfterDeleteHead">The bounds after the delete, holes included.</param>
+    /// <param name="GroupOrdinals">The ordinals a persistent-subscription group created under ordinal numbering delivered.</param>
+    /// <param name="GroupCheckpoint">The group's checkpoint, an ordinal, when its consumer reconnected.</param>
     public sealed record Report(
         IReadOnlyList<(long Ordinal, long Position)> Ordinals,
         StreamHead OrdinalHead,
@@ -32,7 +34,9 @@ public static class Scenario
         long ConfirmedHead,
         long LiveOrdinal,
         IReadOnlyList<long> AfterDelete,
-        StreamHead AfterDeleteHead);
+        StreamHead AfterDeleteHead,
+        IReadOnlyList<long> GroupOrdinals,
+        long GroupCheckpoint);
 
     /// <summary>Runs the scenario.</summary>
     /// <param name="masterConnectionString">A connection string to the server's master database.</param>
@@ -51,7 +55,7 @@ public static class Scenario
             cancellationToken,
             options =>
             {
-                options.Store.Ordinals = true;
+                options.Store.AssignOrdinals = true;
                 options.Deletion.AllowDelete = true;
             }).ConfigureAwait(false);
         await output.WriteLineAsync($"2. Server listening at {server.Address}; store initialized with ordinals, and deletion allowed for step 8.").ConfigureAwait(false);
@@ -94,7 +98,37 @@ public static class Scenario
         await output.WriteLineAsync($"9. Read {Category} by ordinal again: {string.Join(", ", afterDelete.Select(pair => pair.Ordinal))}; bounds {afterDeleteHead.First}..{afterDeleteHead.Last} still count the holes, which the reader skips.").ConfigureAwait(false);
 
         await messages.DisposeAsync().ConfigureAwait(false);
-        await output.WriteLineAsync("10. Disposed the subscription; dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync("10. Disposed the subscription.").ConfigureAwait(false);
+
+        await client.CreatePersistentSubscriptionAsync(Category, "billing", GroupSettings.Default with { Start = StreamPosition.Start, Numbering = Numbering.Ordinal }, cancellationToken).ConfigureAwait(false);
+        var groupOrdinals = new List<long>();
+        await using (var group = client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken))
+        {
+            await foreach (var message in group.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                groupOrdinals.Add(message.Record.Ordinal ?? throw new InvalidOperationException("The group delivered an event without its ordinal."));
+                await group.AckAsync(message.Record.Id).ConfigureAwait(false);
+                if (groupOrdinals.Count == 2)
+                {
+                    break;
+                }
+            }
+
+            // An acknowledgement is one-way: it is on the wire when AckAsync returns, not yet
+            // applied. Leaving the moment it is sent can cancel the call before the server reads
+            // it, and the event would come again on reconnect, as at-least-once delivery allows.
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+        }
+
+        await output.WriteLineAsync($"11. Created the group billing over {Category} under ordinal numbering, from the start, and acknowledged ordinals {string.Join(", ", groupOrdinals)}: the numbering is the group's for life.").ConfigureAwait(false);
+
+        long groupCheckpoint;
+        await using (var group = await ReconnectAsync(client, cancellationToken).ConfigureAwait(false))
+        {
+            groupCheckpoint = (await group.Confirmed.ConfigureAwait(false)).Checkpoint;
+        }
+
+        await output.WriteLineAsync($"12. Reconnected to the group: confirmed at checkpoint {groupCheckpoint}, an ordinal, never a position; dropping the database.").ConfigureAwait(false);
 
         return new Report(
             ordinals,
@@ -103,32 +137,64 @@ public static class Scenario
             confirmed.Head,
             live ?? throw new InvalidOperationException("The subscription ended before delivering the event."),
             afterDelete.Select(pair => pair.Ordinal).ToList(),
-            afterDeleteHead);
+            afterDeleteHead,
+            groupOrdinals,
+            groupCheckpoint);
     }
 
     private static EventData Event(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>
-    /// Reads a virtual stream by ordinal once the numberer, which runs behind the store's head on
+    /// Connects to the group again. The server frees a consumer's place a moment after its call
+    /// ends, so a consumer that reconnects at once may be told the place is still taken; it tries
+    /// again shortly, as a consumer resuming after a dropped connection would.
+    /// </summary>
+    private static async Task<PersistentSubscription> ReconnectAsync(NightingaleClient client, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var group = client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken);
+            try
+            {
+                await group.Confirmed.ConfigureAwait(false);
+                return group;
+            }
+            catch (ConsumerLimitReachedException) when (attempt < 50)
+            {
+                await group.DisposeAsync().ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads a virtual stream by ordinal once the sequencer, which runs behind the store's head on
     /// its own cadence, has reached the expected last ordinal.
     /// </summary>
     private static async Task<(List<(long Ordinal, long Position)> Events, StreamHead Head)> ReadNumberedAsync(NightingaleClient client, string stream, long expectedLast, CancellationToken cancellationToken)
     {
+        // Generous, because the sequencer runs behind the tail's polling and its first batch on a
+        // freshly created database compiles a large statement; a loaded server takes its time.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
         while (true)
         {
-            await using var read = client.ReadStreamAsync(Direction.Forwards, stream, StreamPosition.Start, numbering: Numbering.Ordinal, cancellationToken: timeout.Token);
-            var head = await read.Head.ConfigureAwait(false);
-            if (head is not null && head.Last >= expectedLast)
+            // Each read is consumed to its end, so the server completes the call itself; a read
+            // that is abandoned after its head is cancelled while it is still paging.
+            var events = new List<(long Ordinal, long Position)>();
+            StreamHead? head;
+            await using (var read = client.ReadStreamAsync(Direction.Forwards, stream, StreamPosition.Start, numbering: Numbering.Ordinal, cancellationToken: timeout.Token))
             {
-                var events = new List<(long Ordinal, long Position)>();
+                head = await read.Head.ConfigureAwait(false);
                 await foreach (var record in read.WithCancellation(timeout.Token).ConfigureAwait(false))
                 {
                     events.Add((record.Ordinal ?? throw new InvalidOperationException("An ordinal read returned an event without its ordinal."), record.Position));
                 }
+            }
 
+            if (head is not null && head.Last >= expectedLast)
+            {
                 return (events, head);
             }
 

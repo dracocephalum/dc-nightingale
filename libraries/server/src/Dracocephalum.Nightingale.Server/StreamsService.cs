@@ -29,14 +29,6 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     /// </summary>
     public const int PageSize = 512;
 
-    /// <summary>
-    /// How long an ordinal subscription waits between looks while the numberer is behind the head
-    /// it woke up for. Ordinals are assigned after commit, so an advance of the tail says events
-    /// were committed, not that they are numbered yet; the subscription looks again on this cadence
-    /// until the numberer has passed the head, then waits on the tail once more.
-    /// </summary>
-    public static readonly TimeSpan NumberingPollInterval = TimeSpan.FromMilliseconds(250);
-
     /// <inheritdoc/>
     public override async Task Read(ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, ServerCallContext context)
     {
@@ -591,7 +583,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     /// A bounded read of a virtual stream by ordinal: a snapshot of what is numbered, whose bounds
     /// are the lowest and highest ordinal assigned. No head is refreshed, because ordinals are
     /// assigned in atomic batches after commit and every assigned one is readable; what the
-    /// numberer has not reached yet is not in the snapshot. A stream with nothing numbered reads
+    /// sequencer has not reached yet is not in the snapshot. A stream with nothing numbered reads
     /// as empty, with bounds of zero.
     /// </summary>
     private async Task ReadOrdinalBounded(VirtualStreamName stream, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
@@ -639,9 +631,9 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     /// A subscription to a virtual stream by ordinal. Every number is an ordinal: the confirmation
     /// carries the highest one assigned, or -1 when none is, and from the end means after that.
     /// The catch-up drains the numbered rows; the live phase waits on the tail like every other
-    /// subscription, then looks for newly numbered rows, and while the numberer is still behind
-    /// the head it woke for, looks again on <see cref="NumberingPollInterval"/> rather than waiting
-    /// for an advance that a quiet store would never bring. A store advance that brings this
+    /// subscription, then looks for newly numbered rows, and while the sequencer is still behind
+    /// the head it woke for, looks again on the feed's poll interval rather than waiting for an
+    /// advance that a quiet store would never bring. A store advance that brings this
     /// stream nothing is silent, as under global numbering.
     /// </summary>
     private async Task SubscribeOrdinal(VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
@@ -703,15 +695,8 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
             }
 
             // Everything up to the observed head is numbered and was just read, so the next thing
-            // to wait for is an advance; otherwise the numberer is behind, and the next look is soon.
-            if (await store.NumberedThroughAsync(cancellationToken).ConfigureAwait(false) >= observed)
-            {
-                observed = await tail.WaitForAdvanceAsync(observed, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await Task.Delay(NumberingPollInterval, timeProvider, cancellationToken).ConfigureAwait(false);
-            }
+            // to wait for is an advance; otherwise the sequencer is behind, and the next look is soon.
+            observed = await EventSource.AwaitNumberingAsync(store, tail, observed, timeProvider, cancellationToken).ConfigureAwait(false);
         }
     }
 

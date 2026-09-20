@@ -89,13 +89,15 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
         /// <summary>
         /// Gets or sets a value indicating whether the virtual streams are numbered: two columns on
         /// the events table hold each event's dense, zero-based place within its category stream and
-        /// its event-type stream, assigned after commit by one numberer per cluster, so a consumer
+        /// its event-type stream, assigned after commit by one sequencer per cluster, so a consumer
         /// can read <c>$ce-</c> and <c>$et-</c> by ordinal and count with a subtraction. Off, an
         /// ordinal read is refused. Fixed at initialization because the columns and their indexes
-        /// shape the table; a store that adopts it later needs a backfill, which is pending. Needs
-        /// one global sequence, so it cannot be combined with partitioning by tenant.
+        /// shape the table; a store that adopts it later needs a backfill, which is pending. Ordinals
+        /// are per tenant by construction, so the feature fits partitioning by tenant; it is refused
+        /// with it only until the sequencer follows a high-water mark per tenant, which the
+        /// multi-tenancy work brings.
         /// </summary>
-        public bool Ordinals { get; set; }
+        public bool AssignOrdinals { get; set; }
 
         /// <summary>Checks the settings are consistent.</summary>
         /// <exception cref="InvalidOperationException">A setting is not a value it can take.</exception>
@@ -107,10 +109,10 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
                     $"Nightingale:Store:Partitioning {Partitioning} is not one of {string.Join(", ", Enum.GetNames<PartitioningMode>())}.");
             }
 
-            if (Ordinals && Partitioning == PartitioningMode.Tenant)
+            if (AssignOrdinals && Partitioning == PartitioningMode.Tenant)
             {
                 throw new InvalidOperationException(
-                    "Nightingale:Store:Ordinals needs one global sequence and cannot be combined with Nightingale:Store:Partitioning Tenant, which gives each tenant its own.");
+                    "Nightingale:Store:AssignOrdinals cannot be combined with Nightingale:Store:Partitioning Tenant yet: the sequencer follows one high-water mark, and a sequence per tenant has one per tenant.");
             }
 
             if (Collation is not null && !CollationName().IsMatch(Collation))

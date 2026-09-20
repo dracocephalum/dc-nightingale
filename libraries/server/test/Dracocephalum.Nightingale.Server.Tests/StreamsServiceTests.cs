@@ -543,7 +543,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     /// <summary>The common settings alone; the service reads nothing a backend adds.</summary>
-    /// <returns><placeholder>A <see cref="Task"/> representing the asynchronous unit test.</placeholder></returns>
+    /// <returns>A <see cref="Task"/> representing the asynchronous unit test.</returns>
     [Fact]
     public async Task Read_WhenReadingACategoryByOrdinal_ShouldSendOrdinalBoundsThenEventsWithTheirOrdinals()
     {
@@ -618,11 +618,11 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Read_WhenSubscribingByOrdinal_ShouldConfirmWithTheLastOrdinalAndLookAgainWhileTheNumbererIsBehind()
+    public async Task Read_WhenSubscribingByOrdinal_ShouldConfirmWithTheLastOrdinalAndLookAgainWhileTheSequencerIsBehind()
     {
-        // Arrange: two numbered events; the tail then advances to 30 before the numberer has
+        // Arrange: two numbered events; the tail then advances to 30 before the sequencer has
         // reached it, so the first look after the wake finds nothing and the next one, after the
-        // interval, finds the event the numberer assigned meanwhile.
+        // interval, finds the event the sequencer assigned meanwhile.
         var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
         _tail.Advance(20);
         A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
