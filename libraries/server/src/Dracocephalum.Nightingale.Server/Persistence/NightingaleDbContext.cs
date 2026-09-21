@@ -94,6 +94,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             lease.HasKey(row => row.Name);
             lease.Property(row => row.Name).HasColumnName("name").HasColumnType("varchar(750)");
             lease.Property(row => row.Owner).HasColumnName("owner").HasColumnType("varchar(64)").IsConcurrencyToken();
+            lease.Property(row => row.OwnerAddress).HasColumnName("owner_address").HasColumnType("varchar(500)");
             lease.Property(row => row.ExpiresAt).HasColumnName("expires_at").HasColumnType("datetimeoffset").IsConcurrencyToken();
         });
 

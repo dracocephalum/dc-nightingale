@@ -38,7 +38,7 @@ public static class NightingaleErrorMapping
             ErrorReason.DeletionDisabled => new DeletionDisabledException(exception.Status.Detail),
             ErrorReason.GroupExists => new GroupExistsException(stream, Text(info, "group")),
             ErrorReason.GroupNotFound => new GroupNotFoundException(stream, Text(info, "group")),
-            ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, Text(info, "group"), Text(info, "owner")),
+            ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, Text(info, "group"), Text(info, "owner"), Address(info)),
             ErrorReason.ConsumerLimitReached => new ConsumerLimitReachedException(stream, Text(info, "group")),
             ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, Text(info, "group")),
             ErrorReason.OrdinalsNotEnabled => new OrdinalsNotEnabledException(stream),
@@ -50,6 +50,9 @@ public static class NightingaleErrorMapping
 
     private static string Text(ErrorInfo info, string key) =>
         info.Metadata.TryGetValue(key, out var text) ? text : string.Empty;
+
+    private static Uri? Address(ErrorInfo info) =>
+        info.Metadata.TryGetValue("address", out var text) && Uri.TryCreate(text, UriKind.Absolute, out var address) ? address : null;
 
     private static long Number(ErrorInfo info, string key, long fallback) =>
         info.Metadata.TryGetValue(key, out var text) && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)

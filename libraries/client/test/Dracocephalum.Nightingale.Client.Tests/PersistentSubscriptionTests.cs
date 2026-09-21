@@ -28,7 +28,7 @@ public sealed class PersistentSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", 7, TestContext.Current.CancellationToken);
+        await using var subscription = await sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", 7, TestContext.Current.CancellationToken);
         var delivered = new List<PersistentSubscriptionMessage.Recorded>();
         await foreach (var message in subscription.WithCancellation(TestContext.Current.CancellationToken))
         {
@@ -49,7 +49,7 @@ public sealed class PersistentSubscriptionTests
         // Arrange
         var (invoker, sent) = DuplexRead([new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = "p-1", Checkpoint = -1 } }]);
         await using var sut = new NightingaleClient(invoker);
-        await using var subscription = sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken);
+        await using var subscription = await sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken);
         var id = Guid.NewGuid();
 
         // Act
@@ -63,19 +63,43 @@ public sealed class PersistentSubscriptionTests
     }
 
     [Fact]
-    public async Task Confirmed_WhenTheGroupIsOwnedElsewhere_ShouldFaultWithTheOwner()
+    public async Task Subscribe_WhenTheGroupIsOwnedElsewhereWithoutAnAddress_ShouldFailNamingTheOwner()
     {
-        // Arrange
-        var (invoker, _) = DuplexRead([], Failure(StatusCode.Unavailable, "GROUP_OWNED_ELSEWHERE", ("stream", "orders-1"), ("group", "billing"), ("owner", "node-2")));
+        // Arrange: the owner advertised no address, so there is nowhere to go.
+        var (invoker, _) = DuplexRead([], Failure(StatusCode.Unavailable, "GROUP_OWNED_ELSEWHERE", ("stream", "orders-1"), ("group", "billing"), ("owner", "node-2"), ("address", string.Empty)));
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken);
-        var exception = await Should.ThrowAsync<GroupOwnedElsewhereException>(() => subscription.Confirmed);
+        var exception = await Should.ThrowAsync<GroupOwnedElsewhereException>(() => sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         exception.Owner.ShouldBe("node-2");
         exception.Group.ShouldBe("billing");
+        exception.Address.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Subscribe_WhenTheGroupIsOwnedElsewhereWithAnAddress_ShouldGoThereOnce()
+    {
+        // Arrange: the first instance refuses and names the owner's address; the owner confirms.
+        var (front, _) = DuplexRead([], Failure(StatusCode.Unavailable, "GROUP_OWNED_ELSEWHERE", ("stream", "orders-1"), ("group", "billing"), ("owner", "node-2"), ("address", "http://node-2:5000/")));
+        var (owner, ownerRequests) = DuplexRead([new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = "s-2", Checkpoint = 4 } }]);
+        var redirectedTo = new List<Uri>();
+        await using var sut = new NightingaleClient(front, address =>
+        {
+            redirectedTo.Add(address);
+            return owner;
+        });
+
+        // Act
+        await using var subscription = await sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken);
+        var confirmed = await subscription.Confirmed;
+
+        // Assert
+        confirmed.SubscriptionId.ShouldBe("s-2");
+        confirmed.Checkpoint.ShouldBe(4);
+        redirectedTo.ShouldBe([new Uri("http://node-2:5000/")]);
+        ownerRequests.ShouldHaveSingleItem().Options.Group.ShouldBe("billing");
     }
 
     private static RecordedEvent Recorded(string stream, long revision, long position) => new()

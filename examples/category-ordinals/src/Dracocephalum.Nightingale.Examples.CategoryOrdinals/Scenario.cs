@@ -102,7 +102,7 @@ public static class Scenario
 
         await client.CreatePersistentSubscriptionAsync(Category, "billing", GroupSettings.Default with { Start = StreamPosition.Start, Numbering = Numbering.Ordinal }, cancellationToken).ConfigureAwait(false);
         var groupOrdinals = new List<long>();
-        await using (var group = client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken))
+        await using (var group = await client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken))
         {
             await foreach (var message in group.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
@@ -154,7 +154,7 @@ public static class Scenario
     {
         for (var attempt = 1; ; attempt++)
         {
-            var group = client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken);
+            var group = await client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken);
             try
             {
                 await group.Confirmed.ConfigureAwait(false);

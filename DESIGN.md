@@ -155,8 +155,16 @@ memory, in `PersistentGroup`, in the one instance that holds the group's lease.
 The lease is a row that only a free, expired or already owned lease lets an
 instance write, two instances racing for it told apart by the row's
 concurrency tokens, renewed while the consumer stays, released when it
-leaves; a second instance asked for the group learns who owns it and refuses,
-until in-cluster forwarding lands. The checkpoint is the last position every
+leaves. The lease carries the owner's address, derived from what the owner
+listens on unless configured, and an instance asked for a group another runs
+refuses with that address; the client goes there itself, once, and keeps the
+connection, the way the reference client follows a not-leader answer to the
+leader. That is the whole of the cluster: no gossip, no registry, no relay,
+the database the only coordination point. A replay is refused the same way
+while a consumer is connected elsewhere, since only the instance running the
+group can wake it. A relay inside the cluster, for a client that can reach
+one load-balanced address only, would sit on the same lease-carried address
+and is not built. The checkpoint is the last position every
 delivered event up to which is done: acknowledged, skipped, or parked. Parked
 messages are rows, one per event, so one can be replayed by itself; the
 reference keeps them in a stream and can only replay them together. A parked

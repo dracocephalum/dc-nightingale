@@ -102,21 +102,17 @@ per group fanning out to several connections; the in-flight tracker already
 accepts acknowledgements in any order. Group info and listing, and updating a
 group's settings in place, are in this group too.
 
-## Group ownership across instances, by lease and forwarding
+## A relay inside the cluster
 
-A persistent-subscription group runs in exactly one instance at a time,
-because its in-flight messages, retry counts and dispatch order are in
-memory. Ownership is a lease row per group, taken by the instance that first
-serves the group and renewed on a heartbeat; an expired lease is taken over,
-and the previous owner's in-flight messages are redelivered from the
-checkpoint. No leader, no gossip: the database is the only coordination
-point, and the client never learns the topology. Today an instance that does
-not own a group refuses the call with the owner named; the pending step is
-in-cluster forwarding, where that instance opens the same call to the owner
-and relays both directions, so any address serves any group through a dumb
-load balancer, at the cost of one hop. An instance registry, id, address and
-last heartbeat, one more table on the gateway's context, is what forwarding
-resolves the owner through.
+A persistent-subscription group runs in exactly one instance at a time, the
+one holding its lease, and the lease carries that instance's address: an
+instance asked for a group another runs refuses with the address, and the
+client goes there itself, as the reference client does. That needs clients
+to reach each instance directly, which holds inside one network. A client
+that can reach one load-balanced address only would need the instance it
+reached to open the same call to the owner and relay both directions, one
+hop, with a header that stops a second hop. It sits on the same lease-carried
+address and adds nothing to the store; built only if such a client appears.
 
 ## Parked messages as rows, and the outbox beside them
 

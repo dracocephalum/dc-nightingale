@@ -169,22 +169,22 @@ public sealed class GroupStoreTests
         var sut = Store();
 
         // Act
-        var first = await sut.AcquireLeaseAsync("group:x", "one", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
-        var renewed = await sut.AcquireLeaseAsync("group:x", "one", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
-        var refused = await sut.AcquireLeaseAsync("group:x", "two", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var first = await sut.AcquireLeaseAsync("group:x", "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var renewed = await sut.AcquireLeaseAsync("group:x", "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var refused = await sut.AcquireLeaseAsync("group:x", "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         _time.Advance(TimeSpan.FromSeconds(31));
-        var takenOver = await sut.AcquireLeaseAsync("group:x", "two", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var takenOver = await sut.AcquireLeaseAsync("group:x", "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await sut.ReleaseLeaseAsync("group:x", "one", TestContext.Current.CancellationToken);
-        var stillTwo = await sut.AcquireLeaseAsync("group:x", "three", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var stillTwo = await sut.AcquireLeaseAsync("group:x", "three", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await sut.ReleaseLeaseAsync("group:x", "two", TestContext.Current.CancellationToken);
-        var free = await sut.AcquireLeaseAsync("group:x", "three", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var free = await sut.AcquireLeaseAsync("group:x", "three", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // Assert
         first.ShouldBeNull();
         renewed.ShouldBeNull();
-        refused.ShouldBe("one");
+        refused!.Owner.ShouldBe("one");
         takenOver.ShouldBeNull();
-        stillTwo.ShouldBe("two");
+        stillTwo!.Owner.ShouldBe("two");
         free.ShouldBeNull();
     }
 
@@ -195,19 +195,19 @@ public sealed class GroupStoreTests
         // lands; the concurrency tokens make the write fail, and the loser learns who holds it.
         var sut = Store();
         var rival = new GroupStore(_contexts, "tenant", _time);
-        await sut.AcquireLeaseAsync("group:x", "one", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync("group:x", "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         _time.Advance(TimeSpan.FromSeconds(31));
         _contexts.BeforeSave = async () =>
         {
             _contexts.BeforeSave = null;
-            await rival.AcquireLeaseAsync("group:x", "two", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            await rival.AcquireLeaseAsync("group:x", "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         };
 
         // Act
-        var lost = await sut.AcquireLeaseAsync("group:x", "three", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var lost = await sut.AcquireLeaseAsync("group:x", "three", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // Assert
-        lost.ShouldBe("two");
+        lost!.Owner.ShouldBe("two");
     }
 
     private GroupStore Store() => new(_contexts, "tenant", _time);

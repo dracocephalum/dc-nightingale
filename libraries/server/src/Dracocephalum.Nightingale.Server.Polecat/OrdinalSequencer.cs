@@ -170,7 +170,7 @@ internal sealed partial class OrdinalSequencer(
             {
                 try
                 {
-                    var holder = await leases.AcquireLeaseAsync(LeaseName, owner, LeaseDuration, stopping).ConfigureAwait(false);
+                    var holder = await leases.AcquireLeaseAsync(LeaseName, owner, null, LeaseDuration, stopping).ConfigureAwait(false);
                     if (holder is not null)
                     {
                         holding = false;
@@ -255,7 +255,7 @@ internal sealed partial class OrdinalSequencer(
 
             if (timeProvider.GetElapsedTime(renewed) >= RenewInterval)
             {
-                if (await leases.AcquireLeaseAsync(LeaseName, owner, LeaseDuration, stopping).ConfigureAwait(false) is not null)
+                if (await leases.AcquireLeaseAsync(LeaseName, owner, null, LeaseDuration, stopping).ConfigureAwait(false) is not null)
                 {
                     return -1;
                 }

@@ -82,14 +82,22 @@ public interface IGroupStore
 
     /// <summary>
     /// Takes or renews a lease. A lease that is free, expired, or already the owner's is granted;
-    /// one another owner holds is not.
+    /// one another owner holds is not. The owner's address is written with the lease, so whoever
+    /// is refused can be told where the owner is.
     /// </summary>
     /// <param name="name">What is leased, a group's name.</param>
     /// <param name="owner">The instance asking.</param>
+    /// <param name="ownerAddress">Where the instance asking is reached, or <see langword="null"/> when it advertises none.</param>
     /// <param name="duration">How long the lease lasts from now.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns><see langword="null"/> when granted; otherwise the id of the owner that holds it.</returns>
-    Task<string?> AcquireLeaseAsync(string name, string owner, TimeSpan duration, CancellationToken cancellationToken);
+    /// <returns><see langword="null"/> when granted; otherwise who holds it.</returns>
+    Task<LeaseHolder?> AcquireLeaseAsync(string name, string owner, Uri? ownerAddress, TimeSpan duration, CancellationToken cancellationToken);
+
+    /// <summary>Who holds a lease, if anyone does and it has not expired.</summary>
+    /// <param name="name">What is leased.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The holder, or <see langword="null"/> when the lease is free or expired.</returns>
+    Task<LeaseHolder?> LeaseHolderAsync(string name, CancellationToken cancellationToken);
 
     /// <summary>Releases a lease the owner holds; a lease held by someone else is left alone.</summary>
     /// <param name="name">What is leased.</param>

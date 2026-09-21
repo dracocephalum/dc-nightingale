@@ -1,9 +1,7 @@
 using System.Net;
 
-using Dracocephalum.Nightingale.Client;
 using Dracocephalum.Nightingale.Server;
 using Dracocephalum.Nightingale.Server.Polecat;
-using Grpc.Net.Client;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -63,11 +61,7 @@ public sealed class ExampleServer : IAsyncDisposable
     /// cannot carry cleartext HTTP/2.
     /// </summary>
     /// <returns>The connection; dispose it to close the channel.</returns>
-    public ExampleConnection Connect()
-    {
-        var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions { HttpHandler = new SocketsHttpHandler { UseProxy = false } });
-        return new ExampleConnection(channel, new NightingaleClient(channel.CreateCallInvoker()));
-    }
+    public ExampleConnection Connect() => new(Address);
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()

@@ -92,22 +92,22 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         var name = "group:lease-" + Guid.NewGuid().ToString("N");
 
         // Act
-        var first = await sut.AcquireLeaseAsync(name, "one", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
-        var renewed = await sut.AcquireLeaseAsync(name, "one", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
-        var refused = await sut.AcquireLeaseAsync(name, "two", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var first = await sut.AcquireLeaseAsync(name, "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var renewed = await sut.AcquireLeaseAsync(name, "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var refused = await sut.AcquireLeaseAsync(name, "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         _time.Advance(TimeSpan.FromSeconds(31));
-        var takenOver = await sut.AcquireLeaseAsync(name, "two", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var takenOver = await sut.AcquireLeaseAsync(name, "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await sut.ReleaseLeaseAsync(name, "one", TestContext.Current.CancellationToken);
-        var stillTwo = await sut.AcquireLeaseAsync(name, "three", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var stillTwo = await sut.AcquireLeaseAsync(name, "three", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await sut.ReleaseLeaseAsync(name, "two", TestContext.Current.CancellationToken);
-        var free = await sut.AcquireLeaseAsync(name, "three", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var free = await sut.AcquireLeaseAsync(name, "three", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // Assert
         first.ShouldBeNull();
         renewed.ShouldBeNull();
-        refused.ShouldBe("one");
+        refused!.Owner.ShouldBe("one");
         takenOver.ShouldBeNull();
-        stillTwo.ShouldBe("two");
+        stillTwo!.Owner.ShouldBe("two");
         free.ShouldBeNull();
     }
 

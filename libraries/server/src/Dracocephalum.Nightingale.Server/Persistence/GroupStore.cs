@@ -217,12 +217,13 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     }
 
     /// <inheritdoc/>
-    public async Task<string?> AcquireLeaseAsync(string name, string owner, TimeSpan duration, CancellationToken cancellationToken)
+    public async Task<LeaseHolder?> AcquireLeaseAsync(string name, string owner, Uri? ownerAddress, TimeSpan duration, CancellationToken cancellationToken)
     {
-        // Free, expired, or ours: taken or renewed. Held by another: left alone, and its owner
+        // Free, expired, or ours: taken or renewed. Held by another: left alone, and its holder
         // returned. Two instances racing for the same row are told apart by the concurrency
         // tokens: the loser's write fails, and it reads who won. A lost race is tried once more,
         // because the winner may have been releasing rather than taking.
+        var address = ownerAddress?.ToString();
         for (var attempt = 0; ; attempt++)
         {
             var now = timeProvider.GetUtcNow();
@@ -230,15 +231,16 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             var lease = await context.Leases.SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
             if (lease is null)
             {
-                context.Leases.Add(new LeaseRow { Name = name, Owner = owner, ExpiresAt = now + duration });
+                context.Leases.Add(new LeaseRow { Name = name, Owner = owner, OwnerAddress = address, ExpiresAt = now + duration });
             }
             else if (lease.Owner != owner && lease.ExpiresAt > now)
             {
-                return lease.Owner;
+                return Holder(lease);
             }
             else
             {
                 lease.Owner = owner;
+                lease.OwnerAddress = address;
                 lease.ExpiresAt = now + duration;
             }
 
@@ -255,10 +257,21 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             {
                 context.ChangeTracker.Clear();
                 var holder = await context.Leases.AsNoTracking().SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
-                return holder is null || holder.Owner == owner ? null : holder.Owner;
+                return holder is null || holder.Owner == owner ? null : Holder(holder);
             }
         }
     }
+
+    /// <inheritdoc/>
+    public async Task<LeaseHolder?> LeaseHolderAsync(string name, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var lease = await context.Leases.AsNoTracking().SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
+        return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : Holder(lease);
+    }
+
+    private static LeaseHolder Holder(LeaseRow lease) =>
+        new(lease.Owner, lease.OwnerAddress is null ? null : new Uri(lease.OwnerAddress, UriKind.Absolute));
 
     /// <inheritdoc/>
     public async Task ReleaseLeaseAsync(string name, string owner, CancellationToken cancellationToken)
