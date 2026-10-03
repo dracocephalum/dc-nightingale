@@ -7,13 +7,17 @@ namespace Dracocephalum.Nightingale.Client.Tests;
 public sealed class NightingaleClientTests
 {
     [Fact]
-    public void Constructor_WhenAddressSchemeIsNotHttp_ShouldThrow()
+    public void Constructor_WhenNotAConnectionString_ShouldThrow()
     {
-        // Arrange
-        var options = new NightingaleClientOptions { Address = new Uri("ftp://nightingale.example") };
-
         // Act & Assert
-        Should.Throw<ArgumentException>(() => new NightingaleClient(options));
+        Should.Throw<FormatException>(() => new NightingaleClient("ftp://nightingale.example"));
+    }
+
+    [Fact]
+    public async Task Constructor_WhenAConnectionString_ShouldOpenWithoutConnecting()
+    {
+        // Act & Assert: nothing listens there, and nothing is asked of it yet.
+        await using var sut = new NightingaleClient("nightingale://one.example:5001,two.example:5002?tls=false&defaultDeadline=5000");
     }
 
     [Fact]

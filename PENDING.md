@@ -10,7 +10,8 @@ in [`VARIANCES.md`](VARIANCES.md).
 
 Nothing yet, like the reference event store's insecure mode. Username and password per call,
 carried in the standard `authorization` header with the Basic scheme, before
-the first beta; Bearer later. A credential is bound to exactly one tenant or carries the admin
+the first beta; Bearer later. The client already reads credentials from its
+connection string and holds them unsent until then. A credential is bound to exactly one tenant or carries the admin
 role; admin is a role, not a tenant. Management operations — create and list
 tenants, manage credentials, administer persistent-subscription groups —
 form a fourth service area and take no tenant. Stream ACLs after that,
@@ -125,18 +126,41 @@ what is on the outbox is delivered ahead of the stream, a delivery that
 fails again moves the row back. Shipped: parking, replay of all and of one,
 delivery at once to a consumer connected to the serving instance. Pending:
 listing parked and outbox rows and skipping one by deleting it, with group
-info; replay of all before a number; a consumer connected to another
-instance woken through in-cluster forwarding; and deferred delivery, a retry
+info; replay of all before a number; and deferred delivery, a retry
 with a delay or a nack that says later, which is an outbox row with a due
 time in the future and a timer in the group's loop, the outbox already
 having the column.
 
 ## Reads from a readable secondary
 
-From-start replays over a large store can run against a readable secondary of
-an availability group and stay consistent as long as both the events and the
-high-water mark are read from the same secondary. Two connection strings in the
-gateway; the store has no read/write split of its own.
+A switch, on by default, with `Nightingale:ReadOnlyConnectionStringName`
+beside it. With the name set, that string is used for read-only connections
+exactly as written; without it, the main string is used with
+`ApplicationIntent=ReadOnly` set, which an availability-group listener with
+read-only routing, or a managed database with read scale-out, sends to a
+readable secondary, and which every other server ignores, so the default
+costs a standalone server a second connection pool and nothing else. The
+store has no read/write split of its own, so the split is the gateway's: its
+raw readers take the read-only string, and what is read through the store's
+sessions today needs a raw reader of its own first.
+
+What may be read there is narrow, because a secondary applies the log after
+the primary commits, under synchronous commit too: a range of `$all` or of a
+virtual stream that lies wholly at or below the mark as the secondary has it,
+the store's progression row read on the same connection. A read on the
+secondary bounded by the primary's mark would skip, silently and inside a
+subscription, the events the secondary has not applied yet. So catch-up over
+history goes to the secondary and everything near the head stays on the
+primary: live delivery, reads of a plain stream, since a client reads what it
+has just appended, heads, every write, the leases and the sequencer.
+
+The gain is isolation, not throughput. A from-start replay over a large
+store pulls cold pages through the primary's memory and pushes out the hot
+tail that appends and live subscribers depend on; on a secondary it does
+neither. Consumers at the head read pages already in memory, and moving them
+would gain nothing and cost freshness. None of it is measurable without an
+availability group: built when one is at hand, with a replay's effect on
+append latency measured both ways.
 
 ## Binary event bodies
 

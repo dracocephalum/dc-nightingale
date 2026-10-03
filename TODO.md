@@ -43,14 +43,13 @@ undecided adds it here rather than mentioning it once in a conversation.
   `Nightingale:Store:AssignOrdinals`; the samples under `examples/` are the
   end-to-end runs. Not yet: filters and checkpoints on `$all` (they answer
   unimplemented), group info, listing and updating, competing consumers,
-  in-cluster forwarding and the ordinal backfill, all in `PENDING.md`. Close
-  by: forwarding next.
+  and the ordinal backfill, all in `PENDING.md`. Close by: group management
+  next.
 - **The sequencer's progress is read as SQL text beside the context.** The
   sequencer's batch is raw by design, and its progress row is read raw by the
   virtual-stream reader too, although the context maps that row. Close by:
   reading the progress through the context once the backend's stream store
-  takes the context factory, which the in-cluster forwarding work will do
-  for the instance registry anyway.
+  takes the context factory.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,

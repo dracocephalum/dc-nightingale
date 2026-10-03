@@ -28,7 +28,7 @@ twenty terabytes, about a hundred services connected over gRPC.
 | Component | Holds | Knows nothing about |
 |---|---|---|
 | `core` | the wire contract (`Protocol/*.proto`) and the domain types both sides share: positions, expected states, event data and records, exceptions | any store, any transport detail |
-| `client` | `NightingaleClient` over the generated stub, and the mapping from wire failure reasons to the shared exceptions | the server's internals |
+| `client` | `NightingaleClient` over the generated stub, opened from one connection string in the reference client's shape that lists the instances and carries every setting, and the mapping from wire failure reasons to the shared exceptions | the server's internals |
 | `server` | the service implementations, the port a backend implements, `IStreamStore`, and the tail every subscription waits on, `IStoreTail` | any particular store |
 | `server` (Polecat backend) | `PolecatStreamStore`, the tailer over the store's high-water agent, the sequencer that assigns ordinals, the schema additions, the initializer that owns the database, and the default host | the wire |
 

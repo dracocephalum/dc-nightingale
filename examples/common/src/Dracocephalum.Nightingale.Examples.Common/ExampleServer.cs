@@ -55,13 +55,12 @@ public sealed class ExampleServer : IAsyncDisposable
         return new ExampleServer(app, new Uri(address));
     }
 
-    /// <summary>
-    /// Connects a client to this server. The server is in this process on a loopback port, so the
-    /// machine's HTTP proxy, if the environment names one, must not sit in the middle: a proxy
-    /// cannot carry cleartext HTTP/2.
-    /// </summary>
+    /// <summary>Gets the connection string a client of this server is opened from.</summary>
+    public string ConnectionString => $"nightingale://{Address.Authority}?tls=false";
+
+    /// <summary>Connects a client to this server, from its connection string.</summary>
     /// <returns>The connection; dispose it to close the channel.</returns>
-    public ExampleConnection Connect() => new(Address);
+    public ExampleConnection Connect() => new(ConnectionString);
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
