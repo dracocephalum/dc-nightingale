@@ -1,12 +1,16 @@
 namespace Dracocephalum.Nightingale.Server.Persistence;
 
 /// <summary>
-/// A persistent-subscription group as its row: keyed by tenant, stream and group name, with the
+/// A persistent-subscription group as its row: keyed by its id, unique by tenant, stream and
+/// group name, with the
 /// settings as a JSON document of primitives, so the row outlives the domain type's shape, and
 /// the checkpoint in the group's numbering.
 /// </summary>
 public sealed class GroupRow
 {
+    /// <summary>Gets or sets the group's id, its key.</summary>
+    public Guid Id { get; set; }
+
     /// <summary>Gets or sets the tenant.</summary>
     public required string TenantId { get; set; }
 

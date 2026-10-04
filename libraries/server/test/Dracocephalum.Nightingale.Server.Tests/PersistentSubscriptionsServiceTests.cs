@@ -32,7 +32,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         A.CallTo(() => _groups.AcquireLeaseAsync(A<string>._, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns((LeaseHolder?)null);
         A.CallTo(() => _groups.LeaseHolderAsync(A<string>._, A<CancellationToken>._)).Returns((LeaseHolder?)null);
-        A.CallTo(() => _groups.DueAsync(A<string>._, A<string>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<OutboxMessage>());
+        A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<OutboxMessage>());
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
@@ -156,8 +156,8 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
-        A.CallTo(() => _groups.ReplayAsync("orders-1", "billing", null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(3);
-        A.CallTo(() => _groups.ReplayAsync("orders-1", "billing", 7, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(0);
+        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(3);
+        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, 7, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(0);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
@@ -184,7 +184,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
         var messages = await Next(call, 3);
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Ack = new Ack { Ids = { messages[1].Event.Event.Id } } }, TestContext.Current.CancellationToken);
-        await Until(() => A.CallTo(() => _groups.SaveCheckpointAsync("orders-1", "billing", 0, A<CancellationToken>._)).MustHaveHappened());
+        await Until(() => A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<CancellationToken>._)).MustHaveHappened());
         await call.RequestStream.CompleteAsync();
 
         // Assert
@@ -193,7 +193,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         messages[1].Event.Event.Revision.ShouldBe(0);
         messages[1].Event.RetryCount.ShouldBe(0);
         messages[2].Event.Event.Revision.ShouldBe(1);
-        A.CallTo(() => _groups.AcquireLeaseAsync("group:orders-1:billing", A<string>._, A<Uri?>._, PersistentSubscriptionsService.LeaseDuration, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.AcquireLeaseAsync(A<string>.That.StartsWith("group:"), A<string>._, A<Uri?>._, PersistentSubscriptionsService.LeaseDuration, A<CancellationToken>._)).MustHaveHappened();
     }
 
     [Fact]
@@ -219,12 +219,13 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         await first.RequestStream.CompleteAsync();
 
         // Assert: the one consumer the group allows is taken, and everything was asked of the
-        // store under the names in the group's row, never the spelling of the request.
+        // store under the group's id, whatever the spelling of the request.
+        var lease = $"group:{definition.Id:N}";
         refused.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Reason.ShouldBe("CONSUMER_LIMIT_REACHED");
-        A.CallTo(() => _groups.AcquireLeaseAsync("group:orders-1:billing", A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustHaveHappened();
-        A.CallTo(() => _groups.AcquireLeaseAsync("group:Orders-1:Billing", A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustNotHaveHappened();
-        A.CallTo(() => _groups.LeaseHolderAsync("group:orders-1:billing", A<CancellationToken>._)).MustHaveHappened();
-        A.CallTo(() => _groups.ReplayAsync("orders-1", "billing", null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.AcquireLeaseAsync(lease, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.AcquireLeaseAsync(A<string>.That.Not.IsEqualTo(lease), A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _groups.LeaseHolderAsync(lease, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.ReplayAsync(definition.Id, null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).MustHaveHappened();
     }
 
     [Fact]
@@ -232,7 +233,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange: the consumer is connected elsewhere, so only that instance can wake it.
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
-        A.CallTo(() => _groups.LeaseHolderAsync("group:orders-1:billing", A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
+        A.CallTo(() => _groups.LeaseHolderAsync(A<string>.That.StartsWith("group:"), A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
@@ -242,7 +243,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
         info.Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
         info.Metadata["address"].ShouldBe("http://other-instance:5000/");
-        A.CallTo(() => _groups.ReplayAsync(A<string>._, A<string>._, A<long?>._, A<ParkedNumber>._, A<DateTimeOffset>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, A<long?>._, A<ParkedNumber>._, A<DateTimeOffset>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -250,7 +251,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
-        A.CallTo(() => _groups.AcquireLeaseAsync("group:orders-1:billing", A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
+        A.CallTo(() => _groups.AcquireLeaseAsync(A<string>.That.StartsWith("group:"), A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
 

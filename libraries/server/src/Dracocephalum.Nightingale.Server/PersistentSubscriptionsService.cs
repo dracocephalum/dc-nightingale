@@ -98,15 +98,15 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
 
         // Which names are the same group is the store's to say, under whatever collation it has:
         // a case-insensitive database answers "Billing" with the group created as "billing". From
-        // here on the group goes by the names in its own row, so the registry, the lease and the
-        // parked rows agree with the store on what one group is.
+        // here on the group is its id, which the registry, the lease, the parked rows and the
+        // outbox go by, and its names are the ones in its own row.
         stream = definition.Stream;
         group = definition.Group;
 
         // A running group's consumer is woken by the instance that runs it, so a replay goes
         // there: refused with the owner's address, and the client repeats it there. With no
         // consumer anywhere, the move is done here and delivered at the next connection.
-        var holder = await groups.LeaseHolderAsync(GroupRegistry.LeaseName(stream, group), context.CancellationToken).ConfigureAwait(false);
+        var holder = await groups.LeaseHolderAsync(GroupRegistry.LeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
         if (holder is not null && !string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal))
         {
             throw NightingaleErrors.GroupOwnedElsewhere(stream, group, holder);
@@ -118,7 +118,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
             : StreamNames.IsReserved(stream) ? ParkedNumber.Position
             : ParkedNumber.Revision;
         long? position = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Position ? request.Position : null;
-        var replayed = await groups.ReplayAsync(stream, group, position, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false);
+        var replayed = await groups.ReplayAsync(definition.Id, position, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false);
         if (position is { } wanted && replayed == 0)
         {
             throw NightingaleErrors.ParkedMessageNotFound(stream, group, wanted);
@@ -126,7 +126,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
 
         // A consumer connected here gets the outbox at once; one connected elsewhere, or none,
         // gets it at its next connection.
-        registry.Wake(stream, group);
+        registry.Wake(definition.Id);
         return new ReplayParkedResponse { Replayed = replayed };
     }
 
@@ -153,12 +153,12 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
 
         // Which names are the same group is the store's to say, under whatever collation it has:
         // a case-insensitive database answers "Billing" with the group created as "billing". From
-        // here on the group goes by the names in its own row, so the registry, the lease and the
-        // parked rows agree with the store on what one group is.
+        // here on the group is its id, which the registry, the lease, the parked rows and the
+        // outbox go by, and its names are the ones in its own row.
         stream = definition.Stream;
         group = definition.Group;
 
-        if (!registry.TryClaim(stream, group))
+        if (!registry.TryClaim(definition.Id))
         {
             throw NightingaleErrors.ConsumerLimitReached(stream, group, definition.Settings.MaxSubscriberCount);
         }
@@ -167,7 +167,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         {
             // Refused with the owner's address: the client goes there itself, the way the
             // reference client follows a not-leader answer.
-            var lease = GroupRegistry.LeaseName(stream, group);
+            var lease = GroupRegistry.LeaseName(definition.Id);
             var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
             if (owner is not null)
             {
@@ -185,7 +185,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         }
         finally
         {
-            registry.Release(stream, group);
+            registry.Release(definition.Id);
         }
     }
 
@@ -243,7 +243,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
     private async Task ServeAsync(GroupDefinition definition, int buffer, string lease, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
         await using var live = new PersistentGroup(store, tail, groups, timeProvider, definition, buffer);
-        registry.Attach(definition.Stream, definition.Group, live.Wake);
+        registry.Attach(definition.Id, live.Wake);
         await responseStream.WriteAsync(
             new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = Guid.NewGuid().ToString("D"), Checkpoint = live.Checkpoint } },
             cancellationToken).ConfigureAwait(false);

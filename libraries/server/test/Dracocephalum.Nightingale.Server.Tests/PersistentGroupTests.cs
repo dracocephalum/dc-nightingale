@@ -24,7 +24,7 @@ public sealed class PersistentGroupTests
 
     public PersistentGroupTests()
     {
-        A.CallTo(() => _groups.DueAsync(A<string>._, A<string>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<OutboxMessage>());
+        A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<OutboxMessage>());
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public sealed class PersistentGroupTests
         first.RetryCount.ShouldBe(0);
         new[] { first, second, third }.Select(message => message.Record.Revision).ShouldBe([0, 1, 2]);
         sut.Checkpoint.ShouldBe(1);
-        A.CallTo(() => _groups.SaveCheckpointAsync("orders-1", "g", 1, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 1, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -132,8 +132,8 @@ public sealed class PersistentGroupTests
     {
         // Arrange: an event at revision 5 on the outbox; the stream itself is followed from the checkpoint after it.
         var replayed = Record("orders-1", 5, 50);
-        A.CallTo(() => _groups.DueAsync("orders-1", "g", A<DateTimeOffset>._, A<CancellationToken>._))
-            .Returns(new List<OutboxMessage> { new("orders-1", "g", 50, 5, null, replayed.Id, "poison", 3, Now) });
+        A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._))
+            .Returns(new List<OutboxMessage> { new(Guid.Empty, 50, 5, null, replayed.Id, "poison", 3, Now) });
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 5, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 8), [replayed]));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 9, 500, A<CancellationToken>._))
@@ -149,7 +149,7 @@ public sealed class PersistentGroupTests
         first.Record.Revision.ShouldBe(5);
         first.RetryCount.ShouldBe(3);
         second.Record.Revision.ShouldBe(9);
-        A.CallTo(() => _groups.DequeueAsync("orders-1", "g", 50, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.DequeueAsync(A<Guid>._, 50, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         sut.Checkpoint.ShouldBe(8, "acknowledging a replayed message below the checkpoint must not move it back");
     }
 
@@ -164,10 +164,10 @@ public sealed class PersistentGroupTests
             .Returns(new StreamSlice(new StreamHead(0, 10), [Record("orders-1", 9, 90), Record("orders-1", 10, 100)]));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 3, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 10), [replayed]));
-        A.CallTo(() => _groups.DueAsync("orders-1", "g", A<DateTimeOffset>._, A<CancellationToken>._))
+        A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._))
             .ReturnsNextFromSequence(
                 new List<OutboxMessage>(),
-                new List<OutboxMessage> { new("orders-1", "g", 30, 3, null, replayed.Id, "poison", 2, Now) });
+                new List<OutboxMessage> { new(Guid.Empty, 30, 3, null, replayed.Id, "poison", 2, Now) });
         await using var sut = Group("orders-1", checkpoint: 8, consumerBuffer: 1);
         var first = await Next(sut);
 
@@ -197,11 +197,11 @@ public sealed class PersistentGroupTests
             .Returns(new StreamSlice(new StreamHead(0, 8), []));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 3, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 8), [replayed]));
-        A.CallTo(() => _groups.DueAsync("orders-1", "g", A<DateTimeOffset>._, A<CancellationToken>._))
+        A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._))
             .ReturnsNextFromSequence(
                 new List<OutboxMessage>(),
-                new List<OutboxMessage> { new("orders-1", "g", 30, 3, null, replayed.Id, "poison", 2, Now) },
-                new List<OutboxMessage> { new("orders-1", "g", 30, 3, null, replayed.Id, "poison", 2, Now) });
+                new List<OutboxMessage> { new(Guid.Empty, 30, 3, null, replayed.Id, "poison", 2, Now) },
+                new List<OutboxMessage> { new(Guid.Empty, 30, 3, null, replayed.Id, "poison", 2, Now) });
         await using var sut = Group("orders-1", checkpoint: 8, consumerBuffer: 2);
 
         // Act
@@ -255,7 +255,7 @@ public sealed class PersistentGroupTests
         await sut.DisposeAsync();
 
         // Assert
-        A.CallTo(() => _groups.SaveCheckpointAsync("orders-1", "g", 0, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -280,7 +280,7 @@ public sealed class PersistentGroupTests
         first.Record.Ordinal.ShouldBe(0);
         second.Record.Ordinal.ShouldBe(1);
         sut.Checkpoint.ShouldBe(1);
-        A.CallTo(() => _groups.SaveCheckpointAsync("$ce-orders", "g", 1, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 1, A<CancellationToken>._)).MustHaveHappened();
         A.CallTo(() => _groups.ParkAsync(A<ParkedMessage>.That.Matches(parked => parked.Position == 17 && parked.Ordinal == 1 && parked.Revision == 0 && parked.EventId == second.Record.Id), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 

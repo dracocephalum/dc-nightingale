@@ -26,15 +26,16 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         // Arrange
         var sut = Store();
         var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
         var settings = GroupSettings.Default with { Start = StreamPosition.From(3), MaxRetryCount = 4, MessageTimeout = TimeSpan.FromSeconds(7), Numbering = Numbering.Ordinal };
 
         // Act
-        await sut.CreateAsync(new GroupDefinition(stream, group, settings, -1), TestContext.Current.CancellationToken);
-        await Should.ThrowAsync<GroupExistsException>(() => sut.CreateAsync(new GroupDefinition(stream, group, settings, -1), TestContext.Current.CancellationToken));
-        await sut.SaveCheckpointAsync(stream, group, 41, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ReplayAsync(stream, group, 42, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new GroupDefinition(stream, group, settings, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<GroupExistsException>(() => sut.CreateAsync(new GroupDefinition(stream, group, settings, -1) { Id = id }, TestContext.Current.CancellationToken));
+        await sut.SaveCheckpointAsync(id, 41, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(id, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(id, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(id, 42, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         var read = await sut.GetAsync(stream, group, TestContext.Current.CancellationToken);
         var deleted = await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
         var again = await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
@@ -45,8 +46,8 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         deleted.ShouldBeTrue();
         again.ShouldBeFalse();
         (await sut.GetAsync(stream, group, TestContext.Current.CancellationToken)).ShouldBeNull();
-        (await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken)).ShouldBeEmpty();
-        (await sut.ReplayAsync(stream, group, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken)).ShouldBe(0);
+        (await sut.DueAsync(id, Now, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+        (await sut.ReplayAsync(id, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
     [Fact]
@@ -55,22 +56,23 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         // Arrange
         var sut = Store();
         var (stream, group) = Names();
-        await sut.CreateAsync(new GroupDefinition(stream, group, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), TestContext.Current.CancellationToken);
+        var id = Guid.CreateVersion7();
+        await sut.CreateAsync(new GroupDefinition(stream, group, GroupSettings.Default, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(id, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(id, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), TestContext.Current.CancellationToken);
 
         // Act
-        var before = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
-        var one = await sut.ReplayAsync(stream, group, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var missing = await sut.ReplayAsync(stream, group, 99, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var sameAgain = await sut.ReplayAsync(stream, group, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var afterOne = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
-        var rest = await sut.ReplayAsync(stream, group, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var afterAll = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
-        await sut.DequeueAsync(stream, group, 10, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage(stream, group, 12, 12, null, Guid.NewGuid(), "b again", 2, Now.AddSeconds(2)), TestContext.Current.CancellationToken);
-        var afterBoth = await sut.DueAsync(stream, group, Now, TestContext.Current.CancellationToken);
-        var backAgain = await sut.ReplayAsync(stream, group, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var before = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        var one = await sut.ReplayAsync(id, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var missing = await sut.ReplayAsync(id, 99, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var sameAgain = await sut.ReplayAsync(id, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterOne = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        var rest = await sut.ReplayAsync(id, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterAll = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        await sut.DequeueAsync(id, 10, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(id, 12, 12, null, Guid.NewGuid(), "b again", 2, Now.AddSeconds(2)), TestContext.Current.CancellationToken);
+        var afterBoth = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        var backAgain = await sut.ReplayAsync(id, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
 
         // Assert
         before.ShouldBeEmpty();
@@ -117,7 +119,8 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         // Arrange: whether another spelling is the same group is the database's to say.
         var sut = Store();
         var (stream, group) = Names();
-        await sut.CreateAsync(new GroupDefinition(stream, group, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        var id = Guid.CreateVersion7();
+        await sut.CreateAsync(new GroupDefinition(stream, group, GroupSettings.Default, -1) { Id = id }, TestContext.Current.CancellationToken);
         var collation = await TestDatabases.ScalarAsync<string>(database.Name, "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'))");
 
         // Act

@@ -135,7 +135,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
 
         foreach (var position in toDequeue)
         {
-            await _groups.DequeueAsync(_definition.Stream, _definition.Group, position, CancellationToken.None).ConfigureAwait(false);
+            await _groups.DequeueAsync(_definition.Id, position, CancellationToken.None).ConfigureAwait(false);
         }
 
         await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
@@ -186,7 +186,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
         await SettleAsync(toRedeliver, toPark, reason, CancellationToken.None).ConfigureAwait(false);
         foreach (var position in toDequeue)
         {
-            await _groups.DequeueAsync(_definition.Stream, _definition.Group, position, CancellationToken.None).ConfigureAwait(false);
+            await _groups.DequeueAsync(_definition.Id, position, CancellationToken.None).ConfigureAwait(false);
         }
 
         await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
@@ -283,7 +283,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
             // Parking moves a message off the outbox in the same write, so one that came from
             // there and failed again is back where it was, with its new reason and count.
             await _groups.ParkAsync(
-                new ParkedMessage(_definition.Stream, _definition.Group, flight.Record.Position, flight.Record.Revision, flight.Record.Ordinal, flight.Record.Id, reason, flight.Attempts, _time.GetUtcNow()),
+                new ParkedMessage(_definition.Id, flight.Record.Position, flight.Record.Revision, flight.Record.Ordinal, flight.Record.Id, reason, flight.Attempts, _time.GetUtcNow()),
                 cancellationToken).ConfigureAwait(false);
         }
     }
@@ -309,7 +309,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
             _lastWrite = _time.GetUtcNow();
         }
 
-        await _groups.SaveCheckpointAsync(_definition.Stream, _definition.Group, checkpoint, cancellationToken).ConfigureAwait(false);
+        await _groups.SaveCheckpointAsync(_definition.Id, checkpoint, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the stream from where the group stands into the live buffer, after the outbox has been queued.</summary>
@@ -435,7 +435,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
         await _draining.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var due = await _groups.DueAsync(_definition.Stream, _definition.Group, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
+            var due = await _groups.DueAsync(_definition.Id, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
             foreach (var message in due)
             {
                 lock (_gate)
@@ -449,7 +449,7 @@ internal sealed class PersistentGroup : IAsyncDisposable
                 var record = await ReadOneAsync(message, cancellationToken).ConfigureAwait(false);
                 if (record is null)
                 {
-                    await _groups.DequeueAsync(_definition.Stream, _definition.Group, message.Position, cancellationToken).ConfigureAwait(false);
+                    await _groups.DequeueAsync(_definition.Id, message.Position, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 

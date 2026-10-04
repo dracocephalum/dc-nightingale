@@ -46,7 +46,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         modelBuilder.Entity<GroupRow>(group =>
         {
             group.ToTable(NightingaleTables.GroupsTable);
-            group.HasKey(row => new { row.TenantId, row.Stream, row.GroupName });
+            group.HasKey(row => row.Id);
+            group.HasIndex(row => new { row.TenantId, row.Stream, row.GroupName }).IsUnique().HasDatabaseName(NightingaleTables.GroupsNameIndex);
+            group.Property(row => row.Id).HasColumnName("id").HasColumnType("uniqueidentifier").ValueGeneratedNever();
             group.Property(row => row.TenantId).HasColumnName("tenant_id").HasColumnType(Name250);
             group.Property(row => row.Stream).HasColumnName("stream").HasColumnType(Name250);
             group.Property(row => row.GroupName).HasColumnName("group_name").HasColumnType(Name250);
@@ -58,10 +60,8 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         modelBuilder.Entity<ParkedRow>(parked =>
         {
             parked.ToTable(NightingaleTables.ParkedTable);
-            parked.HasKey(row => new { row.TenantId, row.Stream, row.GroupName, row.Position });
-            parked.Property(row => row.TenantId).HasColumnName("tenant_id").HasColumnType(Name250);
-            parked.Property(row => row.Stream).HasColumnName("stream").HasColumnType(Name250);
-            parked.Property(row => row.GroupName).HasColumnName("group_name").HasColumnType(Name250);
+            parked.HasKey(row => new { row.GroupId, row.Position });
+            parked.Property(row => row.GroupId).HasColumnName("group_id").HasColumnType("uniqueidentifier");
             parked.Property(row => row.Position).HasColumnName("position").HasColumnType("bigint");
             parked.Property(row => row.Revision).HasColumnName("revision").HasColumnType("bigint");
             parked.Property(row => row.Ordinal).HasColumnName("ordinal").HasColumnType("bigint");
@@ -74,10 +74,8 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         modelBuilder.Entity<OutboxRow>(outbox =>
         {
             outbox.ToTable(NightingaleTables.OutboxTable);
-            outbox.HasKey(row => new { row.TenantId, row.Stream, row.GroupName, row.Position });
-            outbox.Property(row => row.TenantId).HasColumnName("tenant_id").HasColumnType(Name250);
-            outbox.Property(row => row.Stream).HasColumnName("stream").HasColumnType(Name250);
-            outbox.Property(row => row.GroupName).HasColumnName("group_name").HasColumnType(Name250);
+            outbox.HasKey(row => new { row.GroupId, row.Position });
+            outbox.Property(row => row.GroupId).HasColumnName("group_id").HasColumnType("uniqueidentifier");
             outbox.Property(row => row.Position).HasColumnName("position").HasColumnType("bigint");
             outbox.Property(row => row.Revision).HasColumnName("revision").HasColumnType("bigint");
             outbox.Property(row => row.Ordinal).HasColumnName("ordinal").HasColumnType("bigint");
@@ -92,7 +90,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         {
             lease.ToTable(NightingaleTables.LeasesTable);
             lease.HasKey(row => row.Name);
-            lease.Property(row => row.Name).HasColumnName("name").HasColumnType("varchar(750)");
+            lease.Property(row => row.Name).HasColumnName("name").HasColumnType("varchar(100)");
             lease.Property(row => row.Owner).HasColumnName("owner").HasColumnType("varchar(64)").IsConcurrencyToken();
             lease.Property(row => row.OwnerAddress).HasColumnName("owner_address").HasColumnType("varchar(500)");
             lease.Property(row => row.ExpiresAt).HasColumnName("expires_at").HasColumnType("datetimeoffset").IsConcurrencyToken();

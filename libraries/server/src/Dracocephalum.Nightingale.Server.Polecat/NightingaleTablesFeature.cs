@@ -1,3 +1,4 @@
+using Dracocephalum.Nightingale.Server.Persistence;
 using Weasel.Core;
 using Weasel.Core.Migrations;
 using Weasel.SqlServer;
@@ -56,18 +57,18 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         yield return store;
 
         var groups = new Table(new SqlServerObjectName(schemaName, GroupsTable));
-        groups.AddColumn("tenant_id", "varchar(250)").NotNull().AsPrimaryKey();
-        groups.AddColumn("stream", "varchar(250)").NotNull().AsPrimaryKey();
-        groups.AddColumn("group_name", "varchar(250)").NotNull().AsPrimaryKey();
+        groups.AddColumn("id", "uniqueidentifier").NotNull().AsPrimaryKey();
+        groups.AddColumn("tenant_id", "varchar(250)").NotNull();
+        groups.AddColumn("stream", "varchar(250)").NotNull();
+        groups.AddColumn("group_name", "varchar(250)").NotNull();
+        groups.Indexes.Add(new IndexDefinition(NightingaleTables.GroupsNameIndex) { Columns = ["tenant_id", "stream", "group_name"], IsUnique = true });
         groups.AddColumn("settings", "nvarchar(max)").NotNull();
         groups.AddColumn("checkpoint_position", "bigint").NotNull();
         groups.AddColumn("created_at", "datetimeoffset").NotNull();
         yield return groups;
 
         var parked = new Table(new SqlServerObjectName(schemaName, ParkedTable));
-        parked.AddColumn("tenant_id", "varchar(250)").NotNull().AsPrimaryKey();
-        parked.AddColumn("stream", "varchar(250)").NotNull().AsPrimaryKey();
-        parked.AddColumn("group_name", "varchar(250)").NotNull().AsPrimaryKey();
+        parked.AddColumn("group_id", "uniqueidentifier").NotNull().AsPrimaryKey();
         parked.AddColumn("position", "bigint").NotNull().AsPrimaryKey();
         parked.AddColumn("revision", "bigint").NotNull();
         parked.AddColumn("ordinal", "bigint");
@@ -78,9 +79,7 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         yield return parked;
 
         var outbox = new Table(new SqlServerObjectName(schemaName, OutboxTable));
-        outbox.AddColumn("tenant_id", "varchar(250)").NotNull().AsPrimaryKey();
-        outbox.AddColumn("stream", "varchar(250)").NotNull().AsPrimaryKey();
-        outbox.AddColumn("group_name", "varchar(250)").NotNull().AsPrimaryKey();
+        outbox.AddColumn("group_id", "uniqueidentifier").NotNull().AsPrimaryKey();
         outbox.AddColumn("position", "bigint").NotNull().AsPrimaryKey();
         outbox.AddColumn("revision", "bigint").NotNull();
         outbox.AddColumn("ordinal", "bigint");
@@ -92,7 +91,7 @@ internal sealed class NightingaleTablesFeature(string schemaName) : FeatureSchem
         yield return outbox;
 
         var leases = new Table(new SqlServerObjectName(schemaName, LeasesTable));
-        leases.AddColumn("name", "varchar(750)").NotNull().AsPrimaryKey();
+        leases.AddColumn("name", "varchar(100)").NotNull().AsPrimaryKey();
         leases.AddColumn("owner", "varchar(64)").NotNull();
         leases.AddColumn("owner_address", "varchar(500)");
         leases.AddColumn("expires_at", "datetimeoffset").NotNull();
