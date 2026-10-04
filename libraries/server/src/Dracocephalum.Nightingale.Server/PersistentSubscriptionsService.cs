@@ -96,6 +96,13 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         var definition = await groups.GetAsync(stream, group, context.CancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
 
+        // Which names are the same group is the store's to say, under whatever collation it has:
+        // a case-insensitive database answers "Billing" with the group created as "billing". From
+        // here on the group goes by the names in its own row, so the registry, the lease and the
+        // parked rows agree with the store on what one group is.
+        stream = definition.Stream;
+        group = definition.Group;
+
         // A running group's consumer is woken by the instance that runs it, so a replay goes
         // there: refused with the owner's address, and the client repeats it there. With no
         // consumer anywhere, the move is done here and delivered at the next connection.
@@ -143,6 +150,13 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         var buffer = options.BufferSize > 0 ? options.BufferSize : 10;
         var definition = await groups.GetAsync(stream, group, cancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
+
+        // Which names are the same group is the store's to say, under whatever collation it has:
+        // a case-insensitive database answers "Billing" with the group created as "billing". From
+        // here on the group goes by the names in its own row, so the registry, the lease and the
+        // parked rows agree with the store on what one group is.
+        stream = definition.Stream;
+        group = definition.Group;
 
         if (!registry.TryClaim(stream, group))
         {

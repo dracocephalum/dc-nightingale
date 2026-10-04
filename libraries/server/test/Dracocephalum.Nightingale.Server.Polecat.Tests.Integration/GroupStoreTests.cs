@@ -111,6 +111,31 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
         free.ShouldBeNull();
     }
 
+    [Fact]
+    public async Task Get_UnderAnotherSpelling_ShouldReturnTheGroupUnderTheNamesItWasCreatedWith()
+    {
+        // Arrange: whether another spelling is the same group is the database's to say.
+        var sut = Store();
+        var (stream, group) = Names();
+        await sut.CreateAsync(new GroupDefinition(stream, group, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        var collation = await TestDatabases.ScalarAsync<string>(database.Name, "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'))");
+
+        // Act
+        var read = await sut.GetAsync(stream.ToUpperInvariant(), group.ToUpperInvariant(), TestContext.Current.CancellationToken);
+
+        // Assert: found, it goes by its own names, never the request's; on a database that tells
+        // case apart there is no such group.
+        if (collation.Contains("_CI", StringComparison.Ordinal))
+        {
+            read.ShouldNotBeNull().Stream.ShouldBe(stream);
+            read.Group.ShouldBe(group);
+        }
+        else
+        {
+            read.ShouldBeNull();
+        }
+    }
+
     private static (string Stream, string Group) Names()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];

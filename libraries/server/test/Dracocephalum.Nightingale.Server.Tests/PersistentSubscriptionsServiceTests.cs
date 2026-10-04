@@ -197,6 +197,37 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Read_WhenTheStoreAnswersAnotherSpellingWithTheSameGroup_ShouldTreatItAsThatGroup()
+    {
+        // Arrange: a case-insensitive store answers "Orders-1" and "Billing" with the group created
+        // as "orders-1" and "billing". One consumer is connected under the names it was created with.
+        var definition = new GroupDefinition("orders-1", "billing", GroupSettings.Default with { Start = StreamPosition.Start }, -1);
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.GetAsync("Orders-1", "Billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, definition.Settings.BufferSize, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10)]));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+        using var first = client.Read(cancellationToken: TestContext.Current.CancellationToken);
+        await first.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
+        await Next(first, 1);
+
+        // Act: a second consumer and a replay, both under the other spelling.
+        using var second = client.Read(cancellationToken: TestContext.Current.CancellationToken);
+        await second.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "Orders-1", Group = "Billing" } }, TestContext.Current.CancellationToken);
+        var refused = await Should.ThrowAsync<RpcException>(async () => await second.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+        await client.ReplayParkedAsync(new ReplayParkedRequest { Stream = "Orders-1", Group = "Billing", All = new() }, cancellationToken: TestContext.Current.CancellationToken);
+        await first.RequestStream.CompleteAsync();
+
+        // Assert: the one consumer the group allows is taken, and everything was asked of the
+        // store under the names in the group's row, never the spelling of the request.
+        refused.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Reason.ShouldBe("CONSUMER_LIMIT_REACHED");
+        A.CallTo(() => _groups.AcquireLeaseAsync("group:orders-1:billing", A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.AcquireLeaseAsync("group:Orders-1:Billing", A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _groups.LeaseHolderAsync("group:orders-1:billing", A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.ReplayAsync("orders-1", "billing", null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).MustHaveHappened();
+    }
+
+    [Fact]
     public async Task ReplayParked_WhenAnotherInstanceRunsTheGroup_ShouldRefuseWithItsAddressAndMoveNothing()
     {
         // Arrange: the consumer is connected elsewhere, so only that instance can wake it.

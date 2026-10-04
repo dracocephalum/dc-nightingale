@@ -61,7 +61,10 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         }
 
         var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings) ?? throw new InvalidOperationException("The group's settings are not readable.");
-        return new GroupDefinition(stream, group, settings.ToSettings(), row.CheckpointPosition);
+
+        // The names are the row's own: a case-insensitive database finds the row under another
+        // spelling, and the group still goes by the names it was created with.
+        return new GroupDefinition(row.Stream, row.GroupName, settings.ToSettings(), row.CheckpointPosition);
     }
 
     /// <inheritdoc/>
