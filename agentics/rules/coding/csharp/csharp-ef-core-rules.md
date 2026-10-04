@@ -68,6 +68,20 @@ loop. The fix is always the explicit configuration the message names.
   keys are immutable: never update a primary key, and never write
   `ON UPDATE CASCADE` in a migration. Owned types are the one exception EF
   requires.
+- **A column that refers to another table is named for it: `<Table>Id`.**
+  `SubscriptionGroupId` for a row of `SubscriptionGroup`, never `GroupId` or
+  `ParentId`: a reference can then be read off a column name, by a person and
+  by generated SQL alike. **When the table is this context's own, the column
+  is a foreign key to it**, declared and with no cascade, which also gives it
+  an index — EF adds one for a foreign key unless an index that leads with
+  the column already exists; SQL Server would not on its own. **When the
+  table is another owner's, the column keeps the name and takes no
+  constraint**: a context does not alter a schema it does not own, the
+  owner's column may not be unique, and the owner may delete rows whatever
+  refers to them. Such a column is passed to the check by name, so the
+  exception is stated rather than silent, and a join to the owner's table
+  goes through a column the owner indexes. Anything else needs the user's
+  agreement.
 - **Money has an explicit precision; fiat is `decimal(19, 4)`.** A `decimal`
   property whose name says currency amount — `Amount`, `Price`, `Total`,
   `Cost`, `Fee`, `Balance`, and any `*Amount` — is `HasPrecision(19, 4)`:
@@ -82,8 +96,9 @@ loop. The fix is always the explicit configuration the message names.
   `.HasConversion<string>().HasMaxLength(64)` on every enum property — longer
   for an enum whose member names exceed 64 characters. Without the conversion
   the column is `int`; without the length it is `nvarchar(max)`.
-- **Same on the wire.** Register `JsonStringEnumConverter` globally so HTTP
-  payloads carry names, not numbers. Put `[EnumDataType(typeof(T))]` on
+- **Same on the wire.** Enums are names in JSON too, through the repository's
+  one set of serializer options; see *JSON* in
+  [csharp-coding-rules.md](csharp-coding-rules.md). Put `[EnumDataType(typeof(T))]` on
   **request DTO** enum properties — it rejects undefined values such as `999`
   during model validation. It has no effect on EF; do not put it on entities
   for that purpose.
@@ -101,9 +116,10 @@ relationships pass; a defaulted entity fails on every line at once.
     {
         private static readonly string[] MoneySuffixes = ["Amount", "Price", "Total", "Cost", "Fee", "Balance"];
 
-        public static void Check(IModel model)
+        public static void Check(IModel model, params string[] externalReferences)
         {
             var violations = new List<string>();
+            var tables = model.GetEntityTypes().Where(e => !e.IsOwned()).Select(e => e.GetTableName()).ToHashSet(StringComparer.Ordinal);
             foreach (var entity in model.GetEntityTypes().Where(e => !e.IsOwned()))
             {
                 var name = entity.DisplayName();
@@ -121,9 +137,18 @@ relationships pass; a defaulted entity fails on every line at once.
                     }
                 }
 
-                foreach (var fk in entity.GetForeignKeys().Where(fk => !fk.IsOwnership && fk.DeleteBehavior is not (DeleteBehavior.Restrict or DeleteBehavior.NoAction)))
+                foreach (var fk in entity.GetForeignKeys().Where(fk => !fk.IsOwnership))
                 {
-                    violations.Add($"{name} -> {fk.PrincipalEntityType.DisplayName()}: {fk.DeleteBehavior} - .OnDelete(DeleteBehavior.Restrict)");
+                    var principal = fk.PrincipalEntityType.GetTableName();
+                    if (fk.DeleteBehavior is not (DeleteBehavior.Restrict or DeleteBehavior.NoAction))
+                    {
+                        violations.Add($"{name} -> {fk.PrincipalEntityType.DisplayName()}: {fk.DeleteBehavior} - .OnDelete(DeleteBehavior.Restrict)");
+                    }
+
+                    if (fk.Properties.Count != 1 || fk.Properties[0].Name != principal + "Id")
+                    {
+                        violations.Add($"{name} -> {fk.PrincipalEntityType.DisplayName()}: the foreign key column must be '{principal}Id', the table it refers to and Id");
+                    }
                 }
 
                 foreach (var property in entity.GetProperties())
@@ -137,6 +162,22 @@ relationships pass; a defaulted entity fails on every line at once.
                     if (clr == typeof(decimal) && MoneySuffixes.Any(s => property.Name.EndsWith(s, StringComparison.Ordinal)) && property.GetPrecision() is null)
                     {
                         violations.Add($"{name}.{property.Name}: money needs an explicit precision - .HasPrecision(19, 4), or the agreed crypto precision");
+                    }
+
+                    // A Guid column named <Something>Id says it refers to a row of <Something>:
+                    // a table of this model, and then a foreign key to it, or another owner's
+                    // table, and then listed as an external reference.
+                    if (clr == typeof(Guid) && property.Name != "Id" && property.Name.EndsWith("Id", StringComparison.Ordinal) && !property.IsForeignKey())
+                    {
+                        var referred = property.Name[..^2];
+                        if (tables.Contains(referred))
+                        {
+                            violations.Add($"{name}.{property.Name}: refers to {referred} by name and is not a foreign key to it - .HasOne<{referred}>().WithMany().HasForeignKey(...).OnDelete(DeleteBehavior.Restrict)");
+                        }
+                        else if (Array.IndexOf(externalReferences, $"{entity.ClrType.Name}.{property.Name}") < 0)
+                        {
+                            violations.Add($"{name}.{property.Name}: named like a reference to a table '{referred}' this model does not have - name it for the table it refers to, or list it as an external reference");
+                        }
                     }
                 }
             }
@@ -161,7 +202,8 @@ The test, one per `DbContext`:
             .Options;
         using var context = new AppDbContext(options);
 
-        // Act + Assert - throws with every violation listed
+        // Act + Assert - throws with every violation listed. A column that refers to a table
+        // this context does not own is named here: ModelConventions.Check(context.Model, "Order.EventId")
         ModelConventions.Check(context.Model);
     }
 
@@ -193,6 +235,22 @@ and editing the generated file against these rules is step two.
                   .Options);
       }
 
+- **The migrations folder is generated code to the analyzers.** The generator
+  writes what the ruleset refuses under warnings-as-errors — initializers
+  without trailing commas, constant array arguments, using directives run
+  together — and its output is not held to a style it did not choose. The
+  shipped `.editorconfig` marks `**/Migrations/*.cs` as generated, so a first
+  migration builds. The rules in this section still apply to what the file
+  *does*; that is the edit of step two, and it is about safety, not style.
+- **Before the first release, one migration.** Until a database exists that
+  must be migrated rather than re-created, every model change would add a
+  migration only ever applied to empty databases. So until the first official
+  release there is a single migration, regenerated on each change: delete
+  the migrations folder and add it again under the same name. The first
+  release freezes it, and from then every change is a migration of its own
+  under the rules below. **The condition is the whole rule**: the moment one
+  database that matters has the migration applied, it is frozen, release or
+  not. Record the choice where the migrations are documented.
 - **Backward compatible with the code in production.** Deploy order is
   migrate first, then roll out; during the rollout old and new code share the
   schema. So a migration must never break the previous release: no rename, no

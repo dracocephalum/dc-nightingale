@@ -24,6 +24,7 @@ banned-API list. The authority for each item is
 | AutoMapper / reflection mapper introduced | Types and APIs | `issue (blocking)` |
 | `!` to silence a nullable warning | Types and APIs | `issue` |
 | `throw new Exception(...)` or `catch (Exception)` swallowing | Design | `issue` |
+| `JsonSerializer` called without the repository's options, or `new JsonSerializerOptions` outside the one class that defines them | Conventions, JSON | `issue` |
 | Validation or not-found expressed as a throw where the component uses result records | Design | `suggestion` |
 | Entity or `DbSet` type crossing the API boundary | Design | `issue` |
 | Enum property without `.HasConversion<string>().HasMaxLength(…)` | EF Core, Model | `issue` |
@@ -35,6 +36,7 @@ banned-API list. The authority for each item is
 | `DeleteBehavior.Cascade` or `ClientCascade`; `ON UPDATE CASCADE` in a migration | EF Core, Model | `issue (blocking)` |
 | Composite or non-`Guid` primary key, or a key column not named `Id` | EF Core, Model | `issue` |
 | Plural table name; `HasDefaultSchema` missing or the schema not confirmed | EF Core, Model | `issue` |
+| Column referring to another table not named `<Table>Id`; reference to one of the context's own tables without a foreign key; a foreign key added to a table the context does not own | EF Core, Model | `issue` |
 | Migration with `DropColumn`, `DropTable`, `RenameColumn`, or a narrowing `AlterColumn` | EF Core, Migrations | `issue (blocking)` — breaks the release still running |
 | `AddColumn` with `nullable: false` or `defaultValue:` on an existing table | EF Core, Migrations | `issue (blocking)` |
 | `CreateIndex` on an existing table without the online option and a confirmed row count | EF Core, Migrations | `issue` |
