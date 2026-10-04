@@ -197,7 +197,7 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
                 $"Database {name} has collation {collation} but Nightingale:Store:Collation is {options.Store.Collation}. The collation is set when the database is created; drop the database and let the server create it, or configure the collation it has.");
         }
 
-        await schema.ApplyAsync(cancellationToken).ConfigureAwait(false);
+        await schema.CreateAsync(cancellationToken).ConfigureAwait(false);
 
         // What is recorded is what is configured, with the collation the database actually has.
         await schema.WriteInitializationAsync(

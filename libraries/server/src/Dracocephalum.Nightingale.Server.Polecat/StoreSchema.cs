@@ -57,11 +57,13 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
             : [];
 
         // The store's tables are compared under the configured settings, which shape them; under
-        // settings the store was not initialized with, the comparison says nothing true.
+        // settings the store was not initialized with, the comparison says nothing true. Nor does
+        // it of a database that holds no store yet: everything is missing, which "not initialized"
+        // already says, and listing it costs many times what creating it does.
         return new SchemaReport(
             true,
             initialized,
-            conflicts.Count > 0 ? null : await StoreChangesAsync(cancellationToken).ConfigureAwait(false),
+            !initialized || conflicts.Count > 0 ? null : await StoreChangesAsync(cancellationToken).ConfigureAwait(false),
             known.Except(applied, StringComparer.Ordinal).ToList(),
             applied.Except(known, StringComparer.Ordinal).ToList(),
             conflicts);
@@ -96,6 +98,38 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
             await database.ApplyAllConfiguredChangesToDatabaseAsync(AutoCreate.CreateOrUpdate, ct: cancellationToken).ConfigureAwait(false);
         }
 
+        await MigrateAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Creates everything in a database that holds nothing. The event store's tables come from
+    /// its creation script, run as it stands, rather than from <see cref="ApplyAsync"/>, which
+    /// first reads the catalog to find what is there: on a database just created that read is
+    /// the slow part by far, and what it finds is known beforehand. Nothing compares the result
+    /// here, for the same reason; the next start does, as every start of an initialized store
+    /// does, and a test holds the script to what the comparison would have made.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the database is current.</returns>
+    public async Task CreateAsync(CancellationToken cancellationToken)
+    {
+        foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
+        {
+            await using (var connection = database.CreateConnection())
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                command.CommandText = database.ToDatabaseScript();
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        await MigrateAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Applies the gateway's migrations and records which store library the tables are for.</summary>
+    private async Task MigrateAsync(CancellationToken cancellationToken)
+    {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
         await context.WriteSettingAsync(StoreLibraryRow, StoreLibraryVersion, cancellationToken).ConfigureAwait(false);

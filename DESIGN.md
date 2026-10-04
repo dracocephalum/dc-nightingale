@@ -122,6 +122,11 @@ default host's switches and a host's own code all go through it.
   index is ever built over data, and one row per setting recording what
   shaped it: the settings below, the actual collation, when and by which
   server version, and the version of the store's library.
+  The store's tables are made by running its creation script, not by
+  comparing an empty database with what the store expects: the comparison's
+  first read of a new database's catalog is the slow part of a start, and
+  on an empty one it can only find that everything is missing. A test makes
+  one database each way and holds their catalogs equal.
 - An initialized database, one that has any of the gateway's migrations, is
   refused when it has a migration this server does not know, because the
   store is then newer than the server; refused when the configuration

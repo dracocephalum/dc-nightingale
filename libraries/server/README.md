@@ -47,7 +47,7 @@ append them after `--`:
 | Switch | Does |
 |---|---|
 | `--export-schema schema.sql` | writes the creation script of a new store: the event store's tables with the gateway's additions, then the gateway's own tables; connects to nothing |
-| `--schema-report` | prints what the configured database needs: changes to the event store's tables, the gateway's pending migrations, and settings the configuration contradicts; exit code 0 when it is current, 1 when it is not |
+| `--schema-report` | prints what the configured database needs: that it is not initialized yet, or changes to the event store's tables, the gateway's pending migrations, and settings the configuration contradicts; exit code 0 when it is current, 1 when it is not |
 | `--apply-schema` | brings the configured database up to date, the event store's tables first and the gateway's after, whatever `Nightingale:ApplySchemaChanges` says |
 
 The gateway's own tables are created by EF Core migrations, generated from
