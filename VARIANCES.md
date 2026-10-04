@@ -193,7 +193,11 @@ SQL Server's default collations are case-insensitive, so those two names
 resolve to the same stream. A binary collation, chosen through
 `Nightingale:Store:Collation` when the server creates the database, makes them
 different streams as the reference does. A caller that uses one consistent
-spelling is unaffected either way.
+spelling is unaffected either way. The same holds for a category, an
+event type and a persistent-subscription group: the database says which
+names are the same one, the server never folds case itself, and a group
+reached under another spelling is the group in its row, with its one lease
+and its consumer limit.
 
 **Why:** it is the database's behaviour, and a collation is fixed when the
 database is created, so it is an initialization choice rather than an API one.
