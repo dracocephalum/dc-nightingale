@@ -1,5 +1,5 @@
-using Dracocephalum.Nightingale.Server.Persistence;
-using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Polecat.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -27,7 +27,7 @@ public sealed class NightingaleDbContextTests
         using var context = Context(NightingaleSchema.Default);
 
         // Act & Assert: throws with every violation listed.
-        ModelConventions.Check(context.Model, ExternalReferences);
+        ModelConventions.Check(context, ExternalReferences);
     }
 
     [Fact]

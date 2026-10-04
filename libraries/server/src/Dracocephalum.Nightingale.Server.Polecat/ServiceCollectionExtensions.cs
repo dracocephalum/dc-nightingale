@@ -1,5 +1,5 @@
-using Dracocephalum.Nightingale.Server.Persistence;
-using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Polecat.Data;
 using JasperFx;
 using JasperFx.Events;
 using JasperFx.MultiTenancy;
@@ -101,7 +101,7 @@ public static class ServiceCollectionExtensions
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
-        services.AddNightingaleGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
+        services.AddNightingaleSubscriptionGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
         services.AddSingleton(provider => new StoreSchema(
             provider.GetRequiredService<IDocumentStore>(),
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
@@ -119,11 +119,11 @@ public static class ServiceCollectionExtensions
         {
             // After the tailer, so the sequencer's first look at the head is a real one. The
             // registry is the server's, but a host that registers only the backend still numbers.
-            services.TryAddSingleton<GroupRegistry>();
+            services.TryAddSingleton<SubscriptionGroupRegistry>();
             services.AddSingleton<IHostedService>(provider => new OrdinalSequencer(
-                provider.GetRequiredService<IGroupStore>(),
+                provider.GetRequiredService<ISubscriptionGroupStore>(),
                 provider.GetRequiredService<IStoreTail>(),
-                provider.GetRequiredService<GroupRegistry>(),
+                provider.GetRequiredService<SubscriptionGroupRegistry>(),
                 connectionString,
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
                 options.Schema,

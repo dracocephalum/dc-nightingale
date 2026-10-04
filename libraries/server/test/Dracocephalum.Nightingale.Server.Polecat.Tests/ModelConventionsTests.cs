@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 
@@ -79,6 +79,32 @@ public sealed class ModelConventionsTests
         exception.Message.ShouldContain("Cascade");
     }
 
+    [Fact]
+    public void CheckSets_WhenATableHasNoSetOrASetIsNotNamedForItsEntity_ShouldSaySo()
+    {
+        // Arrange: Customer is exposed under another name, and Order not at all.
+        using var context = Context(model => model.Entity<Order>().HasOne<Customer>().WithMany().HasForeignKey(order => order.CustomerId).OnDelete(DeleteBehavior.Restrict));
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => ModelConventions.CheckSets(context));
+
+        // Assert
+        exception.Message.ShouldContain("Order: the context has no DbSet<Order>");
+        exception.Message.ShouldContain("Shop.Buyers: a set is named for its entity - 'Customer' or its plural");
+    }
+
+    [Theory]
+    [InlineData(typeof(Named<Customer>))]
+    [InlineData(typeof(Plural<Customer>))]
+    public void CheckSets_WhenASetIsItsEntitysNameOrPlural_ShouldPass(Type contextType)
+    {
+        // Arrange
+        using var context = (DbContext)Activator.CreateInstance(contextType)!;
+
+        // Act & Assert
+        Should.NotThrow(() => ModelConventions.CheckSets(context));
+    }
+
     private static Shop Context(Action<ModelBuilder> relationships) =>
         new(new DbContextOptionsBuilder<Shop>().UseSqlServer(DesignTime).Options, relationships);
 
@@ -98,9 +124,29 @@ public sealed class ModelConventionsTests
         public Guid EventId { get; set; }
     }
 
+    /// <summary>A context whose one set has its entity's own name, as a word with no plural would.</summary>
+    private sealed class Named<T> : DbContext
+        where T : class
+    {
+        public DbSet<Customer> Customer => Set<Customer>();
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) => optionsBuilder.UseSqlServer(DesignTime);
+    }
+
+    /// <summary>A context whose one set is its entity's plural.</summary>
+    private sealed class Plural<T> : DbContext
+        where T : class
+    {
+        public DbSet<Customer> Customers => Set<Customer>();
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) => optionsBuilder.UseSqlServer(DesignTime);
+    }
+
     /// <summary>A model the test shapes, cached per instance so each test builds its own.</summary>
     private sealed class Shop(DbContextOptions<Shop> options, Action<ModelBuilder> relationships) : DbContext(options)
     {
+        public DbSet<Customer> Buyers => Set<Customer>();
+
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
             optionsBuilder.EnableServiceProviderCaching(false);
 

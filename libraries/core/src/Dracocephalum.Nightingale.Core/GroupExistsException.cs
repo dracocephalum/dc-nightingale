@@ -1,6 +1,10 @@
 namespace Dracocephalum.Nightingale;
 
 /// <summary>A persistent-subscription group with this name already exists on the stream.</summary>
+/// <remarks>
+/// The name is the contract's, kept on purpose: the reference client says "persistent subscription" and
+/// "group", and so do the wire and the client here. The server's own types say "subscription group".
+/// </remarks>
 public sealed class GroupExistsException : InvalidOperationException
 {
     /// <summary>Initializes a new instance of the <see cref="GroupExistsException"/> class.</summary>

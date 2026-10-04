@@ -23,7 +23,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     private static readonly DateTimeOffset Created = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
 
     private readonly IStreamStore _store = A.Fake<IStreamStore>(options => options.Strict());
-    private readonly IGroupStore _groups = A.Fake<IGroupStore>();
+    private readonly ISubscriptionGroupStore _groups = A.Fake<ISubscriptionGroupStore>();
     private readonly FakeTail _tail = new();
     private WebApplication? _app;
     private GrpcChannel? _channel;
@@ -32,7 +32,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         A.CallTo(() => _groups.AcquireLeaseAsync(A<string>._, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns((LeaseHolder?)null);
         A.CallTo(() => _groups.LeaseHolderAsync(A<string>._, A<CancellationToken>._)).Returns((LeaseHolder?)null);
-        A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<OutboxMessage>());
+        A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<SubscriptionOutboxMessage>());
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
@@ -59,8 +59,8 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     public async Task Create_ShouldStoreTheGroupWithItsSettingsAndNoCheckpoint()
     {
         // Arrange
-        GroupDefinition? captured = null;
-        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).Invokes(call => captured = call.GetArgument<GroupDefinition>(0));
+        SubscriptionGroupDefinition? captured = null;
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).Invokes(call => captured = call.GetArgument<SubscriptionGroupDefinition>(0));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
@@ -80,9 +80,9 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     public async Task Create_UnderOrdinalNumbering_ShouldStoreTheNumberingWithTheGroup()
     {
         // Arrange
-        GroupDefinition? captured = null;
+        SubscriptionGroupDefinition? captured = null;
         A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
-        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).Invokes(call => captured = call.GetArgument<GroupDefinition>(0));
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).Invokes(call => captured = call.GetArgument<SubscriptionGroupDefinition>(0));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
@@ -103,7 +103,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
-        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -119,14 +119,14 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
         exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("ORDINALS_NOT_ENABLED");
-        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
     public async Task Create_WhenTheGroupExists_ShouldFailAsAlreadyExists()
     {
         // Arrange
-        A.CallTo(() => _groups.CreateAsync(A<GroupDefinition>._, A<CancellationToken>._)).ThrowsAsync(new GroupExistsException("orders-1", "billing"));
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).ThrowsAsync(new GroupExistsException("orders-1", "billing"));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
@@ -155,9 +155,9 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     public async Task ReplayParked_ShouldMoveAllOrOneToTheOutboxAndFailWhenTheOneIsMissing()
     {
         // Arrange
-        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
-        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(3);
-        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, 7, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(0);
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
+        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, null, SubscriptionParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(3);
+        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, 7, SubscriptionParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(0);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
@@ -174,7 +174,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange: the group starts at the beginning of a two-event stream, with the checkpoint written on every acknowledgement.
         var settings = GroupSettings.Default with { Start = StreamPosition.Start, CheckpointUpperBound = 1, CheckpointLowerBound = 1 };
-        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", settings, -1));
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new SubscriptionGroupDefinition("orders-1", "billing", settings, -1));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, settings.BufferSize, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 0, 10), Record("orders-1", 1, 11)]));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
@@ -201,7 +201,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange: a case-insensitive store answers "Orders-1" and "Billing" with the group created
         // as "orders-1" and "billing". One consumer is connected under the names it was created with.
-        var definition = new GroupDefinition("orders-1", "billing", GroupSettings.Default with { Start = StreamPosition.Start }, -1);
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default with { Start = StreamPosition.Start }, -1);
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
         A.CallTo(() => _groups.GetAsync("Orders-1", "Billing", A<CancellationToken>._)).Returns(definition);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, definition.Settings.BufferSize, A<CancellationToken>._))
@@ -225,14 +225,14 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         A.CallTo(() => _groups.AcquireLeaseAsync(lease, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustHaveHappened();
         A.CallTo(() => _groups.AcquireLeaseAsync(A<string>.That.Not.IsEqualTo(lease), A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).MustNotHaveHappened();
         A.CallTo(() => _groups.LeaseHolderAsync(lease, A<CancellationToken>._)).MustHaveHappened();
-        A.CallTo(() => _groups.ReplayAsync(definition.Id, null, ParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.ReplayAsync(definition.Id, null, SubscriptionParkedNumber.Revision, A<DateTimeOffset>._, A<CancellationToken>._)).MustHaveHappened();
     }
 
     [Fact]
     public async Task ReplayParked_WhenAnotherInstanceRunsTheGroup_ShouldRefuseWithItsAddressAndMoveNothing()
     {
         // Arrange: the consumer is connected elsewhere, so only that instance can wake it.
-        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
         A.CallTo(() => _groups.LeaseHolderAsync(A<string>.That.StartsWith("group:"), A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
@@ -243,14 +243,14 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
         info.Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
         info.Metadata["address"].ShouldBe("http://other-instance:5000/");
-        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, A<long?>._, A<ParkedNumber>._, A<DateTimeOffset>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, A<long?>._, A<SubscriptionParkedNumber>._, A<DateTimeOffset>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
     public async Task Read_WhenAnotherInstanceOwnsTheGroup_ShouldFailNamingTheOwner()
     {
         // Arrange
-        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1));
         A.CallTo(() => _groups.AcquireLeaseAsync(A<string>.That.StartsWith("group:"), A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
@@ -271,7 +271,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     public async Task Read_WhenTheGroupIsMissing_ShouldFailAsNotFound()
     {
         // Arrange
-        A.CallTo(() => _groups.GetAsync("orders-1", "nobody", A<CancellationToken>._)).Returns((GroupDefinition?)null);
+        A.CallTo(() => _groups.GetAsync("orders-1", "nobody", A<CancellationToken>._)).Returns((SubscriptionGroupDefinition?)null);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
 

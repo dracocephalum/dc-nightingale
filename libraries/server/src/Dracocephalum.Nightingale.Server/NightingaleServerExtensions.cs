@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
@@ -21,7 +21,7 @@ public static class NightingaleServerExtensions
         ArgumentNullException.ThrowIfNull(services);
         services.AddGrpc();
         services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton<GroupRegistry>();
+        services.TryAddSingleton<SubscriptionGroupRegistry>();
         services.TryAddSingleton<InstanceAddress>();
         return services;
     }
@@ -60,7 +60,7 @@ public static class NightingaleServerExtensions
     /// <param name="tenantId">The tenant every group belongs to.</param>
     /// <param name="configure">The provider and connection.</param>
     /// <returns>The same collection, for chaining.</returns>
-    public static IServiceCollection AddNightingaleGroupStore(this IServiceCollection services, string schema, string tenantId, Action<DbContextOptionsBuilder> configure)
+    public static IServiceCollection AddNightingaleSubscriptionGroupStore(this IServiceCollection services, string schema, string tenantId, Action<DbContextOptionsBuilder> configure)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
@@ -68,7 +68,7 @@ public static class NightingaleServerExtensions
         ArgumentNullException.ThrowIfNull(configure);
         services.AddSingleton(new NightingaleSchema(schema));
         services.AddDbContextFactory<NightingaleDbContext>(configure);
-        services.AddSingleton<IGroupStore>(provider => new GroupStore(
+        services.AddSingleton<ISubscriptionGroupStore>(provider => new SubscriptionGroupStore(
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             tenantId,
             provider.GetService<TimeProvider>() ?? TimeProvider.System));

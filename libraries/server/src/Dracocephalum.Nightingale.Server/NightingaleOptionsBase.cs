@@ -19,7 +19,7 @@ public abstract class NightingaleOptionsBase
     /// and changed by the gateway's own migrations, whose history is kept in the same schema. It
     /// may be the schema the event store uses; the names do not collide.
     /// </summary>
-    public string Schema { get; set; } = Persistence.NightingaleSchema.Default;
+    public string Schema { get; set; } = Data.NightingaleSchema.Default;
 
     /// <summary>Gets or sets what the server allows to be deleted.</summary>
     public DeletionSettings Deletion { get; set; } = new();

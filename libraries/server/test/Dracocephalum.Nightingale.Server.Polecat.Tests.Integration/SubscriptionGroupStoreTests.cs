@@ -1,0 +1,191 @@
+using Dracocephalum.Nightingale.Server.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
+using Shouldly;
+
+namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
+
+/// <summary>
+/// The group store's tables against the real database, through the context the host registered:
+/// groups and their checkpoints, parked messages and the replay mark, and the lease's three
+/// answers, with the concurrency tokens that settle a lease doing so on SQL Server. Built with a
+/// clock the test moves, so lease expiry is a fact rather than a wait.
+/// </summary>
+[Collection(SharedSqlServer.Name)]
+[Trait("Category", "Integration")]
+public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)
+{
+    private static readonly DateTimeOffset Now = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
+
+    private readonly FakeTimeProvider _time = new(Now);
+
+    [Fact]
+    public async Task Groups_ShouldBeCreatedOnceReadBackWithTheirSettingsAndDeletedWithTheirParkedMessages()
+    {
+        // Arrange
+        var sut = Store();
+        var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
+        var settings = GroupSettings.Default with { Start = StreamPosition.From(3), MaxRetryCount = 4, MessageTimeout = TimeSpan.FromSeconds(7), Numbering = Numbering.Ordinal };
+
+        // Act
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, settings, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<GroupExistsException>(() => sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, settings, -1) { Id = id }, TestContext.Current.CancellationToken));
+        await sut.SaveCheckpointAsync(id, 41, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(id, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var read = await sut.GetAsync(stream, group, TestContext.Current.CancellationToken);
+        var deleted = await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
+        var again = await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
+
+        // Assert
+        read.ShouldNotBeNull().Settings.ShouldBe(settings);
+        read.Checkpoint.ShouldBe(41);
+        deleted.ShouldBeTrue();
+        again.ShouldBeFalse();
+        (await sut.GetAsync(stream, group, TestContext.Current.CancellationToken)).ShouldBeNull();
+        (await sut.DueAsync(id, Now, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+        (await sut.ReplayAsync(id, null, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Replay_ShouldMoveParkedMessagesToTheOutboxAndParkingShouldMoveThemBack()
+    {
+        // Arrange
+        var sut = Store();
+        var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, GroupSettings.Default, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), TestContext.Current.CancellationToken);
+
+        // Act
+        var before = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        var one = await sut.ReplayAsync(id, 12, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var missing = await sut.ReplayAsync(id, 99, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var sameAgain = await sut.ReplayAsync(id, 12, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterOne = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        var rest = await sut.ReplayAsync(id, null, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterAll = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        await sut.DequeueAsync(id, 10, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 12, 12, null, Guid.NewGuid(), "b again", 2, Now.AddSeconds(2)), TestContext.Current.CancellationToken);
+        var afterBoth = await sut.DueAsync(id, Now, TestContext.Current.CancellationToken);
+        var backAgain = await sut.ReplayAsync(id, null, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+
+        // Assert
+        before.ShouldBeEmpty();
+        one.ShouldBe(1);
+        missing.ShouldBe(0);
+        sameAgain.ShouldBe(1);
+        afterOne.ShouldHaveSingleItem().Position.ShouldBe(12);
+        rest.ShouldBe(2);
+        afterAll.Select(message => message.Position).ShouldBe([10, 12]);
+        afterBoth.ShouldBeEmpty("one dequeued, one parked again");
+        backAgain.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Leases_ShouldBeGrantedWhenFreeRenewedByTheOwnerRefusedToOthersAndTakenOverOnceExpired()
+    {
+        // Arrange
+        var sut = Store();
+        var name = "group:lease-" + Guid.NewGuid().ToString("N");
+
+        // Act
+        var first = await sut.AcquireLeaseAsync(name, "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var renewed = await sut.AcquireLeaseAsync(name, "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var refused = await sut.AcquireLeaseAsync(name, "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        _time.Advance(TimeSpan.FromSeconds(31));
+        var takenOver = await sut.AcquireLeaseAsync(name, "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.ReleaseLeaseAsync(name, "one", TestContext.Current.CancellationToken);
+        var stillTwo = await sut.AcquireLeaseAsync(name, "three", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.ReleaseLeaseAsync(name, "two", TestContext.Current.CancellationToken);
+        var free = await sut.AcquireLeaseAsync(name, "three", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Assert
+        first.ShouldBeNull();
+        renewed.ShouldBeNull();
+        refused!.Owner.ShouldBe("one");
+        takenOver.ShouldBeNull();
+        stillTwo!.Owner.ShouldBe("two");
+        free.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Park_ForAGroupThatWasDeleted_ShouldLeaveNothingBehind()
+    {
+        // Arrange: a consumer still holds an event while its group is deleted under it.
+        var sut = Store();
+        var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, GroupSettings.Default, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 10, 10, null, Guid.NewGuid(), "poison", 1, Now), TestContext.Current.CancellationToken);
+        await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
+
+        // Act: the park arrives after the delete. The foreign key refuses a row for a group that
+        // is gone, and the store takes that for what it is.
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 11, 11, null, Guid.NewGuid(), "poison", 1, Now), TestContext.Current.CancellationToken);
+
+        // Assert: the delete took the group's parked event with it, and the late one left no row.
+        var orphans = await TestDatabases.ScalarAsync<int>(database.Name, $"SELECT COUNT(*) FROM nightingale.SubscriptionParkedEvent WHERE SubscriptionGroupId = '{id}'");
+        orphans.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Groups_WithNamesInAnotherScript_ShouldBeTwoGroups()
+    {
+        // Arrange: two names no character of which is in the database's code page. In a column
+        // that is not Unicode both would be stored as question marks, and be one name.
+        var sut = Store();
+        var (stream, _) = Names();
+        const string billing = "计费";
+        const string ledger = "账单";
+
+        // Act
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, billing, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, ledger, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        var first = await sut.GetAsync(stream, billing, TestContext.Current.CancellationToken);
+        var second = await sut.GetAsync(stream, ledger, TestContext.Current.CancellationToken);
+
+        // Assert
+        first.ShouldNotBeNull().Group.ShouldBe(billing);
+        second.ShouldNotBeNull().Group.ShouldBe(ledger);
+        second.Id.ShouldNotBe(first.Id);
+    }
+
+    [Fact]
+    public async Task Get_UnderAnotherSpelling_ShouldReturnTheGroupUnderTheNamesItWasCreatedWith()
+    {
+        // Arrange: whether another spelling is the same group is the database's to say.
+        var sut = Store();
+        var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, GroupSettings.Default, -1) { Id = id }, TestContext.Current.CancellationToken);
+        var collation = await TestDatabases.ScalarAsync<string>(database.Name, "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'))");
+
+        // Act
+        var read = await sut.GetAsync(stream.ToUpperInvariant(), group.ToUpperInvariant(), TestContext.Current.CancellationToken);
+
+        // Assert: found, it goes by its own names, never the request's; on a database that tells
+        // case apart there is no such group.
+        if (collation.Contains("_CI", StringComparison.Ordinal))
+        {
+            read.ShouldNotBeNull().Stream.ShouldBe(stream);
+            read.Group.ShouldBe(group);
+        }
+        else
+        {
+            read.ShouldBeNull();
+        }
+    }
+
+    private static (string Stream, string Group) Names()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        return ("orders-" + suffix, "g-" + suffix);
+    }
+
+    private SubscriptionGroupStore Store() => new(database.Services.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(), JasperFx.StorageConstants.DefaultTenantId, _time);
+}

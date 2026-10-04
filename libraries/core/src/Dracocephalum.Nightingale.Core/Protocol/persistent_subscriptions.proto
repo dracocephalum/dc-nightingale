@@ -8,6 +8,11 @@
 // the confirmation and the events. A group runs in one server instance at a
 // time; see "Ownership" below. Numbers, names, bodies and errors are defined
 // in shared.proto and errors.proto.
+//
+// The names here, "persistent subscription" and "group", are the reference
+// protocol's, kept on purpose so the contract reads as the one its callers
+// already know. The server's own types and tables say "subscription group"
+// for the same thing; the difference is deliberate, and it stops at the wire.
 
 syntax = "proto3";
 

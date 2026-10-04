@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Dracocephalum.Nightingale.Server.Polecat.Data;
 using JasperFx.Events.Daemon;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -63,7 +63,7 @@ internal sealed class PolecatStoreTail(IDocumentStore store, IDbContextFactory<E
         // behind; the poller closes the rest.
         var mark = Head;
         await using var context = await events.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var following = await context.Events.AsNoTracking()
+        var following = await context.EventRows.AsNoTracking()
             .Where(row => row.SeqId > mark)
             .OrderBy(row => row.SeqId)
             .Select(row => row.SeqId)

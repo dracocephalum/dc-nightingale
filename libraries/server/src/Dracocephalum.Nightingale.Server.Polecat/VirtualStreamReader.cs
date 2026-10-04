@@ -2,7 +2,7 @@ using System.Linq.Expressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Dracocephalum.Nightingale.Server.Polecat.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
@@ -93,7 +93,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var mark = await context.Progression.AsNoTracking()
+        var mark = await context.ProgressionRows.AsNoTracking()
             .Where(row => row.Name == EventsDbContext.HighWaterMark)
             .Select(row => (long?)row.LastSeqId)
             .FirstOrDefaultAsync(cancellationToken)
@@ -130,7 +130,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     public async Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
     {
         await using var context = Context();
-        var all = Keyed(context.Events.AsNoTracking().Where(e => e.TenantId == tenantId), stream);
+        var all = Keyed(context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId), stream);
         var ordinals = stream.Kind == VirtualStreamKind.Category
             ? all.Where(e => e.CategoryOrdinal != null).Select(e => e.CategoryOrdinal)
             : all.Where(e => e.TypeOrdinal != null).Select(e => e.TypeOrdinal);
@@ -230,7 +230,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <summary>The live events of the tenant, of one virtual stream or of all.</summary>
     private IQueryable<EventRow> Live(EventsDbContext context, VirtualStreamName? stream)
     {
-        var live = context.Events.AsNoTracking().Where(e => e.TenantId == tenantId && !e.IsArchived);
+        var live = context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId && !e.IsArchived);
         return stream is { } named ? Keyed(live, named) : live;
     }
 
