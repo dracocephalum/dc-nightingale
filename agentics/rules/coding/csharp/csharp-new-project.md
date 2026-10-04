@@ -28,7 +28,7 @@ without asking; the build would enforce them anyway.
 | monorepo | a project to an existing component | `<component>/src/<Prefix>.<Name>/` | that component's `.slnx` |
 | monorepo | a new component | `<category>/<kebab-name>/` — create `src/` and `test/` there first | its own, new — see step 5 |
 
-Categories are `services/`, `libraries/`, `jobs/`, `tools/`. Never create a
+Categories are `services/`, `libraries/`, `jobs/`, `tools/`, `examples/`. Never create a
 solution at a monorepo root, and never add a `Directory.Build.props`,
 `Directory.Build.targets`, or `Directory.Packages.props` below the root — see `AGENTS.md` for why.
 
@@ -157,7 +157,7 @@ everything shared is inherited from the root.
 | Category | Add |
 |---|---|
 | `libraries/` | nothing — packable by default |
-| `services/`, `jobs/`, `tools/` | `<IsPackable>false</IsPackable>` |
+| `services/`, `jobs/`, `tools/`, `examples/` | `<IsPackable>false</IsPackable>` |
 | a *service library*, whichever category | nothing — it is packable on purpose, see step 1 |
 
 **Referencing another component** — say the client and the server of one

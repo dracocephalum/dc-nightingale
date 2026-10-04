@@ -52,6 +52,7 @@ map of categories.
 | `libraries/` | packages published to NuGet | [`libraries/README.md`](libraries/README.md) |
 | `jobs/` | scheduled executables | [`jobs/README.md`](jobs/README.md) |
 | `tools/` | internal tooling, never shipped | [`tools/README.md`](tools/README.md) |
+| `examples/` | runnable samples of the libraries | [`examples/README.md`](examples/README.md) |
 | `infrastructure/` | provisioning | — |
 | `ui/` | front-end applications | — |
 

@@ -6,7 +6,8 @@ argument-hint: "[paths...]"
 ---
 
 A consistency and drift pass. **Not a bug hunt** - that is the built-in
-`/code-review`. **Not a rules review** - that is `/review`. Building, testing
+`/code-review`. **Not a rules review** - that is `/review`. **Not about what
+the documents cost to read** - that is `/optimize`. Building, testing
 and dependency licences are deliberately outside it, so a scrub stays cheap
 enough to run without deciding to.
 

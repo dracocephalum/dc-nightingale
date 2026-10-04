@@ -23,7 +23,11 @@ more often than people expect.
   internal domain names.
 - **Credentials.** Tokens, API keys, connection strings, passwords. A secret
   committed once is compromised, even if the next commit removes it — it stays
-  in history and in every clone and fork.
+  in history and in every clone and fork. A test of code that *handles*
+  credentials still needs a value: use one that says what it is, `some-user`
+  and `some-password`, never one shaped like a real secret and never a
+  well-known joke password, which a reader and a scanner both have to stop
+  and judge.
 - **Internal identifiers.** Ticket URLs, internal hostnames, account numbers, and
   similar, where the repo may be public.
 

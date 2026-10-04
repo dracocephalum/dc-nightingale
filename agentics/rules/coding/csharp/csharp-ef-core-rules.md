@@ -5,6 +5,32 @@ The general rules in [csharp-coding-rules.md](csharp-coding-rules.md) still
 apply; this file adds what is specific to EF Core, and it is read only when a
 task touches it.
 
+## A schema another tool owns
+
+Everything below assumes the context owns its tables: it names them, keys
+them and migrates them. When something else creates and migrates the tables —
+a store's own schema manager, a database that predates the repository, a
+vendor's product — the context is a **mirror**, and with the user's agreement,
+recorded in `DESIGN.md` with the reason, three things change:
+
+- **Names, keys and column types follow the owner exactly.** Its table names,
+  plural or prefixed as they are; its keys, natural or composite; the store
+  type of every column, written out with `HasColumnType`. The naming and key
+  rules under *Model* do not apply, and `ModelConventions.Check` is not run
+  for that context.
+- **No EF migrations for those tables.** The owner migrates them. A migration
+  generated from the mirror would fight the owner for the same table.
+- **A test holds the mirror to the owner.** It compares the EF model with the
+  owner's table definitions — every table, and for each column its name,
+  store type and nullability, and the primary key columns in order — and
+  fails naming every difference. It takes the place of the conventions test
+  and is as mandatory: nothing else compares the two, so without it a column
+  the owner adds or retypes is found in production.
+
+How the tables are shaped is no longer this file's to decide, so the rest of
+*Model* and all of *Migrations* do not apply to a mirror either. A context
+that owns some tables and mirrors others is two contexts.
+
 ## Model
 
 Conventions are **checked, not patched**. Every rule below is configured

@@ -144,6 +144,7 @@ noise, and a folder that exists implies a decision that has not been made:
 | `libraries/` | packages published to NuGet |
 | `jobs/` | scheduled executables (Kubernetes CronJobs and similar) |
 | `tools/` | never shipped to production |
+| `examples/` | runnable samples of the repository's own libraries, each a component; never shipped — see *Samples* below |
 | `infrastructure/` | Terraform and similar provisioning |
 | `ui/` | front-end applications that are **deployed** — a shared component library is a package and belongs in `libraries/` |
 | `docs/` | documentation written for people — architecture, decisions, guides; created only when there is some |
@@ -239,6 +240,30 @@ ruleset, central-package-management fixes, test wiring, verification — is
 [`coding/csharp/csharp-new-project.md`](coding/csharp/csharp-new-project.md),
 which also backs `/new`. The first component created at initialization
 follows it too.
+
+### Samples
+
+A sample under `examples/` is a component like any other, with its own
+solution, `src/` and `test/`, and it exists to show a consumer how the
+libraries are used against something real. Its shape keeps it from drifting
+away from what is verified:
+
+- **One scenario method does the work and returns a report.** A static
+  `Scenario.RunAsync` takes what it needs and a `TextWriter`, narrates each
+  step to the writer, and returns a record of what it observed.
+- **The program prints; the test asserts.** `Program.cs` runs the scenario
+  against the console and turns success or failure into an exit code. The
+  test project runs the *same method* with a null writer and asserts the
+  report. A sample whose test exercised different code would be a sample
+  nobody has run.
+- **What samples share is a library, not a sample.** The hosting, the
+  throwaway resources and the program shell go in `examples/common`, so each
+  sample is only its scenario.
+- **A sample leaves nothing behind.** Whatever it creates — a database, a
+  file, a container — it removes, pass or fail.
+
+A sample that needs a real dependency is an integration test and is gated
+like one; see `csharp-unit-tests-rules.md`.
 
 ## Choices made here
 
