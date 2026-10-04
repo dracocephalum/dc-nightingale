@@ -67,6 +67,15 @@ credentials, not a schema migration; the category and type indexes lead with
 the tenant column. Database-per-tenant is not planned: there is no coherent
 cross-tenant position across databases.
 
+The samples would use it. Each scenario under `examples/` creates and
+initializes a database of its own, because several of them append to the same
+stream names and read the same category. With tenants, one database
+initialized once serves every scenario of a run, a tenant each: names, groups
+and ordinals are per tenant, so the scenarios keep their names and their
+dense numbering. Positions are the exception while the sequence is shared: a
+scenario would assert them relative to where it started, or run on a
+tenant-partitioned store.
+
 ## Ordinals on a store initialized without them
 
 Ordinal numbering of the virtual streams (`DESIGN.md`, seam 6) is a store
