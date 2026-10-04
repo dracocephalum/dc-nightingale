@@ -437,6 +437,6 @@ connection whatever is configured.
 - `*.Tests.Integration` projects need the local SQL Server and run only with
   `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
   path, and the two guards above. Each creates its databases and drops them.
-- `examples/` are programs that narrate a scenario end to end and tests that
-  assert the same run, against a database the server creates and the sample
-  drops.
+- `examples/` holds one program per backend that narrates each of its scenarios
+  end to end, and a test per scenario that asserts the same run, against a
+  database the server creates and the scenario drops.
