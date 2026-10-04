@@ -47,7 +47,7 @@ append them after `--`:
 | Switch | Does |
 |---|---|
 | `--export-schema schema.sql` | writes the creation script of a new store: the event store's tables with the gateway's additions, then the gateway's own tables; connects to nothing |
-| `--schema-report` | prints what the configured database needs: changes to the event store's tables, the gateway's pending migrations, and settings the configuration contradicts; exit code 0 when it is current, 1 when it is not |
+| `--schema-report` | prints what the configured database needs: that it is not initialized yet, or changes to the event store's tables, the gateway's pending migrations, and settings the configuration contradicts; exit code 0 when it is current, 1 when it is not |
 | `--apply-schema` | brings the configured database up to date, the event store's tables first and the gateway's after, whatever `Nightingale:ApplySchemaChanges` says |
 
 The gateway's own tables are created by EF Core migrations, generated from
@@ -80,6 +80,7 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:ConnectionStringName` | `Nightingale` | which entry under `ConnectionStrings` the server uses |
 | `Nightingale:CreateDatabase` | `true` | create the database when it does not exist; off, a missing database is an error, for a host whose login may not create one |
 | `Nightingale:ApplySchemaChanges` | `false` | apply what a store initialized earlier needs at startup: changes to the event store's tables, then the gateway's pending migrations; off, a database that is behind is refused with what would be applied in the message |
+| `Nightingale:FastBoot` | `false` | at startup, take the event store's tables as current when the hash recorded with them is the hash of the creation script this server would apply, instead of comparing every table; the hash covers the store library, the schema library under it, the gateway's additions and the settings, so an upgrade still compares, but a change made to the tables outside the server goes unnoticed; `--schema-report` and `--apply-schema` always compare |
 | `Nightingale:Schema` | `nightingale` | the schema the gateway keeps its own tables and its migrations history in; it may be the event store's schema |
 | `Nightingale:UseReadOnlyConnection` | `true` | open a second, read-only connection and serve from it the pages of `$all` and of the virtual streams that lie at or below its own high-water mark; exact, and where there is no readable secondary it reaches the same server |
 | `Nightingale:ReadOnlyConnectionStringName` | none | which entry under `ConnectionStrings` the read-only connection uses, exactly as written; unset, the main string with `ApplicationIntent=ReadOnly`, which a listener with read-only routing sends to a secondary |

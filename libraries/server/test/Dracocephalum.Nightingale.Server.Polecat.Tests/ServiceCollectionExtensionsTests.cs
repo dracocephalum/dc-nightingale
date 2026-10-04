@@ -33,6 +33,7 @@ public sealed class ServiceCollectionExtensionsTests
             ("ConnectionStrings:Nightingale", ConnectionString),
             ("Nightingale:CreateDatabase", "false"),
             ("Nightingale:ApplySchemaChanges", "true"),
+            ("Nightingale:FastBoot", "true"),
             ("Nightingale:Store:Collation", "Latin1_General_100_BIN2"),
             ("Nightingale:Store:Partitioning", "ArchivedStream"),
             ("Nightingale:Deletion:AllowTombstone", "true"));
@@ -48,6 +49,7 @@ public sealed class ServiceCollectionExtensionsTests
             bound => bound.ConnectionStringName.ShouldBe("Nightingale"),
             bound => bound.CreateDatabase.ShouldBeFalse(),
             bound => bound.ApplySchemaChanges.ShouldBeTrue(),
+            bound => bound.FastBoot.ShouldBeTrue(),
             bound => bound.Store.Collation.ShouldBe("Latin1_General_100_BIN2"),
             bound => bound.Store.Partitioning.ShouldBe(PartitioningMode.ArchivedStream),
             bound => bound.Deletion.AllowDelete.ShouldBeFalse(),

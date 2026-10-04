@@ -17,8 +17,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class StoreInitializerTests : IAsyncLifetime
 {
-    /// <summary>One row per value of what a store is initialized with: four settings, who and when, and the store library.</summary>
-    private const int SettingRowCount = 7;
+    /// <summary>One row per value of what a store is initialized with: four settings, who and when, the store library and the hash of its creation script.</summary>
+    private const int SettingRowCount = 8;
 
     private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
     private readonly string _name = TestDatabases.NewName();
@@ -123,6 +123,35 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         refused.Message.ShouldContain("ix_pc_events_category_seq");
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name = 'ix_pc_events_category_seq'")).ShouldBe(1);
         await repaired.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Start_WithFastBoot_ShouldTakeTheRecordedHashAndCompareWhenItIsNotThisServers()
+    {
+        // Arrange: an initialized store one of whose indexes was dropped outside the server.
+        using (var first = await TestDatabases.StartHostAsync(_name))
+        {
+            await first.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        await TestDatabases.ExecuteAsync(_name, "DROP INDEX ix_pc_events_category_seq ON dbo.pc_events");
+
+        // Act: the recorded hash is this server's, so a fast boot compares nothing and serves;
+        // the report compares all the same.
+        using (var trusting = await TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot()))
+        {
+            var report = await trusting.Services.GetNightingaleSchemaReportAsync(TestContext.Current.CancellationToken);
+            report.StoreChanges.ShouldNotBeNull().ShouldContain("ix_pc_events_category_seq");
+            report.StoreComparisonSkipped.ShouldBeFalse();
+            await trusting.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        // A hash that is not this server's, as after an upgrade of the store library: compared, and refused.
+        await TestDatabases.ExecuteAsync(_name, "UPDATE nightingale.Setting SET [Value] = 'another' WHERE [Name] = 'StoreSchemaHash'");
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot()));
+
+        // Assert
+        refused.Message.ShouldContain("ix_pc_events_category_seq");
     }
 
     [Fact]

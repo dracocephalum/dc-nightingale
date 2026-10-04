@@ -38,17 +38,18 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
     private const string WhyUtf8 = "The event store keeps stream names, event types and tenants in columns that are not Unicode, and under any other collation a character outside the code page is stored as a question mark, so two names in another script become one.";
 
     /// <inheritdoc/>
-    public Task StartAsync(CancellationToken cancellationToken) => InitializeAsync(options.ApplySchemaChanges, cancellationToken);
+    public Task StartAsync(CancellationToken cancellationToken) => InitializeAsync(options.ApplySchemaChanges, options.FastBoot, cancellationToken);
 
     /// <inheritdoc/>
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>Brings the database to a state the server can serve, or refuses, saying why.</summary>
     /// <param name="applyChanges">Whether changes an initialized store needs are applied, or refused.</param>
+    /// <param name="fastBoot">Whether a recorded hash equal to this server's stands in for comparing the event store's tables.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the store can be served.</returns>
     /// <exception cref="StoreInitializationException">The store cannot be served; the message says why.</exception>
-    public async Task InitializeAsync(bool applyChanges, CancellationToken cancellationToken)
+    public async Task InitializeAsync(bool applyChanges, bool fastBoot, CancellationToken cancellationToken)
     {
         var target = new SqlConnectionStringBuilder(connectionString);
         var name = target.InitialCatalog;
@@ -71,7 +72,7 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
             LogCreatedDatabase(name, options.Store.Collation ?? "the server default");
         }
 
-        var report = await schema.ReportAsync(cancellationToken).ConfigureAwait(false);
+        var report = await schema.ReportAsync(fastBoot, cancellationToken).ConfigureAwait(false);
         if (!report.Initialized)
         {
             await InitializeEmptyDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
@@ -101,6 +102,11 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
 
             await schema.ApplyAsync(cancellationToken).ConfigureAwait(false);
             LogAppliedChanges(name, report.PendingMigrations.Count, report.StoreChanges is not null);
+        }
+
+        if (report.StoreComparisonSkipped)
+        {
+            LogStoreComparisonSkipped(name);
         }
 
         var createdBy = await schema.ReadCreatedByAsync(cancellationToken).ConfigureAwait(false);
@@ -226,6 +232,9 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Applied schema changes to database {Database}: {Migrations} of the gateway's migrations, and changes to the event store's tables: {StoreChanged}.")]
     private partial void LogAppliedChanges(string database, int migrations, bool storeChanged);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Fast boot: the event store's tables in database {Database} were not compared, because the recorded hash of their creation script is this server's. A change made to them outside the server goes unnoticed.")]
+    private partial void LogStoreComparisonSkipped(string database);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Serving the store in database {Database}, initialized by {CreatedBy}.")]
     private partial void LogServingStore(string database, string createdBy);

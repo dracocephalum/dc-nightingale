@@ -102,6 +102,70 @@ internal static class TestDatabases
         return host;
     }
 
+    /// <summary>
+    /// Makes an initialized store without the server: the event store's tables from its creation
+    /// script, run as one command, then what the server itself does after applying them, the
+    /// gateway's migrations and the rows that record what the store was made from. The server's
+    /// own way compares the database with what the store expects, and the first comparison in a
+    /// database costs many seconds of query compilation; a test that is not about initialization
+    /// has no use for it. <c>StoreCreationTests</c> holds a store made this way equal to one the
+    /// server initialized.
+    /// </summary>
+    /// <param name="name">The database name; the database must not exist.</param>
+    /// <param name="configure">Adjusts the options, as for the host that will serve the store.</param>
+    /// <returns>A task that completes when the store is there.</returns>
+    public static async Task ProvisionAsync(string name, Action<NightingaleOptions>? configure = null)
+    {
+        var options = new NightingaleOptions();
+        configure?.Invoke(options);
+        await CreateEmptyAsync(name);
+
+        var services = new ServiceCollection();
+        services.AddNightingalePolecat(ConnectionStringFor(name), configure);
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<global::Polecat.IDocumentStore>();
+        foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync())
+        {
+            await ExecuteAsync(name, database.ToDatabaseScript());
+        }
+
+        var schema = provider.GetRequiredService<StoreSchema>();
+        await schema.MigrateAsync(CancellationToken.None);
+        await schema.WriteInitializationAsync(
+            new StoreSettings
+            {
+                Schema = options.Store.Schema,
+                Collation = NightingaleOptions.StoreOptions.DefaultCollation,
+                Partitioning = options.Store.Partitioning,
+                AssignOrdinals = options.Store.AssignOrdinals,
+            },
+            TimeProvider.System.GetUtcNow(),
+            "a test",
+            CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Hosts the backend against a store made by <see cref="ProvisionAsync"/>, with fast boot on,
+    /// so the start takes the recorded hash for the store's tables and compares nothing.
+    /// </summary>
+    /// <param name="name">The database name; the database must not exist.</param>
+    /// <param name="configure">Adjusts the options.</param>
+    /// <returns>The started host; stop and dispose it when done.</returns>
+    public static async Task<IHost> StartProvisionedHostAsync(string name, Action<NightingaleOptions>? configure = null)
+    {
+        await ProvisionAsync(name, configure);
+        return await StartHostAsync(name, FastBoot(configure));
+    }
+
+    /// <summary>The same options, with fast boot on.</summary>
+    /// <param name="configure">Adjusts the options.</param>
+    /// <returns>The adjustment, followed by turning fast boot on.</returns>
+    public static Action<NightingaleOptions> FastBoot(Action<NightingaleOptions>? configure = null) => options =>
+    {
+        configure?.Invoke(options);
+        options.FastBoot = true;
+    };
+
     /// <summary>The store a host registered.</summary>
     /// <param name="host">The host.</param>
     /// <returns>The store.</returns>
