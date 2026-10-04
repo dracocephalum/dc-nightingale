@@ -140,8 +140,8 @@ public static class ServiceCollectionExtensions
         store.DatabaseSchemaName = options.Store.Schema;
         store.Events.StreamIdentity = StreamIdentity.AsString;
         store.Events.TenancyStyle = TenancyStyle.Conjoined;
-        store.EventGraph.UseTenantPartitionedEvents = options.Store.Partitioning == NightingaleOptions.StoreSettings.PartitioningMode.Tenant;
-        store.EventGraph.UseArchivedStreamPartitioning = options.Store.Partitioning == NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream;
+        store.EventGraph.UseTenantPartitionedEvents = options.Store.Partitioning == PartitioningMode.Tenant;
+        store.EventGraph.UseArchivedStreamPartitioning = options.Store.Partitioning == PartitioningMode.ArchivedStream;
         store.Events.EnableCorrelationId = true;
         store.Events.EnableCausationId = true;
         store.Events.EnableHeaders = true;

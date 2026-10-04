@@ -47,7 +47,10 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         modelBuilder.HasDefaultSchema(schema.Name);
 
         // Names are compared by the database's own rule for which names are the same; nothing
-        // here folds case. They are not Unicode because the event store's are not. A column that
+        // here folds case. A tenant and a stream are not Unicode because the event store's
+        // columns for them are not, and a value that could not be stored there has no business
+        // here; a group's name is the gateway's own and is Unicode, so two names in another
+        // script are two groups whatever the database's code page. A column that
         // refers to a row of another of these tables is named for that table and is a foreign key
         // to it, never cascading: a group's rows are deleted with it, by the code that deletes it.
         modelBuilder.Entity<SubscriptionGroup>(group =>
@@ -56,7 +59,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             group.HasKey(row => row.Id);
             group.Property(row => row.TenantId).HasMaxLength(250).IsUnicode(false);
             group.Property(row => row.Stream).HasMaxLength(250).IsUnicode(false);
-            group.Property(row => row.Name).HasMaxLength(250).IsUnicode(false);
+            group.Property(row => row.Name).HasMaxLength(250);
             group.HasIndex(row => new { row.TenantId, row.Stream, row.Name }).IsUnique();
         });
 

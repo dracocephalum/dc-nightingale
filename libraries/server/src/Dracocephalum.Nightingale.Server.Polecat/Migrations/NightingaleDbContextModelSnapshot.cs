@@ -121,8 +121,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(250)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(250)");
+                        .HasColumnType("nvarchar(250)");
 
                     b.Property<string>("Settings")
                         .IsRequired()

@@ -67,74 +67,22 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     /// Gets or sets the settings fixed when the store is initialized and checked on every later
     /// start.
     /// </summary>
-    public StoreSettings Store { get; set; } = new();
+    public StoreOptions Store { get; set; } = new();
 
     /// <summary>
-    /// The choices made once, when the store is initialized on an empty database, because each one
-    /// shapes the events table and changing it afterwards means rebuilding the table. The server
-    /// records them in the store and refuses to start against a store whose record disagrees with
-    /// the configuration, so a setting cannot drift under a running system.
+    /// The store's settings as a host of this backend configures them: the four every store is
+    /// initialized with, from the base, and the check that they are values SQL Server and this
+    /// backend can take. The schema is the store's default, <c>dbo</c>, unless said otherwise,
+    /// and is created with the tables when it does not exist. The collation is only used when the
+    /// server creates the database, a database provisioned by hand keeps its own and the setting,
+    /// when given, must match it; SQL Server's default collations do not tell case apart, a binary
+    /// one such as <c>Latin1_General_100_BIN2</c> does, and a UTF-8 one is what lets a stream name
+    /// hold characters outside the collation's code page. Ordinals fit partitioning by tenant by
+    /// construction, and are refused with it only until the sequencer follows a high-water mark
+    /// per tenant, which the multi-tenancy work brings.
     /// </summary>
-    public sealed partial class StoreSettings
+    public sealed partial class StoreOptions : StoreSettings
     {
-        /// <summary>
-        /// How the events table is partitioned. One value rather than one switch per scheme because
-        /// a SQL Server table has exactly one partition scheme, and because the choice is made once,
-        /// when the store is initialized: changing it means rebuilding the table, so the server
-        /// records it and refuses a configuration that disagrees.
-        /// </summary>
-        public enum PartitioningMode
-        {
-            /// <summary>One partition; one global sequence numbers every event.</summary>
-            None = 0,
-
-            /// <summary>
-            /// A partition per tenant, each tenant numbering its events from its own sequence.
-            /// Positions are then per tenant, and a read across all tenants has no coherent
-            /// position, so the server refuses the wildcard tenant.
-            /// </summary>
-            Tenant = 1,
-
-            /// <summary>
-            /// Two partitions, live and archived, so the events of deleted streams sit apart and
-            /// every read of live events touches only the other. The sequence stays global.
-            /// </summary>
-            ArchivedStream = 2,
-        }
-
-        /// <summary>
-        /// Gets or sets the collation the database is created with, or null for the server's
-        /// default. It decides whether two stream names that differ only in case are the same
-        /// stream: SQL Server's default collations are case-insensitive, a binary collation such as
-        /// <c>Latin1_General_100_BIN2</c> is not. Only used when the server creates the database; a
-        /// database provisioned by hand keeps its own, and this setting, when given, must match it.
-        /// </summary>
-        public string? Collation { get; set; }
-
-        /// <summary>Gets or sets how the events table is partitioned.</summary>
-        public PartitioningMode Partitioning { get; set; } = PartitioningMode.None;
-
-        /// <summary>
-        /// Gets or sets the schema every table lives in, the store's and the gateway's alike, so the
-        /// gateway's indexes and the sequencer's batch stay within one schema. The store's default,
-        /// <c>dbo</c>. Created by the server with the tables when it does not exist. Fixed at
-        /// initialization: a store initialized in one schema is found nowhere else.
-        /// </summary>
-        public string Schema { get; set; } = "dbo";
-
-        /// <summary>
-        /// Gets or sets a value indicating whether the virtual streams are numbered: two columns on
-        /// the events table hold each event's dense, zero-based place within its category stream and
-        /// its event-type stream, assigned after commit by one sequencer per cluster, so a consumer
-        /// can read <c>$ce-</c> and <c>$et-</c> by ordinal and count with a subtraction. Off, an
-        /// ordinal read is refused. Fixed at initialization because the columns and their indexes
-        /// shape the table; a store that adopts it later needs a backfill, which is pending. Ordinals
-        /// are per tenant by construction, so the feature fits partitioning by tenant; it is refused
-        /// with it only until the sequencer follows a high-water mark per tenant, which the
-        /// multi-tenancy work brings.
-        /// </summary>
-        public bool AssignOrdinals { get; set; }
-
         /// <summary>Checks the settings are consistent.</summary>
         /// <exception cref="InvalidOperationException">A setting is not a value it can take.</exception>
         public void Validate()

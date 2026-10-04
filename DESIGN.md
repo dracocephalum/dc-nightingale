@@ -46,7 +46,7 @@ type name and JSON body are the whole event. `JsonEvent` is the seam. It is the
 store's event wrapper over a `JsonElement`, sealed, with the type name the
 client sent held in a property whose setter does nothing, so the store's own
 naming pass cannot overwrite it. The body is written and read as JSON text
-with `NightingaleJson.Options`, the one set of serializer options every
+with `NightingaleJson.Default`, the one set of serializer options every
 component uses for JSON it does not own, so the client's casing, key order,
 number formatting and unicode come back byte for byte, insignificant
 whitespace aside.
@@ -148,11 +148,12 @@ whether ordinals are assigned (seam 6). Changing any of them means a new
 database, and the settings rows record each so a changed configuration is
 refused rather than served.
 
-The rows are settings in the plainest sense: each is a name, a
-configuration path, and a value, and they are read by the configuration
-binder into the very type the configuration binds into. So the stored
-settings and the configured ones are two instances of one type, compared
-property by property, and the table never changes shape: a store older than
+The rows are settings in the plainest sense: each is a name, the path the
+setting has in a settings file, `Store:Partitioning`, and a value, and they
+are read by the configuration binder into `StoreSettings`, the base of the
+type the configuration binds into. Both are seen through one interface,
+`IStoreSettings`, which every backend's settings carry, and the comparison
+is written against it, property by property, and the table never changes shape: a store older than
 a setting has no row for it and reads as the default, and a row a newer
 server wrote is ignored by an older one.
 

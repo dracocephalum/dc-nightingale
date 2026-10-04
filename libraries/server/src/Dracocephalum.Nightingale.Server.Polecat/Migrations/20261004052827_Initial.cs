@@ -66,7 +66,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     TenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
                     Stream = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
-                    Name = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(250)", maxLength: 250, nullable: false),
                     Settings = table.Column<string>(type: "nvarchar(max)", nullable: false),
                     CheckpointPosition = table.Column<long>(type: "bigint", nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)

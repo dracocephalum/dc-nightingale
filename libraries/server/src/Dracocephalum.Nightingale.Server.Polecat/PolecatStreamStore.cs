@@ -326,7 +326,7 @@ internal sealed class PolecatStreamStore(IDocumentStore store, IDbContextFactory
             stored.Sequence,
             stored.EventTypeName,
             stored.Timestamp,
-            stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, NightingaleJson.Options) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, NightingaleJson.Options),
+            stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, NightingaleJson.Default) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, NightingaleJson.Default),
             JsonEvent.MetadataOf(stored));
 
     /// <summary>

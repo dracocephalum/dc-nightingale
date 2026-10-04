@@ -44,7 +44,7 @@ public sealed class SchemaExportTests
     {
         // Arrange: the store is registered as a host registers it, against a server nobody connects to.
         var services = new ServiceCollection();
-        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream);
+        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.Partitioning = PartitioningMode.ArchivedStream);
         using var provider = services.BuildServiceProvider();
         var path = Path.Combine(Path.GetTempPath(), "nightingale-schema-" + Guid.NewGuid().ToString("N") + ".sql");
 

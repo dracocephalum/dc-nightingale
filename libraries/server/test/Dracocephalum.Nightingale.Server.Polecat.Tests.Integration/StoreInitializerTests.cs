@@ -97,7 +97,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Act
         var exception = await Should.ThrowAsync<StoreInitializationException>(
-            () => TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant));
+            () => TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.Tenant));
 
         // Assert
         exception.Message.ShouldContain("Partitioning is Tenant but the store was initialized with None");
@@ -273,7 +273,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async Task Start_WithTenantPartitioning_ShouldAppendReadAndKeepTheSchemaStable()
     {
         // Arrange
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant);
+        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.Tenant);
         var store = host.Store();
 
         // Act: the first append provisions the default tenant's partition and sequence.
@@ -292,7 +292,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async Task Start_WithArchivedStreamPartitioning_ShouldAppendReadAndKeepTheSchemaStable()
     {
         // Arrange
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream);
+        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.ArchivedStream);
         var store = host.Store();
 
         // Act

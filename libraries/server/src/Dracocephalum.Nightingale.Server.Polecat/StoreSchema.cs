@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 
 using Dracocephalum.Nightingale.Server.Persistence;
@@ -24,6 +25,15 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="options">The host's options.</param>
 internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<NightingaleDbContext> contexts, string connectionString, NightingaleOptions options)
 {
+    /// <summary>The row that says when the store was initialized. Not a setting: nothing is compared with it.</summary>
+    public const string CreatedAtRow = "CreatedAt";
+
+    /// <summary>The row that says which server version initialized the store.</summary>
+    public const string CreatedByRow = "CreatedBy";
+
+    /// <summary>The row that says which version of the event-store library last applied its schema.</summary>
+    public const string StoreLibraryRow = "StoreLibrary";
+
     /// <summary>Gets the version of the event-store library this server was built with.</summary>
     public static string StoreLibraryVersion { get; } =
         typeof(IDocumentStore).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
@@ -43,7 +53,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         var applied = (await context.Database.GetAppliedMigrationsAsync(cancellationToken).ConfigureAwait(false)).ToList();
         var initialized = applied.Count > 0;
         IReadOnlyList<string> conflicts = initialized
-            ? (await context.ReadSettingsAsync<StoredSettings>(cancellationToken).ConfigureAwait(false)).DifferencesFrom(options.Store)
+            ? (await context.ReadSettingsAsync<StoreSettings>(cancellationToken).ConfigureAwait(false)).DifferencesFrom(options.Store)
             : [];
 
         // The store's tables are compared under the configured settings, which shape them; under
@@ -88,26 +98,30 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
 
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
-        await context.WriteSettingAsync(nameof(StoredSettings.StoreLibrary), StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
+        await context.WriteSettingAsync(StoreLibraryRow, StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Records what an empty database was initialized with.</summary>
-    /// <param name="settings">The settings.</param>
+    /// <summary>Records what an empty database was initialized with, and by whom and when.</summary>
+    /// <param name="settings">The settings, with the database's actual collation.</param>
+    /// <param name="createdAt">When the store was initialized.</param>
+    /// <param name="createdBy">The version of the server that initialized it.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the rows are written.</returns>
-    public async Task WriteSettingsAsync(StoredSettings settings, CancellationToken cancellationToken)
+    public async Task WriteInitializationAsync(IStoreSettings settings, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.WriteSettingsAsync(settings, cancellationToken).ConfigureAwait(false);
+        await context.WriteSettingAsync(CreatedAtRow, createdAt.ToString("O", CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
+        await context.WriteSettingAsync(CreatedByRow, createdBy, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Reads what the store was initialized with.</summary>
+    /// <summary>Reads which server version initialized the store.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The settings.</returns>
-    public async Task<StoredSettings> ReadSettingsAsync(CancellationToken cancellationToken)
+    /// <returns>The version, or "unknown" when the store does not say.</returns>
+    public async Task<string> ReadCreatedByAsync(CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        return await context.ReadSettingsAsync<StoredSettings>(cancellationToken).ConfigureAwait(false);
+        return await context.ReadSettingAsync(CreatedByRow, cancellationToken).ConfigureAwait(false) ?? "unknown";
     }
 
     /// <summary>The change the event store's tables need, or <see langword="null"/> when they match.</summary>

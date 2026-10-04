@@ -220,7 +220,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             row.SeqId,
             row.Type,
             row.Timestamp,
-            JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Options),
+            JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Default),
             metadata,
             row.Ordinal);
     }

@@ -92,8 +92,8 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
             LogAppliedChanges(name, report.PendingMigrations.Count, report.StoreChanges is not null);
         }
 
-        var stored = await schema.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        LogServingStore(name, stored.CreatedBy);
+        var createdBy = await schema.ReadCreatedByAsync(cancellationToken).ConfigureAwait(false);
+        LogServingStore(name, createdBy);
     }
 
     private static async Task CreateDatabaseAsync(string master, string name, string? collation, CancellationToken cancellationToken)
@@ -159,20 +159,18 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
         }
 
         await schema.ApplyAsync(cancellationToken).ConfigureAwait(false);
-        await schema.WriteSettingsAsync(
-            new StoredSettings
+
+        // What is recorded is what is configured, with the collation the database actually has.
+        await schema.WriteInitializationAsync(
+            new StoreSettings
             {
-                Store = new NightingaleOptions.StoreSettings
-                {
-                    Schema = options.Store.Schema,
-                    Collation = collation,
-                    Partitioning = options.Store.Partitioning,
-                    AssignOrdinals = options.Store.AssignOrdinals,
-                },
-                CreatedAt = timeProvider.GetUtcNow(),
-                CreatedBy = typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown",
-                StoreLibrary = StoreSchema.StoreLibraryVersion,
+                Schema = options.Store.Schema,
+                Collation = collation,
+                Partitioning = options.Store.Partitioning,
+                AssignOrdinals = options.Store.AssignOrdinals,
             },
+            timeProvider.GetUtcNow(),
+            typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown",
             cancellationToken).ConfigureAwait(false);
 
         LogInitializedStore(name, options.Store.Schema, options.Schema, collation, options.Store.Partitioning, options.Store.AssignOrdinals);
@@ -182,7 +180,7 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
     private partial void LogCreatedDatabase(string database, string collation);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Initialized the store in database {Database}: the event store in schema {StoreSchema}, the gateway's tables in schema {Schema}, collation {Collation}, partitioning {Partitioning}, ordinals {Ordinals}.")]
-    private partial void LogInitializedStore(string database, string storeSchema, string schema, string collation, NightingaleOptions.StoreSettings.PartitioningMode partitioning, bool ordinals);
+    private partial void LogInitializedStore(string database, string storeSchema, string schema, string collation, PartitioningMode partitioning, bool ordinals);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Applied schema changes to database {Database}: {Migrations} of the gateway's migrations, and changes to the event store's tables: {StoreChanged}.")]
     private partial void LogAppliedChanges(string database, int migrations, bool storeChanged);

@@ -73,7 +73,7 @@ public sealed class ReadOnlyConnectionTests(SqlServerTestDatabase database)
                 read => read.Type.ShouldBe(viaStore.Type),
                 read => read.Created.ShouldBe(viaStore.Created),
                 read => Encoding.UTF8.GetString(read.Data.Span).ShouldBe(body),
-                read => read.Metadata.ToJsonString(NightingaleJson.Options).ShouldBe(viaStore.Metadata.ToJsonString(NightingaleJson.Options)));
+                read => read.Metadata.ToJsonString(NightingaleJson.Default).ShouldBe(viaStore.Metadata.ToJsonString(NightingaleJson.Default)));
         }
     }
 

@@ -34,7 +34,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             TenantId = tenantId,
             Stream = group.Stream,
             Name = group.Group,
-            Settings = JsonSerializer.Serialize(StoredSettings.From(group.Settings)),
+            Settings = JsonSerializer.Serialize(StoredSettings.From(group.Settings), NightingaleJson.Default),
             CheckpointPosition = group.Checkpoint,
             CreatedAt = timeProvider.GetUtcNow(),
         });
@@ -61,7 +61,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             return null;
         }
 
-        var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings) ?? throw new InvalidOperationException("The group's settings are not readable.");
+        var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings, NightingaleJson.Default) ?? throw new InvalidOperationException("The group's settings are not readable.");
 
         // The names are the row's own: a case-insensitive database finds the row under another
         // spelling, and the group still goes by the names it was created with.

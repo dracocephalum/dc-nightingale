@@ -134,6 +134,28 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
     }
 
     [Fact]
+    public async Task Groups_WithNamesInAnotherScript_ShouldBeTwoGroups()
+    {
+        // Arrange: two names no character of which is in the database's code page. In a column
+        // that is not Unicode both would be stored as question marks, and be one name.
+        var sut = Store();
+        var (stream, _) = Names();
+        const string billing = "计费";
+        const string ledger = "账单";
+
+        // Act
+        await sut.CreateAsync(new GroupDefinition(stream, billing, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new GroupDefinition(stream, ledger, GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        var first = await sut.GetAsync(stream, billing, TestContext.Current.CancellationToken);
+        var second = await sut.GetAsync(stream, ledger, TestContext.Current.CancellationToken);
+
+        // Assert
+        first.ShouldNotBeNull().Group.ShouldBe(billing);
+        second.ShouldNotBeNull().Group.ShouldBe(ledger);
+        second.Id.ShouldNotBe(first.Id);
+    }
+
+    [Fact]
     public async Task Get_UnderAnotherSpelling_ShouldReturnTheGroupUnderTheNamesItWasCreatedWith()
     {
         // Arrange: whether another spelling is the same group is the database's to say.

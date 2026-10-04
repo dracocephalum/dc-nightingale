@@ -80,7 +80,7 @@ internal sealed class JsonEvent : Event<JsonElement>, IEvent
     public static JsonObject MetadataOf(IEvent stored)
     {
         var metadata = stored.Headers is { Count: > 0 } headers
-            ? JsonSerializer.SerializeToNode(headers) as JsonObject ?? []
+            ? JsonSerializer.SerializeToNode(headers, NightingaleJson.Default) as JsonObject ?? []
             : [];
         if (stored.CorrelationId is { } correlation)
         {

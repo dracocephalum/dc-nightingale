@@ -166,7 +166,7 @@ public static class WireConversions
     public static ByteString ToMetadataBytes(JsonObject? metadata) =>
         metadata is null || metadata.Count == 0
             ? ByteString.Empty
-            : ByteString.CopyFromUtf8(metadata.ToJsonString(NightingaleJson.Options));
+            : ByteString.CopyFromUtf8(metadata.ToJsonString(NightingaleJson.Default));
 
     /// <summary>Parses wire metadata back into an object.</summary>
     /// <param name="metadata">The bytes; must hold a JSON object.</param>

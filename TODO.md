@@ -124,6 +124,16 @@ undecided adds it here rather than mentioning it once in a conversation.
   Default: our own proto in the same shape, with our own client. Close by:
   confirming the default before the proto is written; it changes message
   shapes.
+- **A stream name outside the database's code page loses its characters.** The
+  event store keeps stream names, event types and tenants in columns that are
+  not Unicode, so under SQL Server's default collation a character outside the
+  collation's code page is stored as a question mark: two stream names in
+  another script, of the same length, become one stream, silently. Measured on
+  the default collation; under a UTF-8 collation the same two names stay
+  apart. The gateway's own names do not have the problem, a group's name is
+  Unicode. Close by: deciding between a UTF-8 collation as the default the
+  server creates a database with, refusing at the API a name the store's
+  collation cannot hold, or both.
 - **Event identity and idempotent retries.** The reference event store de-duplicates by
   client-supplied event id within a stream, which makes an append safe to
   retry after a timeout. Default: honour client ids and enforce uniqueness
