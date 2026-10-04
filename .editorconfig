@@ -99,7 +99,11 @@ insert_final_newline = true
 
 # [StyleCop] stylecop.json orderingRules.systemUsingDirectivesFirst = true
 # Organize usings
-dotnet_separate_import_directive_groups = true
+# Not the generated value, which is true and asks for a blank line between every
+# group of usings. The code keeps System first with one blank line after it and
+# none between the other groups; nothing in the build asks for more, and left
+# on, `dotnet format whitespace` reports nearly every file.
+dotnet_separate_import_directive_groups = false
 dotnet_sort_system_directives_first = true
 # [StyleCop] SA1633 is disabled in the ruleset, so no header is required.
 file_header_template = unset
