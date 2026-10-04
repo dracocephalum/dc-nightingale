@@ -8,7 +8,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// <summary>
 /// The server owns its database: it creates or initializes an empty one, records the settings that
 /// shaped it, refuses a database that is not its own or whose record disagrees with the
-/// configuration, and never migrates while serving unless told to. Every test here uses a
+/// configuration, and never migrates while serving unless told to. The decisions themselves are
+/// tested without a database, in the unit tests of the initializer; what is here is what only a
+/// real database shows, and a test whose subject is not the first initialization makes its store
+/// from the creation script instead. Every test here uses a
 /// database of its own, dropped at the end whatever happened, and they run one at a time: each
 /// start runs the store's catalog query, whose memory grant a small SQL Server hands out one at a
 /// time.
@@ -59,20 +62,6 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WhenDatabaseWasProvisionedEmptyByHand_ShouldInitializeIt()
-    {
-        // Arrange: a database administrator created the database; the login may not create one.
-        await TestDatabases.CreateEmptyAsync(_name);
-
-        // Act
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.CreateDatabase = false);
-
-        // Assert
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting")).ShouldBe(SettingRowCount);
-        await host.StopAsync(TestContext.Current.CancellationToken);
-    }
-
-    [Fact]
     public async Task Start_WhenDatabaseHoldsForeignTables_ShouldRefuse()
     {
         // Arrange
@@ -90,10 +79,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async Task Start_WhenSettingsDifferFromWhatTheStoreWasInitializedWith_ShouldRefuse()
     {
         // Arrange
-        using (var first = await TestDatabases.StartHostAsync(_name))
-        {
-            await first.StopAsync(TestContext.Current.CancellationToken);
-        }
+        await TestDatabases.ProvisionAsync(_name);
 
         // Act
         var exception = await Should.ThrowAsync<StoreInitializationException>(
@@ -200,10 +186,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async Task Start_WhenTheStoreIsNewerThanTheServer_ShouldRefuse()
     {
         // Arrange: a store a newer server has migrated carries a migration this one does not have.
-        using (var first = await TestDatabases.StartHostAsync(_name))
-        {
-            await first.StopAsync(TestContext.Current.CancellationToken);
-        }
+        await TestDatabases.ProvisionAsync(_name);
 
         await TestDatabases.ExecuteAsync(_name, "INSERT INTO nightingale.__EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('29990101000000_FromTheFuture', '99.0.0')");
 
@@ -271,7 +254,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async Task Start_ByDefault_ShouldTellStreamNamesApartByCaseAndByScript()
     {
         // Arrange & Act: the default collation is binary and UTF-8.
-        using var host = await TestDatabases.StartHostAsync(_name);
+        using var host = await TestDatabases.StartProvisionedHostAsync(_name);
         var store = host.Store();
         await store.AppendAsync("Orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
         var lower = await store.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
@@ -354,26 +337,6 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldBe(collation);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting WHERE [Name] LIKE '%IgnoreCollation%'")).ShouldBe(0);
         withoutTheChoice.Message.ShouldContain("which is not a UTF-8 collation");
-    }
-
-    [Fact]
-    public async Task Start_WhenTheHostIgnoresCollationCompatibility_ShouldInitializeAProvisionedDatabaseThatIsNotUtf8()
-    {
-        // Arrange: a database created by hand with the server's own default collation.
-        await TestDatabases.CreateEmptyAsync(_name, collation: null);
-
-        // Act: no collation configured means whichever the database has.
-        using var host = await TestDatabases.StartHostAsync(_name, options =>
-        {
-            options.Store.Collation = null;
-            options.Store.IgnoreCollationCompatibility = true;
-        });
-        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-
-        // Assert
-        appended.Revision.ShouldBe(0);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldNotContain("UTF8");
-        await host.StopAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]

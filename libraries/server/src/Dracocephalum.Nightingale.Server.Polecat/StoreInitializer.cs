@@ -1,7 +1,5 @@
-using System.Globalization;
 using System.Reflection;
 
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -19,14 +17,16 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// said to apply it. A database with tables that the gateway never initialized is refused
 /// outright: it is not ours. The store's own schema management stays off throughout, because its
 /// table ensurer would rebuild the events table from the unpatched definition on first use.
-/// What is pending and how it is applied is <see cref="StoreSchema"/>'s; this decides when.
+/// What is pending and how it is applied is <see cref="IStoreSchema"/>'s, and the database
+/// itself is <see cref="IStoreDatabase"/>'s; this decides when, and holds no connection of its
+/// own, so every decision in it is tested without a database.
 /// </summary>
+/// <param name="database">The database: whether it is there, making it, its collation.</param>
 /// <param name="schema">Reports what the database needs, and applies it.</param>
-/// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="options">The host's options.</param>
 /// <param name="timeProvider">The clock the store's creation is stamped with.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class StoreInitializer(StoreSchema schema, string connectionString, NightingaleOptions options, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
+internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSchema schema, NightingaleOptions options, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
 {
     /// <summary>The code page SQL Server reports for a UTF-8 collation.</summary>
     private const int Utf8CodePage = 65001;
@@ -51,16 +51,14 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
     /// <exception cref="StoreInitializationException">The store cannot be served; the message says why.</exception>
     public async Task InitializeAsync(bool applyChanges, bool fastBoot, CancellationToken cancellationToken)
     {
-        var target = new SqlConnectionStringBuilder(connectionString);
-        var name = target.InitialCatalog;
+        var name = database.Name;
         if (string.IsNullOrEmpty(name) || string.Equals(name, "master", StringComparison.OrdinalIgnoreCase))
         {
             throw new StoreInitializationException(
                 $"The connection string ConnectionStrings:{options.ConnectionStringName} must name the database to use; master is not it.");
         }
 
-        var master = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master" }.ConnectionString;
-        if (!await schema.DatabaseExistsAsync(cancellationToken).ConfigureAwait(false))
+        if (!await database.ExistsAsync(cancellationToken).ConfigureAwait(false))
         {
             if (!options.CreateDatabase)
             {
@@ -68,7 +66,7 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
                     $"Database {name} does not exist and Nightingale:CreateDatabase is false. Create it empty, or set Nightingale:CreateDatabase to true.");
             }
 
-            await CreateDatabaseAsync(master, name, options.Store.Collation, !options.Store.IgnoreCollationCompatibility, cancellationToken).ConfigureAwait(false);
+            await CreateDatabaseAsync(cancellationToken).ConfigureAwait(false);
             LogCreatedDatabase(name, options.Store.Collation ?? "the server default");
         }
 
@@ -113,57 +111,34 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
         LogServingStore(name, createdBy);
     }
 
-    private static async Task CreateDatabaseAsync(string master, string name, string? collation, bool requireUtf8, CancellationToken cancellationToken)
+    /// <summary>Creates the database with the configured collation, which is checked against the server's catalog first.</summary>
+    private async Task CreateDatabaseAsync(CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(master);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        // The name is quoted as an identifier and the collation is checked against the server's
-        // catalog before it is spliced in; both come from the host's own configuration, never from
-        // a request.
+        var collation = options.Store.Collation;
         if (collation is not null)
         {
-            await using var check = connection.CreateCommand();
-            check.CommandText = "SELECT COLLATIONPROPERTY(@collation, 'CodePage')";
-            check.Parameters.AddWithValue("@collation", collation);
-            var codePage = await check.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-            if (codePage is null or DBNull)
+            var codePage = await database.ReadCodePageAsync(collation, cancellationToken).ConfigureAwait(false);
+            if (codePage is null)
             {
                 throw new StoreInitializationException(
                     $"Nightingale:Store:Collation {collation} is not a collation this SQL Server knows; fn_helpcollations() lists the ones it does. A server older than SQL Server 2019 has no UTF-8 collation: name one it has, and see {IgnoreOption}.");
             }
 
-            if (requireUtf8 && Convert.ToInt32(codePage, CultureInfo.InvariantCulture) != Utf8CodePage)
+            if (!options.Store.IgnoreCollationCompatibility && codePage != Utf8CodePage)
             {
                 throw new StoreInitializationException(
                     $"Nightingale:Store:Collation {collation} is not a UTF-8 collation. {WhyUtf8} Name one that ends in _UTF8; unset, the server uses {NightingaleOptions.StoreOptions.DefaultCollation}. {HowToIgnore}");
             }
         }
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = collation is null
-            ? "DECLARE @sql nvarchar(400) = N'CREATE DATABASE ' + QUOTENAME(@name); EXEC(@sql);"
-            : "DECLARE @sql nvarchar(600) = N'CREATE DATABASE ' + QUOTENAME(@name) + N' COLLATE ' + @collation; EXEC(@sql);";
-        command.Parameters.AddWithValue("@name", name);
-        if (collation is not null)
-        {
-            command.Parameters.AddWithValue("@collation", collation);
-        }
-
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await database.CreateAsync(collation, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The database's collation, which must be a UTF-8 one whoever created the database.</summary>
     private async Task<string> RequireUtf8CollationAsync(string name, CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var read = connection.CreateCommand();
-        read.CommandText = "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), COLLATIONPROPERTY(CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), 'CodePage')";
-        await using var reader = await read.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-        var collation = reader.GetString(0);
-        if (reader.IsDBNull(1) || Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture) != Utf8CodePage)
+        var (collation, codePage) = await database.ReadCollationAsync(cancellationToken).ConfigureAwait(false);
+        if (codePage != Utf8CodePage)
         {
             if (options.Store.IgnoreCollationCompatibility)
             {
@@ -180,19 +155,11 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
 
     private async Task InitializeEmptyDatabaseAsync(string name, CancellationToken cancellationToken)
     {
-        await using (var connection = new SqlConnection(connectionString))
+        var tables = await database.CountTablesAsync(cancellationToken).ConfigureAwait(false);
+        if (tables > 0)
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await using (var count = connection.CreateCommand())
-            {
-                count.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped = 0";
-                var tables = (int)(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
-                if (tables > 0)
-                {
-                    throw new StoreInitializationException(
-                        $"Database {name} holds {tables} tables and none of Nightingale's migrations, so it was not initialized by Nightingale. The server only initializes an empty database; point it at one, or at a database it initialized.");
-                }
-            }
+            throw new StoreInitializationException(
+                $"Database {name} holds {tables} tables and none of Nightingale's migrations, so it was not initialized by Nightingale. The server only initializes an empty database; point it at one, or at a database it initialized.");
         }
 
         var collation = await RequireUtf8CollationAsync(name, cancellationToken).ConfigureAwait(false);
