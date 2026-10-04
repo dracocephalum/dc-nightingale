@@ -273,13 +273,14 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WithAnotherUtf8Collation_ShouldCreateTheDatabaseWithItAndFollowItsRuleForCase()
+    public async Task Start_WithAnotherUtf8Collation_ShouldFollowItsRuleForCase()
     {
-        // Arrange: a host may still choose that case does not tell names apart.
+        // Arrange: a host may still choose that case does not tell names apart. That the server
+        // creates a database with the collation it is given is StoreDatabaseTests'.
         const string collation = "Latin1_General_100_CI_AS_SC_UTF8";
 
         // Act
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Collation = collation);
+        using var host = await TestDatabases.StartProvisionedHostAsync(_name, options => options.Store.Collation = collation);
         var store = host.Store();
         await store.AppendAsync("Orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
         var lower = await store.AppendAsync("orders-1", StreamState.Any, [Event()], TestContext.Current.CancellationToken);
@@ -318,20 +319,20 @@ public sealed class StoreInitializerTests : IAsyncLifetime
             options.Store.IgnoreCollationCompatibility = true;
         }
 
-        // Act: created with it, served with it, and a second start finds it as it was left.
-        using (var first = await TestDatabases.StartHostAsync(_name, Ignoring))
+        // Act: served with it, and a second start finds it as it was left.
+        using (var first = await TestDatabases.StartProvisionedHostAsync(_name, Ignoring))
         {
             var appended = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
             appended.Revision.ShouldBe(0);
             await first.StopAsync(TestContext.Current.CancellationToken);
         }
 
-        using (var second = await TestDatabases.StartHostAsync(_name, Ignoring))
+        using (var second = await TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot(Ignoring)))
         {
             await second.StopAsync(TestContext.Current.CancellationToken);
         }
 
-        var withoutTheChoice = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.Store.Collation = collation));
+        var withoutTheChoice = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot(options => options.Store.Collation = collation)));
 
         // Assert: the choice is the host's, made each time, and not a property of the store.
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldBe(collation);
@@ -369,10 +370,10 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WithTenantPartitioning_ShouldAppendReadAndKeepTheSchemaStable()
+    public async Task Start_WithTenantPartitioning_ShouldAppendAndRead()
     {
-        // Arrange
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.Tenant);
+        // Arrange: that the schema stays what the store expects after an append is StoreCreationTests'.
+        using var host = await TestDatabases.StartProvisionedHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.Tenant);
         var store = host.Store();
 
         // Act: the first append provisions the default tenant's partition and sequence.
@@ -383,15 +384,14 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.Count.ShouldBe(2);
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("Tenant");
-        await AssertNoSchemaDelta(host);
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
-    public async Task Start_WithArchivedStreamPartitioning_ShouldAppendReadAndKeepTheSchemaStable()
+    public async Task Start_WithArchivedStreamPartitioning_ShouldAppendAndRead()
     {
-        // Arrange
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.ArchivedStream);
+        // Arrange: that the schema stays what the store expects after an append is StoreCreationTests'.
+        using var host = await TestDatabases.StartProvisionedHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.ArchivedStream);
         var store = host.Store();
 
         // Act
@@ -402,15 +402,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.ShouldHaveSingleItem().Revision.ShouldBe(1);
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("ArchivedStream");
-        await AssertNoSchemaDelta(host);
         await host.StopAsync(TestContext.Current.CancellationToken);
-    }
-
-    private static async Task AssertNoSchemaDelta(Microsoft.Extensions.Hosting.IHost host)
-    {
-        var store = host.Services.GetRequiredService<global::Polecat.IDocumentStore>();
-        var databases = await store.Options.Tenancy!.BuildDatabasesAsync(TestContext.Current.CancellationToken);
-        await Should.NotThrowAsync(() => databases[0].AssertDatabaseMatchesConfigurationAsync(TestContext.Current.CancellationToken));
     }
 
     private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
