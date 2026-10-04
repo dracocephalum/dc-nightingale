@@ -31,6 +31,10 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
     /// <summary>The code page SQL Server reports for a UTF-8 collation.</summary>
     private const int Utf8CodePage = 65001;
 
+    private const string IgnoreOption = "Nightingale:Store:IgnoreCollationCompatibility";
+
+    private const string HowToIgnore = "To use this collation all the same, knowing that, set " + IgnoreOption + " to true.";
+
     private const string WhyUtf8 = "The event store keeps stream names, event types and tenants in columns that are not Unicode, and under any other collation a character outside the code page is stored as a question mark, so two names in another script become one.";
 
     /// <inheritdoc/>
@@ -63,7 +67,7 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
                     $"Database {name} does not exist and Nightingale:CreateDatabase is false. Create it empty, or set Nightingale:CreateDatabase to true.");
             }
 
-            await CreateDatabaseAsync(master, name, options.Store.Collation, cancellationToken).ConfigureAwait(false);
+            await CreateDatabaseAsync(master, name, options.Store.Collation, !options.Store.IgnoreCollationCompatibility, cancellationToken).ConfigureAwait(false);
             LogCreatedDatabase(name, options.Store.Collation ?? "the server default");
         }
 
@@ -103,7 +107,7 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
         LogServingStore(name, createdBy);
     }
 
-    private static async Task CreateDatabaseAsync(string master, string name, string? collation, CancellationToken cancellationToken)
+    private static async Task CreateDatabaseAsync(string master, string name, string? collation, bool requireUtf8, CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(master);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -120,13 +124,13 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
             if (codePage is null or DBNull)
             {
                 throw new StoreInitializationException(
-                    $"Nightingale:Store:Collation {collation} is not a collation this SQL Server knows; fn_helpcollations() lists the ones it does.");
+                    $"Nightingale:Store:Collation {collation} is not a collation this SQL Server knows; fn_helpcollations() lists the ones it does. A server older than SQL Server 2019 has no UTF-8 collation: name one it has, and see {IgnoreOption}.");
             }
 
-            if (Convert.ToInt32(codePage, CultureInfo.InvariantCulture) != Utf8CodePage)
+            if (requireUtf8 && Convert.ToInt32(codePage, CultureInfo.InvariantCulture) != Utf8CodePage)
             {
                 throw new StoreInitializationException(
-                    $"Nightingale:Store:Collation {collation} is not a UTF-8 collation. {WhyUtf8} Name one that ends in _UTF8; unset, the server uses {NightingaleOptions.StoreOptions.DefaultCollation}.");
+                    $"Nightingale:Store:Collation {collation} is not a UTF-8 collation. {WhyUtf8} Name one that ends in _UTF8; unset, the server uses {NightingaleOptions.StoreOptions.DefaultCollation}. {HowToIgnore}");
             }
         }
 
@@ -155,8 +159,14 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
         var collation = reader.GetString(0);
         if (reader.IsDBNull(1) || Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture) != Utf8CodePage)
         {
+            if (options.Store.IgnoreCollationCompatibility)
+            {
+                LogCollationNotUtf8(name, collation);
+                return collation;
+            }
+
             throw new StoreInitializationException(
-                $"Database {name} has collation {collation}, which is not a UTF-8 collation. {WhyUtf8} The collation is set when the database is created; let the server create it, or create it with a collation that ends in _UTF8, such as {NightingaleOptions.StoreOptions.DefaultCollation}.");
+                $"Database {name} has collation {collation}, which is not a UTF-8 collation. {WhyUtf8} The collation is set when the database is created; let the server create it, or create it with a collation that ends in _UTF8, such as {NightingaleOptions.StoreOptions.DefaultCollation}. {HowToIgnore}");
         }
 
         return collation;
@@ -204,6 +214,9 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
 
         LogInitializedStore(name, options.Store.Schema, options.Schema, collation, options.Store.Partitioning, options.Store.AssignOrdinals);
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Database {Database} has collation {Collation}, which is not UTF-8, and the host chose to use it: a character of a name outside its code page is stored as a question mark, so two such names can become one.")]
+    private partial void LogCollationNotUtf8(string database, string collation);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created database {Database} with collation {Collation}.")]
     private partial void LogCreatedDatabase(string database, string collation);

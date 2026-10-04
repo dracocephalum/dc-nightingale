@@ -12,6 +12,7 @@ public sealed class StoreSettingsTests
 
         // Assert: case tells names apart, and a name holds any character.
         sut.Store.Collation.ShouldBe("Latin1_General_100_BIN2_UTF8");
+        sut.Store.IgnoreCollationCompatibility.ShouldBeFalse();
         Should.NotThrow(sut.Store.Validate);
     }
 

@@ -91,6 +91,18 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
         /// </summary>
         public const string DefaultCollation = "Latin1_General_100_BIN2_UTF8";
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the server works with a collation that is not
+        /// UTF-8. Off, such a collation is refused. On, it is the host's own considered choice,
+        /// for a database that already has another collation or a server too old to have a
+        /// UTF-8 one, and its consequence is the host's too: a character of a stream name, an
+        /// event type, a tenant or a correlation or causation id that is outside the collation's
+        /// code page is stored as a question mark, so two such names can become one. Names that
+        /// stay within the code page are unaffected. It is a choice of the host and not a
+        /// setting of the store, so it is not recorded with the store's settings.
+        /// </summary>
+        public bool IgnoreCollationCompatibility { get; set; }
+
         /// <summary>Initializes a new instance of the <see cref="StoreOptions"/> class with this backend's defaults.</summary>
         public StoreOptions()
         {

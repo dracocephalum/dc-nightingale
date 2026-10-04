@@ -291,7 +291,60 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         // Assert
         exception.Message.ShouldContain("is not a UTF-8 collation");
         exception.Message.ShouldContain(NightingaleOptions.StoreOptions.DefaultCollation);
+        exception.Message.ShouldContain("Nightingale:Store:IgnoreCollationCompatibility");
         (await TestDatabases.ScalarAsync<object>("master", $"SELECT ISNULL(DB_ID('{_name}'), -1)")).ShouldBe(-1);
+    }
+
+    [Fact]
+    public async Task Start_WhenTheHostIgnoresCollationCompatibility_ShouldServeADatabaseThatIsNotUtf8()
+    {
+        // Arrange: the host's own choice, for a collation the server would otherwise refuse.
+        const string collation = "SQL_Latin1_General_CP1_CI_AS";
+        static void Ignoring(NightingaleOptions options)
+        {
+            options.Store.Collation = collation;
+            options.Store.IgnoreCollationCompatibility = true;
+        }
+
+        // Act: created with it, served with it, and a second start finds it as it was left.
+        using (var first = await TestDatabases.StartHostAsync(_name, Ignoring))
+        {
+            var appended = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            appended.Revision.ShouldBe(0);
+            await first.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (var second = await TestDatabases.StartHostAsync(_name, Ignoring))
+        {
+            await second.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        var withoutTheChoice = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.Store.Collation = collation));
+
+        // Assert: the choice is the host's, made each time, and not a property of the store.
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldBe(collation);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting WHERE [Name] LIKE '%IgnoreCollation%'")).ShouldBe(0);
+        withoutTheChoice.Message.ShouldContain("which is not a UTF-8 collation");
+    }
+
+    [Fact]
+    public async Task Start_WhenTheHostIgnoresCollationCompatibility_ShouldInitializeAProvisionedDatabaseThatIsNotUtf8()
+    {
+        // Arrange: a database created by hand with the server's own default collation.
+        await TestDatabases.CreateEmptyAsync(_name, collation: null);
+
+        // Act: no collation configured means whichever the database has.
+        using var host = await TestDatabases.StartHostAsync(_name, options =>
+        {
+            options.Store.Collation = null;
+            options.Store.IgnoreCollationCompatibility = true;
+        });
+        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+
+        // Assert
+        appended.Revision.ShouldBe(0);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldNotContain("UTF8");
+        await host.StopAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -306,6 +359,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Assert
         asConfigured.Message.ShouldContain("which is not a UTF-8 collation");
+        asConfigured.Message.ShouldContain("Nightingale:Store:IgnoreCollationCompatibility");
         whateverItHas.Message.ShouldContain("which is not a UTF-8 collation");
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped = 0")).ShouldBe(0);
     }

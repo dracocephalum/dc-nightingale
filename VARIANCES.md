@@ -195,8 +195,11 @@ which never folds case itself: a host may name another UTF-8 collation
 through `Nightingale:Store:Collation`, a case-insensitive one for instance,
 and then two names that differ only in case are one stream, one category,
 one event type, one persistent-subscription group. A collation that is not
-UTF-8 is refused outright, for a database the server would create and for
-one provisioned by hand alike.
+UTF-8 is refused, for a database the server would create and for one
+provisioned by hand alike, unless the host sets
+`Nightingale:Store:IgnoreCollationCompatibility`: its own choice, for a
+database that already has another collation or a server too old to have a
+UTF-8 one, with the loss described below as its consequence.
 
 A name has a longest length, which the reference does not have in the same
 way: the event store's columns hold 250 bytes of a stream name and 500 of an
