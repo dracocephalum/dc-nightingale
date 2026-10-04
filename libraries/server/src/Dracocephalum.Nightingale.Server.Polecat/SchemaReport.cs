@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="DatabaseExists">Whether the database is there at all.</param>
 /// <param name="Initialized">Whether the gateway has initialized it: at least one of its migrations is applied.</param>
-/// <param name="StoreChanges">The change the event store's tables need, as the statements that would be run, or <see langword="null"/> when they match, and when they were not compared: before the store is initialized, while its settings conflict, and when <see cref="StoreComparisonSkipped"/> says so.</param>
+/// <param name="StoreChanges">The change the event store's tables need, as the statements that would be run, or <see langword="null"/> when they match, and when they were not compared: before the store is initialized, while its settings conflict or it is newer than this server, and when <see cref="StoreComparisonSkipped"/> says so.</param>
 /// <param name="PendingMigrations">The gateway's migrations not applied yet, oldest first.</param>
 /// <param name="UnknownMigrations">Migrations applied to the database that this server does not have: the store is newer than the server.</param>
 /// <param name="SettingConflicts">Where the configuration disagrees with the settings the store was initialized with.</param>

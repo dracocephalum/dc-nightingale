@@ -102,14 +102,15 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddNightingaleSubscriptionGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
+        services.AddSingleton<IStoreDatabase>(new StoreDatabase(connectionString));
         services.AddSingleton(provider => new StoreSchema(
             provider.GetRequiredService<IDocumentStore>(),
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
-            connectionString,
+            provider.GetRequiredService<IStoreDatabase>(),
             options));
         services.AddSingleton(provider => new StoreInitializer(
+            provider.GetRequiredService<IStoreDatabase>(),
             provider.GetRequiredService<StoreSchema>(),
-            connectionString,
             options,
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<StoreInitializer>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StoreInitializer>.Instance));

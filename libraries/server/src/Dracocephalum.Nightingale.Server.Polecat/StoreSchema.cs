@@ -5,7 +5,6 @@ using System.Text;
 
 using Dracocephalum.Nightingale.Server.Data;
 using JasperFx;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Polecat;
 using Weasel.Core.Migrations;
@@ -23,9 +22,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="store">The store whose tenancy answers the patched database.</param>
 /// <param name="contexts">Makes the gateway's own context.</param>
-/// <param name="connectionString">The connection string the store uses.</param>
+/// <param name="database">The database the tables are in.</param>
 /// <param name="options">The host's options.</param>
-internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<NightingaleDbContext> contexts, string connectionString, NightingaleOptions options)
+internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<NightingaleDbContext> contexts, IStoreDatabase database, NightingaleOptions options) : IStoreSchema
 {
     /// <summary>The row that says when the store was initialized. Not a setting: nothing is compared with it.</summary>
     public const string CreatedAtRow = "CreatedAt";
@@ -46,19 +45,12 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     public static string StoreLibraryVersion { get; } =
         typeof(IDocumentStore).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 
-    /// <summary>Reports where the database stands; changes nothing.</summary>
-    /// <param name="trustStoreHash">
-    /// Whether a recorded hash equal to this server's stands in for comparing the event store's
-    /// tables. It says the tables were applied from the script this server would apply; it
-    /// cannot say nothing has touched them since.
-    /// </param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The report.</returns>
+    /// <inheritdoc/>
     public async Task<SchemaReport> ReportAsync(bool trustStoreHash, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var known = context.Database.GetMigrations().ToList();
-        if (!await DatabaseExistsAsync(cancellationToken).ConfigureAwait(false))
+        if (!await database.ExistsAsync(cancellationToken).ConfigureAwait(false))
         {
             return new SchemaReport(false, false, null, known, [], []);
         }
@@ -72,8 +64,10 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         // The store's tables are compared under the configured settings, which shape them; under
         // settings the store was not initialized with, the comparison says nothing true. Nor does
         // it of a database that holds no store yet: everything is missing, which "not initialized"
-        // already says, and the comparison is the slow part of a start.
-        var compare = initialized && conflicts.Count == 0;
+        // already says, and the comparison is the slow part of a start. Nor of a store newer than
+        // this server, which would be measured against what an older server expects.
+        var unknown = applied.Except(known, StringComparer.Ordinal).ToList();
+        var compare = initialized && conflicts.Count == 0 && unknown.Count == 0;
         var trusted = compare && trustStoreHash
             && string.Equals(
                 await context.ReadSettingAsync(StoreSchemaHashRow, cancellationToken).ConfigureAwait(false),
@@ -84,7 +78,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
             initialized,
             compare && !trusted ? await StoreChangesAsync(cancellationToken).ConfigureAwait(false) : null,
             known.Except(applied, StringComparer.Ordinal).ToList(),
-            applied.Except(known, StringComparer.Ordinal).ToList(),
+            unknown,
             conflicts)
         {
             StoreComparisonSkipped = trusted,
@@ -101,41 +95,20 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     public async Task<string> ComputeStoreHashAsync(CancellationToken cancellationToken)
     {
         var script = new StringBuilder();
-        foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
+        foreach (var tenant in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
         {
-            script.Append(database.ToDatabaseScript());
+            script.Append(tenant.ToDatabaseScript());
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(script.ToString())));
     }
 
-    /// <summary>
-    /// Whether the database is there, asked of the server rather than found out by connecting to
-    /// it: a connection that fails is remembered by the pool for a while, and whatever connects
-    /// next, to a database created in between, is told it is still missing.
-    /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>True when the database exists.</returns>
-    public async Task<bool> DatabaseExistsAsync(CancellationToken cancellationToken)
-    {
-        var target = new SqlConnectionStringBuilder(connectionString);
-        await using var connection = new SqlConnection(new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master" }.ConnectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT DB_ID(@name)";
-        command.Parameters.AddWithValue("@name", target.InitialCatalog);
-        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return result is not null and not DBNull;
-    }
-
-    /// <summary>Applies what is pending: the event store's tables first, then the gateway's migrations.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the database is current.</returns>
+    /// <inheritdoc/>
     public async Task ApplyAsync(CancellationToken cancellationToken)
     {
-        foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
+        foreach (var tenant in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
         {
-            await database.ApplyAllConfiguredChangesToDatabaseAsync(AutoCreate.CreateOrUpdate, ct: cancellationToken).ConfigureAwait(false);
+            await tenant.ApplyAllConfiguredChangesToDatabaseAsync(AutoCreate.CreateOrUpdate, ct: cancellationToken).ConfigureAwait(false);
         }
 
         await MigrateAsync(cancellationToken).ConfigureAwait(false);
@@ -157,12 +130,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         await context.WriteSettingAsync(StoreSchemaHashRow, await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Records what an empty database was initialized with, and by whom and when.</summary>
-    /// <param name="settings">The settings, with the database's actual collation.</param>
-    /// <param name="createdAt">When the store was initialized.</param>
-    /// <param name="createdBy">The version of the server that initialized it.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the rows are written.</returns>
+    /// <inheritdoc/>
     public async Task WriteInitializationAsync(IStoreSettings settings, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -171,9 +139,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         await context.WriteSettingAsync(CreatedByRow, createdBy, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Reads which server version initialized the store.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The version, or "unknown" when the store does not say.</returns>
+    /// <inheritdoc/>
     public async Task<string> ReadCreatedByAsync(CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -184,11 +150,11 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     private async Task<string?> StoreChangesAsync(CancellationToken cancellationToken)
     {
         var changes = new List<string>();
-        foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
+        foreach (var tenant in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
         {
             try
             {
-                await database.AssertDatabaseMatchesConfigurationAsync(cancellationToken).ConfigureAwait(false);
+                await tenant.AssertDatabaseMatchesConfigurationAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (DatabaseValidationException exception)
             {
