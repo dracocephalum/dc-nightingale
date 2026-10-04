@@ -65,6 +65,10 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         {
             throw NightingaleErrors.GroupExists(stream, group);
         }
+        catch (ValueTooLongException tooLong)
+        {
+            throw NightingaleErrors.InvalidArgument(tooLong.Message);
+        }
 
         return new CreateResponse();
     }

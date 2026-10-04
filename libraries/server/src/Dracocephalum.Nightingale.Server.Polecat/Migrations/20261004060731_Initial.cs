@@ -20,9 +20,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "varchar(100)", unicode: false, maxLength: 100, nullable: false),
-                    Owner = table.Column<string>(type: "varchar(64)", unicode: false, maxLength: 64, nullable: false),
-                    OwnerAddress = table.Column<string>(type: "varchar(500)", unicode: false, maxLength: 500, nullable: true),
+                    Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    Owner = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
+                    OwnerAddress = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
                     ExpiresAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)
                 },
                 constraints: table =>
@@ -36,7 +36,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "varchar(100)", unicode: false, maxLength: 100, nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     Position = table.Column<long>(type: "bigint", nullable: false)
                 },
                 constraints: table =>
@@ -50,7 +50,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "varchar(200)", unicode: false, maxLength: 200, nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     Value = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true)
                 },
                 constraints: table =>

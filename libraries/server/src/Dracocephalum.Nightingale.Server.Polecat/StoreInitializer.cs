@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 
 using Microsoft.Data.SqlClient;
@@ -27,6 +28,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="logger">The logger.</param>
 internal sealed partial class StoreInitializer(StoreSchema schema, string connectionString, NightingaleOptions options, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
 {
+    /// <summary>The code page SQL Server reports for a UTF-8 collation.</summary>
+    private const int Utf8CodePage = 65001;
+
+    private const string WhyUtf8 = "The event store keeps stream names, event types and tenants in columns that are not Unicode, and under any other collation a character outside the code page is stored as a question mark, so two names in another script become one.";
+
     /// <inheritdoc/>
     public Task StartAsync(CancellationToken cancellationToken) => InitializeAsync(options.ApplySchemaChanges, cancellationToken);
 
@@ -80,6 +86,7 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
                 $"Database {name} was initialized by Nightingale with settings the configuration no longer matches: {string.Join("; ", report.SettingConflicts)}. These settings are fixed at initialization; change the configuration back, or initialize a new database.");
         }
 
+        await RequireUtf8CollationAsync(name, cancellationToken).ConfigureAwait(false);
         if (report.StoreChanges is not null || report.PendingMigrations.Count > 0)
         {
             if (!applyChanges)
@@ -107,13 +114,19 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
         if (collation is not null)
         {
             await using var check = connection.CreateCommand();
-            check.CommandText = "SELECT COUNT(*) FROM fn_helpcollations() WHERE name = @collation";
+            check.CommandText = "SELECT COLLATIONPROPERTY(@collation, 'CodePage')";
             check.Parameters.AddWithValue("@collation", collation);
-            var known = (int)(await check.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
-            if (known == 0)
+            var codePage = await check.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            if (codePage is null or DBNull)
             {
                 throw new StoreInitializationException(
                     $"Nightingale:Store:Collation {collation} is not a collation this SQL Server knows; fn_helpcollations() lists the ones it does.");
+            }
+
+            if (Convert.ToInt32(codePage, CultureInfo.InvariantCulture) != Utf8CodePage)
+            {
+                throw new StoreInitializationException(
+                    $"Nightingale:Store:Collation {collation} is not a UTF-8 collation. {WhyUtf8} Name one that ends in _UTF8; unset, the server uses {NightingaleOptions.StoreOptions.DefaultCollation}.");
             }
         }
 
@@ -130,9 +143,27 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>The database's collation, which must be a UTF-8 one whoever created the database.</summary>
+    private async Task<string> RequireUtf8CollationAsync(string name, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var read = connection.CreateCommand();
+        read.CommandText = "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), COLLATIONPROPERTY(CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), 'CodePage')";
+        await using var reader = await read.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        var collation = reader.GetString(0);
+        if (reader.IsDBNull(1) || Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture) != Utf8CodePage)
+        {
+            throw new StoreInitializationException(
+                $"Database {name} has collation {collation}, which is not a UTF-8 collation. {WhyUtf8} The collation is set when the database is created; let the server create it, or create it with a collation that ends in _UTF8, such as {NightingaleOptions.StoreOptions.DefaultCollation}.");
+        }
+
+        return collation;
+    }
+
     private async Task InitializeEmptyDatabaseAsync(string name, CancellationToken cancellationToken)
     {
-        string collation;
         await using (var connection = new SqlConnection(connectionString))
         {
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -146,11 +177,9 @@ internal sealed partial class StoreInitializer(StoreSchema schema, string connec
                         $"Database {name} holds {tables} tables and none of Nightingale's migrations, so it was not initialized by Nightingale. The server only initializes an empty database; point it at one, or at a database it initialized.");
                 }
             }
-
-            await using var read = connection.CreateCommand();
-            read.CommandText = "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'))";
-            collation = (string)(await read.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }
+
+        var collation = await RequireUtf8CollationAsync(name, cancellationToken).ConfigureAwait(false);
 
         if (options.Store.Collation is not null && !string.Equals(options.Store.Collation, collation, StringComparison.OrdinalIgnoreCase))
         {

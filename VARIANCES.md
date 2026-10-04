@@ -183,24 +183,33 @@ host.
 from each client; and the one read that can go stale is the one an append is
 usually based on, so it is opt-in and decided where the database is known.
 
-## Stream name case sensitivity follows the database collation
+## Names are compared by the database, under a UTF-8 collation
 
 **Reference:** stream names are case-sensitive; `Orders-1` and `orders-1` are
-different streams.
+different streams. A name is any text.
 
-**Nightingale:** the stream identifier column uses the database's collation.
-SQL Server's default collations are case-insensitive, so those two names
-resolve to the same stream. A binary collation, chosen through
-`Nightingale:Store:Collation` when the server creates the database, makes them
-different streams as the reference does. A caller that uses one consistent
-spelling is unaffected either way. The same holds for a category, an
-event type and a persistent-subscription group: the database says which
-names are the same one, the server never folds case itself, and a group
-reached under another spelling is the group in its row, with its one lease
-and its consumer limit.
+**Nightingale:** the same, by default: the server creates its database with a
+binary UTF-8 collation, under which case tells names apart and a name holds
+any character. What decides is the database's collation, not the server,
+which never folds case itself: a host may name another UTF-8 collation
+through `Nightingale:Store:Collation`, a case-insensitive one for instance,
+and then two names that differ only in case are one stream, one category,
+one event type, one persistent-subscription group. A collation that is not
+UTF-8 is refused outright, for a database the server would create and for
+one provisioned by hand alike.
 
-**Why:** it is the database's behaviour, and a collation is fixed when the
-database is created, so it is an initialization choice rather than an API one.
+A name has a longest length, which the reference does not have in the same
+way: the event store's columns hold 250 bytes of a stream name and 500 of an
+event type, in UTF-8, so 250 characters of ASCII and fewer of a script that
+takes more bytes per character. The database measures; a name that does not
+fit is refused as an invalid argument and nothing is stored cut short.
+
+**Why:** the event store keeps names in columns that are not Unicode. Under
+a collation that is not UTF-8 a character outside the collation's code page
+is stored as a question mark, so two names in another script, of the same
+length, would silently become one stream. Requiring UTF-8 removes the case
+rather than guarding it, and a collation is fixed when the database is
+created, which makes it an initialization choice rather than an API one.
 
 ## `$all` holds only application events
 

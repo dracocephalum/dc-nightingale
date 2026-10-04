@@ -5,6 +5,17 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 public sealed class StoreSettingsTests
 {
     [Fact]
+    public void Collation_ByDefault_ShouldBeBinaryAndUtf8()
+    {
+        // Act: what a host that names no collation gets a database created with.
+        var sut = new NightingaleOptions();
+
+        // Assert: case tells names apart, and a name holds any character.
+        sut.Store.Collation.ShouldBe("Latin1_General_100_BIN2_UTF8");
+        Should.NotThrow(sut.Store.Validate);
+    }
+
+    [Fact]
     public void Validate_WhenPartitioningIsNotAKnownMode_ShouldRefuse()
     {
         // Arrange: a value the binder cannot have produced from a name, but a cast can.

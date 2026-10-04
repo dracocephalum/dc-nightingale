@@ -1,8 +1,10 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 using Dracocephalum.Nightingale.Server.Persistence;
 using Dracocephalum.Nightingale.Server.Polecat.Persistence;
 using JasperFx.Events;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Polecat;
@@ -34,8 +36,14 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="contexts">Makes the gateway's own context, for the sequencer's progress.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed class PolecatStreamStore(IDocumentStore store, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
+internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
 {
+    /// <summary>SQL Server's error for a value longer than its column, naming the column.</summary>
+    private const int TruncationWithColumn = 2628;
+
+    /// <summary>The same error as servers that do not name the column raise it.</summary>
+    private const int Truncation = 8152;
+
     private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
     private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
@@ -101,6 +109,12 @@ internal sealed class PolecatStreamStore(IDocumentStore store, IDbContextFactory
         catch (InvalidStreamException)
         {
             throw new StreamDeletedException(stream);
+        }
+        catch (SqlException exception) when (exception.Number is TruncationWithColumn or Truncation)
+        {
+            // The store's columns hold so many bytes of the encoded text, and the database is what
+            // measures: it refuses the write, names the column, and nothing is stored cut short.
+            throw new ValueTooLongException(WhatIsIn(exception), exception);
         }
 
         var last = (IEvent)wrapped[^1];
@@ -259,6 +273,23 @@ internal sealed class PolecatStreamStore(IDocumentStore store, IDbContextFactory
             .Select(row => (long?)row.Position);
         return await EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(progress, cancellationToken).ConfigureAwait(false) ?? 0;
     }
+
+    /// <summary>What the column the database named holds, as a caller would call it.</summary>
+    private static string WhatIsIn(SqlException exception)
+    {
+        var column = ColumnOf().Match(exception.Message) is { Success: true } match ? match.Groups[1].Value : string.Empty;
+        return column switch
+        {
+            "id" or "stream_id" => ValueTooLongException.StreamName,
+            "type" => "event type",
+            "correlation_id" => "correlation id",
+            "causation_id" => "causation id",
+            _ => "value",
+        };
+    }
+
+    [GeneratedRegex("column '([^']+)'")]
+    private static partial Regex ColumnOf();
 
     private void RequireOrdinals(string stream)
     {

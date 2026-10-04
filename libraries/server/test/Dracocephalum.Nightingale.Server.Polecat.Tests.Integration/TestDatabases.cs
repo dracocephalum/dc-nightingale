@@ -33,8 +33,12 @@ internal static class TestDatabases
 
     /// <summary>Creates an empty database by hand, as a database administrator would provision one.</summary>
     /// <param name="name">The database name.</param>
+    /// <param name="collation">The collation to create it with; the server's default collation when null.</param>
     /// <returns>A task that completes when the database exists.</returns>
-    public static Task CreateEmptyAsync(string name) => ExecuteOnMasterAsync(string.Format(CultureInfo.InvariantCulture, "CREATE DATABASE [{0}]", name));
+    public static Task CreateEmptyAsync(string name, string? collation = NightingaleOptions.StoreOptions.DefaultCollation) =>
+        ExecuteOnMasterAsync(collation is null
+            ? string.Format(CultureInfo.InvariantCulture, "CREATE DATABASE [{0}]", name)
+            : string.Format(CultureInfo.InvariantCulture, "CREATE DATABASE [{0}] COLLATE {1}", name, collation));
 
     /// <summary>Runs a statement in a database.</summary>
     /// <param name="name">The database name.</param>
