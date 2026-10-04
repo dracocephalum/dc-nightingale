@@ -23,7 +23,7 @@ public sealed class OrdinalTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _host = await TestDatabases.StartHostAsync(_name, options =>
+        _host = await TestDatabases.StartProvisionedHostAsync(_name, options =>
         {
             options.Store.AssignOrdinals = true;
             options.Deletion.AllowDelete = true;

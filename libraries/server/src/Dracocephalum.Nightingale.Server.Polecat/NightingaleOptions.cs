@@ -36,6 +36,20 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public bool ApplySchemaChanges { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether startup takes the event store's tables as current
+    /// when the hash recorded with them is the hash of the creation script this server would
+    /// apply, instead of comparing every table with what the store expects. The hash covers the
+    /// store library, the schema library under it, the gateway's additions and the settings, so
+    /// it changes whenever the expected tables do and the comparison then runs as usual. What it
+    /// cannot see is a change made to the tables outside the server, a dropped index say, which
+    /// the comparison would have refused at startup and which now shows as an error at the first
+    /// statement that needs it. Off by default. The comparison costs seconds the first time the
+    /// database server compiles it and a fraction of one after, so this is for a host that starts
+    /// often against a database it trusts; the schema report and the schema apply always compare.
+    /// </summary>
+    public bool FastBoot { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the server opens a second, read-only connection and
     /// serves from it the reads a readable secondary can answer exactly: pages of <c>$all</c> and of
     /// the virtual streams, by position, at or below the high-water mark as that connection sees

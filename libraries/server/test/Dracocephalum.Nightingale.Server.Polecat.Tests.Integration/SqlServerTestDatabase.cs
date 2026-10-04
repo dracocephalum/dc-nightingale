@@ -27,7 +27,7 @@ public sealed class SqlServerTestDatabase : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _host = await TestDatabases.StartHostAsync(Name);
+        _host = await TestDatabases.StartProvisionedHostAsync(Name);
     }
 
     public async ValueTask DisposeAsync()

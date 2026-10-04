@@ -128,6 +128,18 @@ default host's switches and a host's own code all go through it.
   contradicts a setting it was initialized with; and refused when either set
   of tables is behind what this server expects, with what would be applied
   in the message, unless `Nightingale:ApplySchemaChanges` is on.
+  The comparison of the store's tables is the slow part of a start the first
+  time the database server compiles it, about ten seconds for the eighty
+  catalog statements the store's schema library sends, and a fraction of a
+  second after. Every apply records the hash of the store's creation script,
+  which covers the store library, the schema library, the gateway's additions
+  and the settings; with `Nightingale:FastBoot` on, a start that finds its own
+  hash recorded skips the comparison. It trades away noticing a change made
+  to the tables outside the server, so it is off by default and the report
+  and the apply never use it. The integration tests that are not about
+  initialization make their store from the creation script and start with
+  fast boot on; one test holds a store made that way equal to one the server
+  initialized, catalog and recorded rows.
 - A database with tables and none of the gateway's migrations is refused
   outright: it is not ours.
 

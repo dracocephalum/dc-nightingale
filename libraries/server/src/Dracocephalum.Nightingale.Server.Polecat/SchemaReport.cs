@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="DatabaseExists">Whether the database is there at all.</param>
 /// <param name="Initialized">Whether the gateway has initialized it: at least one of its migrations is applied.</param>
-/// <param name="StoreChanges">The change the event store's tables need, as the statements that would be run, or <see langword="null"/> when they match.</param>
+/// <param name="StoreChanges">The change the event store's tables need, as the statements that would be run, or <see langword="null"/> when they match, and when they were not compared: before the store is initialized, while its settings conflict, and when <see cref="StoreComparisonSkipped"/> says so.</param>
 /// <param name="PendingMigrations">The gateway's migrations not applied yet, oldest first.</param>
 /// <param name="UnknownMigrations">Migrations applied to the database that this server does not have: the store is newer than the server.</param>
 /// <param name="SettingConflicts">Where the configuration disagrees with the settings the store was initialized with.</param>
@@ -22,6 +22,12 @@ public sealed record SchemaReport(
     IReadOnlyList<string> UnknownMigrations,
     IReadOnlyList<string> SettingConflicts)
 {
+    /// <summary>
+    /// Gets a value indicating whether the event store's tables were taken as current on the
+    /// strength of the recorded hash, without comparing them: <c>Nightingale:FastBoot</c>.
+    /// </summary>
+    public bool StoreComparisonSkipped { get; init; }
+
     /// <summary>Gets a value indicating whether the database is exactly what this server expects.</summary>
     public bool IsCurrent =>
         DatabaseExists && Initialized && StoreChanges is null && PendingMigrations.Count == 0 && UnknownMigrations.Count == 0 && SettingConflicts.Count == 0;
