@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
@@ -104,16 +105,25 @@ public sealed class StoreCreationTests : IAsyncLifetime
         // Arrange: one database the way the tests make a store, from the script.
         await TestDatabases.ProvisionAsync(_fromScript, options => options.Store.Partitioning = partitioning);
 
-        // Act: another the way the server makes one, by comparison, here from nothing.
+        // Act: another the way the server makes one, by comparison, here from nothing, read as
+        // the server left it. Then an append, which under tenant partitioning provisions the
+        // tenant's partition and sequence, and must leave the tables what the store expects.
+        List<string> fromComparison;
+        List<string> rowsFromComparison;
         using (var host = await TestDatabases.StartHostAsync(_fromComparison, options => options.Store.Partitioning = partitioning))
         {
+            fromComparison = await LinesAsync(_fromComparison, Catalog);
+            rowsFromComparison = await LinesAsync(_fromComparison, Rows);
+            await host.Store().AppendAsync("orders-1", StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", "{}"u8.ToArray())], TestContext.Current.CancellationToken);
+            var store = host.Services.GetRequiredService<global::Polecat.IDocumentStore>();
+            var databases = await store.Options.Tenancy!.BuildDatabasesAsync(TestContext.Current.CancellationToken);
+            await Should.NotThrowAsync(() => databases[0].AssertDatabaseMatchesConfigurationAsync(TestContext.Current.CancellationToken));
             await host.StopAsync(TestContext.Current.CancellationToken);
         }
 
         // Assert
         var fromScript = await LinesAsync(_fromScript, Catalog);
-        var fromComparison = await LinesAsync(_fromComparison, Catalog);
-        (await LinesAsync(_fromScript, Rows)).ShouldBe(await LinesAsync(_fromComparison, Rows));
+        (await LinesAsync(_fromScript, Rows)).ShouldBe(rowsFromComparison);
         fromScript.ShouldContain(line => line.StartsWith("column dbo.pc_events.seq_id ", StringComparison.Ordinal));
         fromScript.Except(fromComparison, StringComparer.Ordinal).ShouldBeEmpty("only the database made from the script has these");
         fromComparison.Except(fromScript, StringComparer.Ordinal).ShouldBeEmpty("only the database made by comparison has these");

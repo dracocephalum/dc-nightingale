@@ -112,13 +112,14 @@ internal static class TestDatabases
     /// server initialized.
     /// </summary>
     /// <param name="name">The database name; the database must not exist.</param>
-    /// <param name="configure">Adjusts the options, as for the host that will serve the store.</param>
+    /// <param name="configure">Adjusts the options, as for the host that will serve the store; the database is created with the collation they name.</param>
     /// <returns>A task that completes when the store is there.</returns>
     public static async Task ProvisionAsync(string name, Action<NightingaleOptions>? configure = null)
     {
         var options = new NightingaleOptions();
         configure?.Invoke(options);
-        await CreateEmptyAsync(name);
+        var collation = options.Store.Collation ?? NightingaleOptions.StoreOptions.DefaultCollation;
+        await CreateEmptyAsync(name, collation);
 
         var services = new ServiceCollection();
         services.AddNightingalePolecat(ConnectionStringFor(name), configure);
@@ -135,7 +136,7 @@ internal static class TestDatabases
             new StoreSettings
             {
                 Schema = options.Store.Schema,
-                Collation = NightingaleOptions.StoreOptions.DefaultCollation,
+                Collation = collation,
                 Partitioning = options.Store.Partitioning,
                 AssignOrdinals = options.Store.AssignOrdinals,
             },
