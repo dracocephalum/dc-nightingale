@@ -117,7 +117,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
 
         // Assert
-        (await TestDatabases.ScalarAsync<bool>(_name, "SELECT assign_ordinals FROM dbo.nightingale_store")).ShouldBeTrue();
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:AssignOrdinals'")).ShouldBe("true");
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name IN ('ix_pc_events_category_ordinal', 'ix_pc_events_type_ordinal')")).ShouldBe(2);
         refused.Message.ShouldContain("initialized with ordinals");
     }

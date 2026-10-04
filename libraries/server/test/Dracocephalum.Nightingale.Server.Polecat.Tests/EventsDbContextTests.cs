@@ -26,7 +26,7 @@ public sealed class EventsDbContextTests
         await using var provider = services.BuildServiceProvider();
         var databases = await provider.GetRequiredService<IDocumentStore>().Options.Tenancy!.BuildDatabasesAsync(TestContext.Current.CancellationToken);
         var declared = databases[0].BuildFeatureSchemas().SelectMany(feature => feature.Objects).OfType<Table>().ToList();
-        using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, "dbo");
+        using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
 
         // Act & Assert
         var entities = context.Model.GetEntityTypes().ToList();
@@ -51,11 +51,34 @@ public sealed class EventsDbContextTests
     }
 
     [Fact]
+    public void SaveChanges_ShouldRefuse()
+    {
+        // Arrange: the mirror reads a table the store owns; a write through it is always a mistake.
+        using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("mirror-" + Guid.NewGuid().ToString("N")).Options, new EventStoreSchema("dbo"));
+        context.Progression.Add(new ProgressionRow { Name = EventsDbContext.HighWaterMark, LastSeqId = 1 });
+
+        // Act & Assert
+        Should.Throw<InvalidOperationException>(() => context.SaveChanges());
+    }
+
+    [Fact]
+    public void ReadOnlyMirror_ShouldMapTheSameTablesUnderItsOwnType()
+    {
+        // Arrange: one mapping, two types, so each connection has a registration of its own.
+        using var main = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
+        using var readOnly = new ReadOnlyEventsDbContext(new DbContextOptionsBuilder<ReadOnlyEventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
+
+        // Act & Assert
+        readOnly.Model.GetEntityTypes().Select(entity => entity.GetTableName()).ShouldBe(main.Model.GetEntityTypes().Select(entity => entity.GetTableName()));
+        readOnly.Events.Where(row => row.SeqId > 1).Select(row => row.SeqId).ToQueryString().ShouldBe(main.Events.Where(row => row.SeqId > 1).Select(row => row.SeqId).ToQueryString());
+    }
+
+    [Fact]
     public void Query_ShouldSendTheKeyAsTheColumnsOwnType()
     {
         // Arrange: a name sent as Unicode to a column that is not makes the database convert the
         // column and scan the index it should seek.
-        using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, "dbo");
+        using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
         var tenant = "tenant";
         var key = "orders";
 

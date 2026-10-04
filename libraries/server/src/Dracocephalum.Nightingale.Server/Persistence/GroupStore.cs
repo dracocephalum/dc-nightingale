@@ -23,17 +23,17 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     {
         ArgumentNullException.ThrowIfNull(group);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        if (await context.Groups.AnyAsync(row => row.TenantId == tenantId && row.Stream == group.Stream && row.GroupName == group.Group, cancellationToken).ConfigureAwait(false))
+        if (await context.Groups.AnyAsync(row => row.TenantId == tenantId && row.Stream == group.Stream && row.Name == group.Group, cancellationToken).ConfigureAwait(false))
         {
             throw new GroupExistsException(group.Stream, group.Group);
         }
 
-        context.Groups.Add(new GroupRow
+        context.Groups.Add(new SubscriptionGroup
         {
             Id = group.Id,
             TenantId = tenantId,
             Stream = group.Stream,
-            GroupName = group.Group,
+            Name = group.Group,
             Settings = JsonSerializer.Serialize(StoredSettings.From(group.Settings)),
             CheckpointPosition = group.Checkpoint,
             CreatedAt = timeProvider.GetUtcNow(),
@@ -54,7 +54,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Groups.AsNoTracking()
-            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.GroupName == group, cancellationToken)
+            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.Name == group, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
@@ -65,7 +65,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
 
         // The names are the row's own: a case-insensitive database finds the row under another
         // spelling, and the group still goes by the names it was created with.
-        return new GroupDefinition(row.Stream, row.GroupName, settings.ToSettings(), row.CheckpointPosition) { Id = row.Id };
+        return new GroupDefinition(row.Stream, row.Name, settings.ToSettings(), row.CheckpointPosition) { Id = row.Id };
     }
 
     /// <inheritdoc/>
@@ -73,7 +73,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Groups
-            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.GroupName == group, cancellationToken)
+            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.Name == group, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
@@ -114,7 +114,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             .ConfigureAwait(false);
         if (row is null)
         {
-            row = new ParkedRow
+            row = new ParkedEvent
             {
                 GroupId = message.GroupId,
                 Position = message.Position,
@@ -169,7 +169,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         var now = timeProvider.GetUtcNow();
         foreach (var row in toMove)
         {
-            context.Outbox.Add(new OutboxRow
+            context.Outbox.Add(new OutboxEntry
             {
                 GroupId = row.GroupId,
                 Position = row.Position,
@@ -231,7 +231,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             var lease = await context.Leases.SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
             if (lease is null)
             {
-                context.Leases.Add(new LeaseRow { Name = name, Owner = owner, OwnerAddress = address, ExpiresAt = now + duration });
+                context.Leases.Add(new Lease { Name = name, Owner = owner, OwnerAddress = address, ExpiresAt = now + duration });
             }
             else if (lease.Owner != owner && lease.ExpiresAt > now)
             {
@@ -270,7 +270,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : Holder(lease);
     }
 
-    private static LeaseHolder Holder(LeaseRow lease) =>
+    private static LeaseHolder Holder(Lease lease) =>
         new(lease.Owner, lease.OwnerAddress is null ? null : new Uri(lease.OwnerAddress, UriKind.Absolute));
 
     /// <inheritdoc/>
@@ -294,10 +294,10 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         }
     }
 
-    private static IQueryable<ParkedRow> ParkedOf(NightingaleDbContext context, Guid groupId) =>
+    private static IQueryable<ParkedEvent> ParkedOf(NightingaleDbContext context, Guid groupId) =>
         context.Parked.Where(row => row.GroupId == groupId);
 
-    private static IQueryable<OutboxRow> OutboxOf(NightingaleDbContext context, Guid groupId) =>
+    private static IQueryable<OutboxEntry> OutboxOf(NightingaleDbContext context, Guid groupId) =>
         context.Outbox.Where(row => row.GroupId == groupId);
 
     /// <summary>The settings as stored: primitives only, so the document outlives the domain type's shape.</summary>

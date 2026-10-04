@@ -40,6 +40,11 @@ public static class NightingaleServerExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
         options.Cluster.Validate();
+        if (!IsIdentifier(options.Schema))
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.Schema)} must be a plain identifier: a letter or an underscore, then letters, digits or underscores, at most 128 characters. It was '{options.Schema}'.");
+        }
+
         services.AddSingleton(options);
         services.AddSingleton<NightingaleOptionsBase>(options);
         return services;
@@ -47,9 +52,8 @@ public static class NightingaleServerExtensions
 
     /// <summary>
     /// Registers the gateway's own tables through the context, and the group store over it. A
-    /// backend calls this with its provider and the schema its store keeps its tables in, so the
-    /// gateway's sit beside them; the backend's schema feature creates the tables, the context
-    /// never migrates.
+    /// backend calls this with its provider, its migrations and the schema the host named for the
+    /// gateway's tables; the context owns them and the backend's migrations create them.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="schema">The schema the tables live in.</param>
@@ -62,7 +66,7 @@ public static class NightingaleServerExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentNullException.ThrowIfNull(configure);
-        services.AddSingleton(new NightingaleTables(schema));
+        services.AddSingleton(new NightingaleSchema(schema));
         services.AddDbContextFactory<NightingaleDbContext>(configure);
         services.AddSingleton<IGroupStore>(provider => new GroupStore(
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
@@ -70,6 +74,12 @@ public static class NightingaleServerExtensions
             provider.GetService<TimeProvider>() ?? TimeProvider.System));
         return services;
     }
+
+    private static bool IsIdentifier(string? name) =>
+        !string.IsNullOrEmpty(name)
+        && name.Length <= 128
+        && (char.IsAsciiLetter(name[0]) || name[0] == '_')
+        && name.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
 
     /// <summary>Maps the Nightingale gRPC services onto the host's endpoints.</summary>
     /// <param name="endpoints">The endpoint route builder.</param>

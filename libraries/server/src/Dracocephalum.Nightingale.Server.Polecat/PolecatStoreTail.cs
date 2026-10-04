@@ -18,9 +18,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// is recorded in TODO.md.
 /// </summary>
 /// <param name="store">The store.</param>
-/// <param name="events">The options of the mirror of the store's events table, over the main connection.</param>
+/// <param name="events">Makes the mirror of the store's events table, over the main connection.</param>
 /// <param name="loggerFactory">Where the daemon's logger comes from.</param>
-internal sealed class PolecatStoreTail(IDocumentStore store, DbContextOptions<EventsDbContext> events, ILoggerFactory loggerFactory) : IStoreTail, IHostedService, IAsyncDisposable
+internal sealed class PolecatStoreTail(IDocumentStore store, IDbContextFactory<EventsDbContext> events, ILoggerFactory loggerFactory) : IStoreTail, IHostedService, IAsyncDisposable
 {
     /// <summary>How many rows past the mark one refresh looks at.</summary>
     private const int RefreshWindow = 10_000;
@@ -62,7 +62,7 @@ internal sealed class PolecatStoreTail(IDocumentStore store, DbContextOptions<Ev
         // every event up to which is committed. The window bounds the read when the poller is far
         // behind; the poller closes the rest.
         var mark = Head;
-        await using var context = new EventsDbContext(events, store.Options.DatabaseSchemaName);
+        await using var context = await events.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var following = await context.Events.AsNoTracking()
             .Where(row => row.SeqId > mark)
             .OrderBy(row => row.SeqId)

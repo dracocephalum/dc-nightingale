@@ -71,13 +71,13 @@ cross-tenant position across databases.
 
 Ordinal numbering of the virtual streams (`DESIGN.md`, seam 6) is a store
 setting fixed at initialization, and a store initialized without it refuses
-the setting. Adopting it later is a backfill: the migrate command adds the two
+the setting. Adopting it later is a backfill: the migrate commadds the two
 columns and their indexes, then the sequencer numbers from position 0, which
 on a large store takes as long as one pass over the table and is done while
 the store is served, because a batch is atomic and a read under ordinal
-numbering sees only what is numbered. The marker row is stamped with the
-setting once the columns exist, before the backfill completes, so the server
-knows the store has the feature and readers see the ordinals arrive.
+numbering sees only what is numbered. The setting's row is written once the columns exist, before the backfill
+completes, so the server knows the store has the feature and readers see the
+ordinals arrive.
 
 ## Server-computed lag counts
 

@@ -1,44 +1,45 @@
-using System.Data;
-using System.Globalization;
 using System.Reflection;
 
-using Dracocephalum.Nightingale.Server.Persistence;
-using JasperFx;
 using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Polecat;
-using Weasel.Core.Migrations;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
 /// Owns the database, at startup and before any request is served. The rule: the server
-/// initializes only a database that is empty, and never migrates a store while serving it.
-/// A missing database is created, with the configured collation, when the host allows it. An empty
-/// database, created here or provisioned by hand, gets the whole schema in one pass while every
-/// table is empty, and a marker row recording the settings that shaped it. A database with a
-/// marker is compared with the configuration and refused on any difference, then its schema is
-/// asserted to match what this server expects. A database with tables and no marker is refused
+/// initializes only a database that is empty, and never changes a store while serving it unless
+/// told to. A missing database is created, with the configured collation, when the host allows
+/// it. An empty database, created here or provisioned by hand, gets the event store's tables and
+/// then the gateway's own, while every table is empty, and rows recording the settings that
+/// shaped it. An initialized database is refused when it is newer than this server, or when the
+/// configuration contradicts the settings it was initialized with; when its tables are behind
+/// what this server expects it is refused too, naming what would be applied, unless the host
+/// said to apply it. A database with tables that the gateway never initialized is refused
 /// outright: it is not ours. The store's own schema management stays off throughout, because its
 /// table ensurer would rebuild the events table from the unpatched definition on first use.
+/// What is pending and how it is applied is <see cref="StoreSchema"/>'s; this decides when.
 /// </summary>
-/// <param name="store">The store whose tenancy answers the patched database.</param>
+/// <param name="schema">Reports what the database needs, and applies it.</param>
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="options">The host's options.</param>
-/// <param name="contexts">Makes the gateway's own context, for writing the marker once the schema is current.</param>
-/// <param name="timeProvider">The clock the marker is stamped with.</param>
+/// <param name="timeProvider">The clock the store's creation is stamped with.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class StoreInitializer(IDocumentStore store, string connectionString, NightingaleOptions options, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
+internal sealed partial class StoreInitializer(StoreSchema schema, string connectionString, NightingaleOptions options, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
 {
-    /// <summary>The schema a store initialized before the setting existed lives in: the store's default.</summary>
-    private const string DefaultSchema = "dbo";
+    /// <inheritdoc/>
+    public Task StartAsync(CancellationToken cancellationToken) => InitializeAsync(options.ApplySchemaChanges, cancellationToken);
 
     /// <inheritdoc/>
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>Brings the database to a state the server can serve, or refuses, saying why.</summary>
+    /// <param name="applyChanges">Whether changes an initialized store needs are applied, or refused.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the store can be served.</returns>
+    /// <exception cref="StoreInitializationException">The store cannot be served; the message says why.</exception>
+    public async Task InitializeAsync(bool applyChanges, CancellationToken cancellationToken)
     {
-        options.Store.Validate();
         var target = new SqlConnectionStringBuilder(connectionString);
         var name = target.InitialCatalog;
         if (string.IsNullOrEmpty(name) || string.Equals(name, "master", StringComparison.OrdinalIgnoreCase))
@@ -48,7 +49,7 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         }
 
         var master = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master" }.ConnectionString;
-        if (!await DatabaseExistsAsync(master, name, cancellationToken).ConfigureAwait(false))
+        if (!await schema.DatabaseExistsAsync(cancellationToken).ConfigureAwait(false))
         {
             if (!options.CreateDatabase)
             {
@@ -60,57 +61,39 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
             LogCreatedDatabase(name, options.Store.Collation ?? "the server default");
         }
 
-        var databases = await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false);
-        var marker = await ReadMarkerAsync(cancellationToken).ConfigureAwait(false);
-        if (marker is null)
+        var report = await schema.ReportAsync(cancellationToken).ConfigureAwait(false);
+        if (!report.Initialized)
         {
-            await InitializeEmptyDatabaseAsync(name, databases, cancellationToken).ConfigureAwait(false);
+            await InitializeEmptyDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        var differences = marker.DifferencesFrom(options.Store);
-        if (differences.Count > 0)
+        if (report.UnknownMigrations.Count > 0)
         {
             throw new StoreInitializationException(
-                $"Database {name} was initialized by Nightingale with settings the configuration no longer matches: {string.Join("; ", differences)}. These settings are fixed at initialization; change the configuration back, or initialize a new database.");
+                $"Database {name} is newer than this server: it has migrations this server does not know, {string.Join(", ", report.UnknownMigrations)}. Run a server at least as new as the one that applied them.");
         }
 
-        foreach (var database in databases)
+        if (report.SettingConflicts.Count > 0)
         {
-            if (options.ApplySchemaChanges)
-            {
-                await database.ApplyAllConfiguredChangesToDatabaseAsync(AutoCreate.CreateOrUpdate, ct: cancellationToken).ConfigureAwait(false);
-                await StampSchemaVersionAsync(cancellationToken).ConfigureAwait(false);
-                continue;
-            }
+            throw new StoreInitializationException(
+                $"Database {name} was initialized by Nightingale with settings the configuration no longer matches: {string.Join("; ", report.SettingConflicts)}. These settings are fixed at initialization; change the configuration back, or initialize a new database.");
+        }
 
-            try
-            {
-                await database.AssertDatabaseMatchesConfigurationAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (DatabaseValidationException exception)
+        if (report.StoreChanges is not null || report.PendingMigrations.Count > 0)
+        {
+            if (!applyChanges)
             {
                 throw new StoreInitializationException(
-                    $"The schema of database {name} differs from what this server expects, and Nightingale:ApplySchemaChanges is false. The change it would apply follows; set the option to true to let this server apply it at startup.{Environment.NewLine}{exception.Message}",
-                    exception);
+                    $"The schema of database {name} differs from what this server expects, and Nightingale:ApplySchemaChanges is false. What it would apply follows; set the option to true to let this server apply it at startup, or run the host with {SchemaSwitches.Apply}.{Environment.NewLine}{report.Describe()}");
             }
+
+            await schema.ApplyAsync(cancellationToken).ConfigureAwait(false);
+            LogAppliedChanges(name, report.PendingMigrations.Count, report.StoreChanges is not null);
         }
 
-        LogServingStore(name, marker.SchemaVersion, marker.CreatedBy);
-    }
-
-    /// <inheritdoc/>
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    private static async Task<bool> DatabaseExistsAsync(string master, string name, CancellationToken cancellationToken)
-    {
-        await using var connection = new SqlConnection(master);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT DB_ID(@name)";
-        command.Parameters.AddWithValue("@name", name);
-        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return result is not null and not DBNull;
+        var stored = await schema.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        LogServingStore(name, stored.CreatedBy);
     }
 
     private static async Task CreateDatabaseAsync(string master, string name, string? collation, CancellationToken cancellationToken)
@@ -147,25 +130,24 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task InitializeEmptyDatabaseAsync(string name, IReadOnlyList<global::Polecat.Storage.PolecatDatabase> databases, CancellationToken cancellationToken)
+    private async Task InitializeEmptyDatabaseAsync(string name, CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        await using (var count = connection.CreateCommand())
-        {
-            count.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped = 0";
-            var tables = (int)(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
-            if (tables > 0)
-            {
-                throw new StoreInitializationException(
-                    $"Database {name} holds {tables} tables and no Nightingale marker, so it was not initialized by Nightingale. The server only initializes an empty database; point it at one, or at a database it initialized.");
-            }
-        }
-
         string collation;
-        await using (var read = connection.CreateCommand())
+        await using (var connection = new SqlConnection(connectionString))
         {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using (var count = connection.CreateCommand())
+            {
+                count.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped = 0";
+                var tables = (int)(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+                if (tables > 0)
+                {
+                    throw new StoreInitializationException(
+                        $"Database {name} holds {tables} tables and none of Nightingale's migrations, so it was not initialized by Nightingale. The server only initializes an empty database; point it at one, or at a database it initialized.");
+                }
+            }
+
+            await using var read = connection.CreateCommand();
             read.CommandText = "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'))";
             collation = (string)(await read.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }
@@ -176,114 +158,35 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
                 $"Database {name} has collation {collation} but Nightingale:Store:Collation is {options.Store.Collation}. The collation is set when the database is created; drop the database and let the server create it, or configure the collation it has.");
         }
 
-        foreach (var database in databases)
-        {
-            await database.ApplyAllConfiguredChangesToDatabaseAsync(AutoCreate.CreateOrUpdate, ct: cancellationToken).ConfigureAwait(false);
-        }
-
-        var marker = new StoreMarker(
-            StoreMarker.CurrentSchemaVersion,
-            options.Store.Partitioning,
-            options.Store.AssignOrdinals,
-            options.Store.Schema,
-            collation,
-            timeProvider.GetUtcNow(),
-            typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown");
-        await using (var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false))
-        {
-            context.Markers.Add(new StoreMarkerRow
+        await schema.ApplyAsync(cancellationToken).ConfigureAwait(false);
+        await schema.WriteSettingsAsync(
+            new StoredSettings
             {
-                Id = StoreMarkerRow.SingleRowId,
-                SchemaVersion = marker.SchemaVersion,
-                Partitioning = marker.Partitioning.ToString(),
-                AssignOrdinals = marker.AssignOrdinals,
-                SchemaName = marker.Schema,
-                Collation = marker.Collation,
-                CreatedAt = marker.CreatedAt,
-                CreatedBy = marker.CreatedBy,
-            });
-            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
+                Store = new NightingaleOptions.StoreSettings
+                {
+                    Schema = options.Store.Schema,
+                    Collation = collation,
+                    Partitioning = options.Store.Partitioning,
+                    AssignOrdinals = options.Store.AssignOrdinals,
+                },
+                CreatedAt = timeProvider.GetUtcNow(),
+                CreatedBy = typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown",
+                StoreLibrary = StoreSchema.StoreLibraryVersion,
+            },
+            cancellationToken).ConfigureAwait(false);
 
-        LogInitializedStore(name, marker.Schema, collation, marker.Partitioning, marker.AssignOrdinals);
+        LogInitializedStore(name, options.Store.Schema, options.Schema, collation, options.Store.Partitioning, options.Store.AssignOrdinals);
     }
-
-    /// <summary>After a change is applied, the marker says which version of the schema the store now has.</summary>
-    private async Task StampSchemaVersionAsync(CancellationToken cancellationToken)
-    {
-        // The schema is current by now, so the model's row is the table's row.
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await context.Markers.SingleOrDefaultAsync(marker => marker.Id == StoreMarkerRow.SingleRowId, cancellationToken).ConfigureAwait(false);
-        if (row is not null && row.SchemaVersion < StoreMarker.CurrentSchemaVersion)
-        {
-            row.SchemaVersion = StoreMarker.CurrentSchemaVersion;
-            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task<StoreMarker?> ReadMarkerAsync(CancellationToken cancellationToken)
-    {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        await using (var exists = connection.CreateCommand())
-        {
-            exists.CommandText = "SELECT OBJECT_ID(@table, 'U')";
-            exists.Parameters.AddWithValue("@table", MarkerTable);
-            var id = await exists.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-            if (id is null or DBNull)
-            {
-                return null;
-            }
-        }
-
-        await using var select = connection.CreateCommand();
-        select.CommandText = string.Format(
-            CultureInfo.InvariantCulture,
-            "SELECT schema_version, partitioning, collation, created_at, created_by, {1}, {2} FROM {0} WHERE id = 1",
-            MarkerTable,
-            await HasColumnAsync(connection, "assign_ordinals", cancellationToken).ConfigureAwait(false) ? "assign_ordinals" : "CAST(NULL AS bit)",
-            await HasColumnAsync(connection, "schema_name", cancellationToken).ConfigureAwait(false) ? "schema_name" : "CAST(NULL AS varchar(128))");
-        await using var reader = await select.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return null;
-        }
-
-        return new StoreMarker(
-            reader.GetInt32(0),
-            Enum.Parse<NightingaleOptions.StoreSettings.PartitioningMode>(reader.GetString(1)),
-            !reader.IsDBNull(5) && reader.GetBoolean(5),
-            reader.IsDBNull(6) ? DefaultSchema : reader.GetString(6),
-            reader.GetString(2),
-            reader.GetFieldValue<DateTimeOffset>(3),
-            reader.GetString(4));
-    }
-
-    /// <summary>
-    /// Whether the marker table has a column: a store initialized by an older server lacks the
-    /// ones added since, and the marker is read before the migration that adds them can run.
-    /// </summary>
-    private async Task<bool> HasColumnAsync(SqlConnection connection, string column, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(@table, 'U') AND name = @column";
-        command.Parameters.AddWithValue("@table", MarkerTable);
-        command.Parameters.AddWithValue("@column", column);
-        return (int)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))! > 0;
-    }
-
-    // The schema name comes from the store's options, never from a request; it is bracketed as an
-    // identifier all the same.
-    private string MarkerTable =>
-        $"[{store.Options.DatabaseSchemaName.Replace("]", "]]", StringComparison.Ordinal)}].[{NightingaleTablesFeature.StoreTable}]";
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created database {Database} with collation {Collation}.")]
     private partial void LogCreatedDatabase(string database, string collation);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Initialized the store in database {Database}, schema {Schema}: collation {Collation}, partitioning {Partitioning}, ordinals {Ordinals}.")]
-    private partial void LogInitializedStore(string database, string schema, string collation, NightingaleOptions.StoreSettings.PartitioningMode partitioning, bool ordinals);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Initialized the store in database {Database}: the event store in schema {StoreSchema}, the gateway's tables in schema {Schema}, collation {Collation}, partitioning {Partitioning}, ordinals {Ordinals}.")]
+    private partial void LogInitializedStore(string database, string storeSchema, string schema, string collation, NightingaleOptions.StoreSettings.PartitioningMode partitioning, bool ordinals);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Serving the store in database {Database}, schema version {SchemaVersion}, initialized by {CreatedBy}.")]
-    private partial void LogServingStore(string database, int schemaVersion, string createdBy);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Applied schema changes to database {Database}: {Migrations} of the gateway's migrations, and changes to the event store's tables: {StoreChanged}.")]
+    private partial void LogAppliedChanges(string database, int migrations, bool storeChanged);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Serving the store in database {Database}, initialized by {CreatedBy}.")]
+    private partial void LogServingStore(string database, string createdBy);
 }

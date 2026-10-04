@@ -18,7 +18,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class ReadOnlyConnectionTests(SqlServerTestDatabase database)
 {
-    private readonly VirtualStreamReader _reader = new(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(database.ConnectionString).Options, "dbo", JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader _reader = new(
+        () => new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(database.ConnectionString).Options, new EventStoreSchema("dbo")),
+        JasperFx.StorageConstants.DefaultTenantId);
 
     [Fact]
     public async Task ReadBelowMarkAsync_ShouldReturnTheMarkAndThePageUpToTheLowerOfTheMarkAndTheHead()

@@ -100,33 +100,61 @@ from the augmented definition without connecting to anything.
 
 A host never configures the store; it names a database. The initializer,
 `StoreInitializer`, runs at startup before any request is served, under one
-rule: the server initializes only an empty database, and never migrates a
-store while serving it.
+rule: the server initializes only an empty database, and never changes a
+store while serving it unless told to.
+
+Two mechanisms keep the database's tables, and they are kept in one order.
+The event store's tables, with the gateway's additions to them, are compared
+and changed by the store's own schema tooling, which works from the
+difference between the real tables and what this version of the store
+expects: a comparison, not a version number, so a change the store's library
+brings with an upgrade is found whether or not anyone expected it. The
+gateway's own tables are created and changed by its migrations (seam 7),
+whose history says which have run. The store's go first, because the
+gateway's tables are about a store that exists. `StoreSchema` is the one
+place that reports what is pending in both and applies it; startup, the
+default host's switches and a host's own code all go through it.
 
 - A database that does not exist is created, with the configured collation,
   when `Nightingale:CreateDatabase` allows it.
 - An empty database, created by the server or provisioned by hand, gets the
-  whole schema in one pass while every table is empty, so no index is ever
-  built over data, and one row in `nightingale_store` recording what shaped
-  it: the schema version, the partitioning choices, the actual collation,
-  when and by which server version.
-- A database with that row is compared with the configuration and refused on
-  any difference, then its schema is asserted to match what this server
-  expects. A difference in schema is refused too, with the change it would
-  apply in the message, unless `Nightingale:ApplySchemaChanges` is on.
-- A database with tables and no row is refused outright: it is not ours.
+  store's tables and then the gateway's while every table is empty, so no
+  index is ever built over data, and one row per setting recording what
+  shaped it: the settings below, the actual collation, when and by which
+  server version, and the version of the store's library.
+- An initialized database, one that has any of the gateway's migrations, is
+  refused when it has a migration this server does not know, because the
+  store is then newer than the server; refused when the configuration
+  contradicts a setting it was initialized with; and refused when either set
+  of tables is behind what this server expects, with what would be applied
+  in the message, unless `Nightingale:ApplySchemaChanges` is on.
+- A database with tables and none of the gateway's migrations is refused
+  outright: it is not ours.
+
+The same report and the same apply are there without starting the server:
+`--schema-report` on the default host prints what the database needs and
+exits with 1 when it is not current, `--apply-schema` brings it up to date,
+and a host of its own calls `GetNightingaleSchemaReportAsync` and
+`ApplyNightingaleSchemaAsync`.
 
 The settings under `Nightingale:Store` are the ones fixed at initialization
-because each shapes the tables or where they live: the schema, the store's
-and the gateway's alike, `dbo` unless said otherwise, created with the tables
-when it is missing; the collation, which decides whether stream names are
-case-sensitive; the partitioning mode, one of none, by tenant, which gives
-each tenant its own sequence, or by the archived flag, which keeps deleted
-streams' events out of every live read, one mode rather than one switch per
-scheme because a table has one partition scheme; and whether ordinals are
-assigned (seam 6). Changing any of them means a new database: a store
-initialized in one schema is found nowhere else, and the marker records each
-so a changed configuration is refused rather than served.
+because each shapes the store's tables or where they live: the schema they
+are in, `dbo` unless said otherwise; the collation, which decides whether
+stream names are case-sensitive; the partitioning mode, one of none, by
+tenant, which gives each tenant its own sequence, or by the archived flag,
+which keeps deleted streams' events out of every live read, one mode rather
+than one switch per scheme because a table has one partition scheme; and
+whether ordinals are assigned (seam 6). Changing any of them means a new
+database, and the settings rows record each so a changed configuration is
+refused rather than served.
+
+The rows are settings in the plainest sense: each is a name, a
+configuration path, and a value, and they are read by the configuration
+binder into the very type the configuration binds into. So the stored
+settings and the configured ones are two instances of one type, compared
+property by property, and the table never changes shape: a store older than
+a setting has no row for it and reads as the default, and a row a newer
+server wrote is ignored by an older one.
 
 ### 4. Positions are the store's sequence
 
@@ -243,14 +271,39 @@ Ordinals are per tenant by construction, the sequencer partitions by tenant and
 the indexes lead with the tenant column, so a read across all tenants has no
 single ordinal sequence and is served under global numbering only.
 
-### 7. The gateway's own tables are one model
+### 7. The gateway's own tables are one model, and its own schema
 
-The tables the gateway adds beside the store's, groups, parked messages,
-leases, the sequencer's progress and the marker, are read and written
-through one EF Core context, `NightingaleDbContext`, in the server library.
-It is one model every backend shares with a provider swap, so the Marten
-backend brings Npgsql rather than a second group store, and it takes the
-plain reads and writes out of SQL strings. The backend has a second, read-only context beside it, a mirror of two
+The tables the gateway keeps, groups, parked events, the outbox, leases, the
+progress of its background processes and the settings rows, are one EF Core
+context, `NightingaleDbContext`, in the server library. The context owns
+them, under the repository's EF rules for a context that does: a `Guid`
+key named `Id` on each, singular table names, natural keys as unique
+indexes, a check that fails a test when a line is forgotten. It names no
+provider and no column type, only lengths and whether a string is Unicode,
+so each backend generates its own migrations from the one model, with
+`dotnet ef migrations add`, into its own project: SQL Server's are in the
+Polecat backend, and the Marten backend brings PostgreSQL's for the same
+context, not a second model. A second test fails when the model has changed
+and no migration carries the change.
+
+The tables live in a schema of their own, `nightingale` unless
+`Nightingale:Schema` names another, with the migrations history beside
+them, so the gateway's tables and the event store's never share a
+mechanism or a history; the schema may be the store's own, the names do
+not collide. Generated migrations carry the schema as a literal, and a host
+may name another, so the operations are moved to the host's schema as they
+run, by the backend's migrations SQL generator; the generated code is never
+edited. A model is cached per context type with its schema in it, so the
+schema is part of the cache key: one process serving two schemas would
+otherwise read the first one's tables through the second context.
+
+A group's key is an id made with the group, and its tenant, stream and
+group name sit under a unique index: the names find a group, by whatever
+rule the database's collation has for which names are the same, and the id
+is the group. Its parked events, its outbox and its lease go by the id, so
+nothing downstream of the lookup depends on how a name is spelt or compared.
+
+The backend has a second, read-only context beside it, a mirror of two
 tables the store owns: its events, with the columns the gateway adds, and
 the row its high-water mark is kept in. The reads by category, by event
 type and by position are LINQ over that mirror, and so is the tail's look
@@ -261,35 +314,25 @@ mirror declares the store's column types exactly, since a name sent as
 Unicode to a column that is not makes the database convert the column and
 scan the index it should seek. One test holds every mapped column to the
 store's own definition, another asks the database for its count of seeks
-and scans on the index.
+and scans on the index. The mirror refuses to save, and exists as two
+types over one mapping, `EventsDbContext` on the main connection and
+`ReadOnlyEventsDbContext` on the read-only one (seam 8), each with a
+registration of its own, so a reader asks for the connection it means by
+type.
 
 What stays SQL text, because its shape is the point or there is no table
 to map: the sequencer's batch, which numbers thousands of events in one
 set-based statement under a lock where row-by-row writes would be an order
-of magnitude slower; the initializer's questions of the catalog and its
-creation of the database; and its read of the marker, which runs before
-the schema has been brought up to date, when a column the model expects
-may not exist yet.
+of magnitude slower; and the initializer's questions of the catalog and
+its creation of the database.
 
-The context deviates on purpose from the toolkit's EF rules for a context
-that owns its tables. It owns nothing: the backend's schema feature creates
-the tables, so one initializer applies one schema under the marker protocol
-and the context never migrates; the names follow the store's convention and
-the tables sit in the store's schema. A group's key is an id made with the
-group, and its tenant, stream and group name sit under a unique index: the
-names find a group, by whatever rule the database's collation has for which
-names are the same, and the id is the group. Its parked messages, its outbox
-and its lease go by the id, so nothing downstream of the lookup depends on
-how a name is spelt or compared. A unit test builds the
-model with the provider's type mappings and holds it equal to the schema
-feature's definition, column for column, so the two cannot drift apart.
-
-The group store's plain reads and writes run on the in-memory provider in
-unit tests. That provider has no transactions, no merge, no collation and no
-filtered indexes, so it stands in for exactly those reads and writes and for
-nothing else; the lease is written so that it needs nothing else, an
-optimistic write settled by the row's concurrency tokens, and the integration
-suite still runs the same tests on SQL Server.
+The group store's plain reads and writes, the reader's queries and the
+settings rows run on the in-memory provider in unit tests. That provider
+has no transactions, no unique indexes, no collation and no filtered
+indexes, so it stands in for exactly those reads and writes and for nothing
+else; the lease is written so that it needs nothing else, an optimistic
+write settled by the row's concurrency tokens, and the integration suite
+still runs the same tests on SQL Server.
 
 ### 8. History is read from a read-only connection
 

@@ -90,6 +90,20 @@ undecided adds it here rather than mentioning it once in a conversation.
   that cancels a streaming read during a page and then reads again on the
   same host, and either a fix in how the reader cancels its command or an
   upstream issue on the SQL client.
+- **An initialization interrupted between its two halves leaves a database the
+  server refuses.** An empty database gets the event store's tables first and
+  the gateway's migrations after; a process that dies between the two leaves
+  tables and none of the gateway's migrations, which the next start reads as a
+  database that is not Nightingale's. Nothing is lost, the database held no
+  data, and dropping it is the way out. Close by: recognizing a database that
+  holds only the store's own tables, all empty, as one to carry on
+  initializing.
+- **The gateway's tables reference each other by id without foreign keys.** A
+  parked event and an outbox entry carry their group's id, and deleting a
+  group removes them in the same write, but nothing in the database says so:
+  a consumer that parks an event while its group is being deleted leaves a
+  row no group owns. Close by: foreign keys with no cascade, and the park
+  treating the refused write as the group being gone.
 - **The sequencer's takeover is not tested with two instances.** The lease
   logic is the group store's, tested there, and the batch transaction reads
   the progress row under an update lock so an overlapping sequencer continues
@@ -110,14 +124,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   commit-time check, and it would be a fourth value of
   `Nightingale:Store:Partitioning`, exclusive with the others like them. Close by: deciding when sizing demands it; see
   `PENDING.md`.
-- **Schema migration is a startup switch, not a command.**
-  `Nightingale:ApplySchemaChanges` lets a host apply a pending schema change
-  at startup, which is the only way to move a store initialized by an older
-  server forward. An operator cannot preview the change, apply it out of band,
-  or apply it while the service is stopped. Close by: a `migrate` command in
-  the default host beside the `--export-schema` switch it already has, with a
-  dry run that prints the delta, after which the switch stays off in
-  production hosts.
 - **Protocol compatibility or API compatibility.** Speaking the reference event store's
   own protocol so its official client works unmodified means implementing server
   features, gossip, the trailer error model and its UUID byte order exactly.

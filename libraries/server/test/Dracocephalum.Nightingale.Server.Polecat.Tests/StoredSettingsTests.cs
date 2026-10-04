@@ -2,7 +2,7 @@ using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 
-public sealed class StoreMarkerTests
+public sealed class StoredSettingsTests
 {
     private static readonly DateTimeOffset Created = new(2026, 9, 19, 8, 0, 0, TimeSpan.Zero);
 
@@ -80,30 +80,16 @@ public sealed class StoreMarkerTests
     public void DifferencesFrom_WhenEverythingDiffers_ShouldListEveryDifference()
     {
         // Arrange
-        var sut = Marker(schemaVersion: StoreMarker.CurrentSchemaVersion + 1, partitioning: NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream, collation: "SQL_Latin1_General_CP1_CI_AS");
+        var sut = Marker(partitioning: NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream, collation: "SQL_Latin1_General_CP1_CI_AS");
         var settings = new NightingaleOptions.StoreSettings { Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.None, Collation = "Latin1_General_100_BIN2" };
 
         // Act
         var differences = sut.DifferencesFrom(settings);
 
         // Assert
-        differences.Count.ShouldBe(3);
-        differences[0].ShouldContain("newer than");
-        differences[1].ShouldContain("Partitioning");
-        differences[2].ShouldContain("Collation");
-    }
-
-    [Fact]
-    public void DifferencesFrom_WhenStoreIsOlderThanTheServer_ShouldNotBeADifference()
-    {
-        // Arrange: an older schema is the migration's business, not a settings conflict.
-        var sut = Marker(schemaVersion: 0);
-
-        // Act
-        var differences = sut.DifferencesFrom(new NightingaleOptions.StoreSettings());
-
-        // Assert
-        differences.ShouldBeEmpty();
+        differences.Count.ShouldBe(2);
+        differences[0].ShouldContain("Partitioning");
+        differences[1].ShouldContain("Collation");
     }
 
     [Fact]
@@ -148,6 +134,11 @@ public sealed class StoreMarkerTests
         differences.ShouldHaveSingleItem().ShouldContain("Schema is dbo but the store was initialized in events");
     }
 
-    private static StoreMarker Marker(int schemaVersion = StoreMarker.CurrentSchemaVersion, NightingaleOptions.StoreSettings.PartitioningMode partitioning = NightingaleOptions.StoreSettings.PartitioningMode.None, string collation = "SQL_Latin1_General_CP1_CI_AS", bool assignOrdinals = false, string schema = "dbo") =>
-        new(schemaVersion, partitioning, assignOrdinals, schema, collation, Created, "1.0.0+abcdef12");
+    private static StoredSettings Marker(NightingaleOptions.StoreSettings.PartitioningMode partitioning = NightingaleOptions.StoreSettings.PartitioningMode.None, string collation = "SQL_Latin1_General_CP1_CI_AS", bool assignOrdinals = false, string schema = "dbo") =>
+        new()
+        {
+            Store = new NightingaleOptions.StoreSettings { Partitioning = partitioning, AssignOrdinals = assignOrdinals, Schema = schema, Collation = collation },
+            CreatedAt = Created,
+            CreatedBy = "1.0.0+abcdef12",
+        };
 }

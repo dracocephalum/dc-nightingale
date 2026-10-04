@@ -1,57 +1,95 @@
 using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Polecat.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Shouldly;
-using Weasel.SqlServer.Tables;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 
 /// <summary>
-/// The context's model and the schema feature describe the same tables. The feature creates
-/// them and the context reads and writes them, so the two are held equal here, column for
-/// column: name, type, nullability and key. Building the model needs the provider's type
-/// mappings, not a connection, so the design-time placeholder string is enough.
+/// The gateway's own context as this backend configures it. The context owns its tables, so it
+/// is held to the conventions, and to its migrations: a change to the model without a migration
+/// fails here rather than at a server's first start. Building the model and writing a migration
+/// script need the provider's type mappings, not a connection, so a placeholder string is enough.
 /// </summary>
 public sealed class NightingaleDbContextTests
 {
+    private const string DesignTime = "Server=localhost;Database=design-time;Integrated Security=true";
+
     [Fact]
-    public void Model_ShouldMirrorEveryTableTheSchemaFeatureDeclares()
+    public void Model_WhenBuilt_ShouldFollowConventions()
     {
         // Arrange
-        var options = new DbContextOptionsBuilder<NightingaleDbContext>()
-            .UseSqlServer("Server=localhost;Database=design-time;Integrated Security=true")
-            .Options;
-        using var context = new NightingaleDbContext(options, new NightingaleTables("dbo"));
-        var declared = new NightingaleTablesFeature("dbo").Objects.OfType<Table>().ToList();
+        using var context = Context(NightingaleSchema.Default);
+
+        // Act & Assert: throws with every violation listed.
+        ModelConventions.Check(context.Model);
+    }
+
+    [Fact]
+    public void Model_ShouldHaveNoChangeTheMigrationsDoNotCarry()
+    {
+        // Arrange
+        using var context = Context(NightingaleSchema.Default);
+
+        // Act & Assert: a model changed without `dotnet ef migrations add` is caught here.
+        context.Database.HasPendingModelChanges().ShouldBeFalse();
+        context.Database.GetMigrations().ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void Model_ShouldBeBuiltPerSchema()
+    {
+        // Arrange: two contexts of one type in one process, over two schemas.
+        using var first = Context(NightingaleSchema.Default);
+        using var second = Context("elsewhere");
+
+        // Act & Assert: each has a model of its own, or the second would use the first's tables.
+        first.Model.GetDefaultSchema().ShouldBe(NightingaleSchema.Default);
+        second.Model.GetDefaultSchema().ShouldBe("elsewhere");
+    }
+
+    [Fact]
+    public void Migrations_WhenTheHostNamesAnotherSchema_ShouldRunInThatSchema()
+    {
+        // Arrange: the migrations were generated under the default schema and are not edited.
+        using var context = Context("elsewhere");
 
         // Act
-        var mapped = context.Model.GetEntityTypes().Select(entity => new
-        {
-            Schema = entity.GetSchema() ?? context.Model.GetDefaultSchema(),
-            Name = entity.GetTableName(),
-            Columns = entity.GetProperties()
-                .Select(property => (property.GetColumnName(), property.GetColumnType(), property.IsNullable))
-                .OrderBy(column => column.Item1, StringComparer.Ordinal)
-                .ToList(),
-            Key = entity.FindPrimaryKey()!.Properties.Select(property => property.GetColumnName()).ToList(),
-        }).OrderBy(table => table.Name, StringComparer.Ordinal).ToList();
+        var script = context.GetService<IMigrator>().GenerateScript();
+
+        // Assert: every table and the schema itself moved; nothing is left in the default one.
+        script.ShouldSatisfyAllConditions(
+            text => text.ShouldContain("CREATE SCHEMA [elsewhere]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[SubscriptionGroup]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[ParkedEvent]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[OutboxEntry]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[Lease]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[ProgressMark]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[Setting]"),
+            text => text.ShouldContain("[elsewhere].[__EFMigrationsHistory]"),
+            text => text.ShouldNotContain("[" + NightingaleSchema.Default + "]"));
+    }
+
+    [Fact]
+    public void Migrations_UnderTheDefaultSchema_ShouldRunAsGenerated()
+    {
+        // Arrange
+        using var context = Context(NightingaleSchema.Default);
+
+        // Act
+        var script = context.GetService<IMigrator>().GenerateScript();
 
         // Assert
-        declared.Count.ShouldBe(6);
-        mapped.Count.ShouldBe(declared.Count);
+        script.ShouldContain("CREATE TABLE [nightingale].[Setting]");
+        script.ShouldContain("[nightingale].[__EFMigrationsHistory]");
+    }
 
-        // A second context of the same type over another schema has a model of its own.
-        using var elsewhere = new NightingaleDbContext(options, new NightingaleTables("elsewhere"));
-        elsewhere.Model.GetDefaultSchema().ShouldBe("elsewhere");
-        context.Model.GetDefaultSchema().ShouldBe("dbo");
-
-        foreach (var table in declared)
-        {
-            var entity = mapped.SingleOrDefault(candidate => candidate.Name == table.Identifier.Name).ShouldNotBeNull($"{table.Identifier.Name} is declared but not mapped");
-            entity.Schema.ShouldBe(table.Identifier.Schema);
-            entity.Columns.ShouldBe(
-                table.Columns.Select(column => (column.Name, column.Type, column.AllowNulls)).OrderBy(column => column.Name, StringComparer.Ordinal).ToList(),
-                $"{table.Identifier.Name}: the columns differ");
-            entity.Key.ShouldBe(table.PrimaryKeyColumns.ToList(), $"{table.Identifier.Name}: the key differs");
-        }
+    private static NightingaleDbContext Context(string schema)
+    {
+        var builder = new DbContextOptionsBuilder<NightingaleDbContext>();
+        NightingaleDbContextFactory.Configure(builder, DesignTime, schema);
+        return new NightingaleDbContext(builder.Options, new NightingaleSchema(schema));
     }
 }

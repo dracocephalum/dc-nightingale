@@ -82,27 +82,38 @@ public static class ServiceCollectionExtensions
 
         // The second store exists only for bounded reads of plain streams on the read-only
         // connection, and only when the host asks for them: it reads and never migrates.
+        // The mirror of the store's events table, once per connection: each is a type of its own,
+        // so a reader asks for the one it means. The read-only one is always there; with the
+        // read-only connection off it reaches the main one and nothing reads through it.
+        services.AddSingleton(new EventStoreSchema(options.Store.Schema));
+        services.AddDbContextFactory<EventsDbContext>(context => context.UseSqlServer(connectionString));
+        services.AddDbContextFactory<ReadOnlyEventsDbContext>(context => context.UseSqlServer(readOnlyConnectionString ?? connectionString));
         services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(
             provider.GetRequiredService<IDocumentStore>(),
-            EventsOptions(connectionString),
+            provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(),
             options.Store.AssignOrdinals,
-            readOnlyConnectionString is null ? null : EventsOptions(readOnlyConnectionString),
+            readOnlyConnectionString is null ? null : provider.GetRequiredService<IDbContextFactory<ReadOnlyEventsDbContext>>(),
             readOnlyConnectionString is not null && options.ReadStreamsFromReadOnlyConnection
                 ? DocumentStore.For(store => Configure(store, readOnlyConnectionString, options))
                 : null,
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
-        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), EventsOptions(connectionString), provider.GetRequiredService<ILoggerFactory>()));
+        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
-        services.AddNightingaleGroupStore(options.Store.Schema, JasperFx.StorageConstants.DefaultTenantId, context => context.UseSqlServer(connectionString));
-        services.AddSingleton<IHostedService>(provider => new StoreInitializer(
+        services.AddNightingaleGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
+        services.AddSingleton(provider => new StoreSchema(
             provider.GetRequiredService<IDocumentStore>(),
+            provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
+            connectionString,
+            options));
+        services.AddSingleton(provider => new StoreInitializer(
+            provider.GetRequiredService<StoreSchema>(),
             connectionString,
             options,
-            provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
-            provider.GetRequiredService<ILogger<StoreInitializer>>()));
+            provider.GetService<ILogger<StoreInitializer>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StoreInitializer>.Instance));
+        services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<StoreInitializer>());
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
         if (options.Store.AssignOrdinals)
         {
@@ -115,16 +126,13 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<GroupRegistry>(),
                 connectionString,
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
+                options.Schema,
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
                 provider.GetRequiredService<ILogger<OrdinalSequencer>>()));
         }
 
         return services;
     }
-
-    /// <summary>The options of the mirror of the store's events table over one connection.</summary>
-    private static DbContextOptions<EventsDbContext> EventsOptions(string connectionString) =>
-        new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(connectionString).Options;
 
     private static void Configure(StoreOptions store, string connectionString, NightingaleOptions options)
     {
