@@ -178,10 +178,10 @@ refused there and everything else still works.
 
 A persistent-subscription group is a checkpoint the server keeps and a set of
 events in flight to one consumer. The checkpoint, the group's settings and its
-parked messages are rows in the gateway's own tables, through the `IGroupStore`
-port and its one implementation, `GroupStore`, over the context of seam 7;
+parked messages are rows in the gateway's own tables, through the `ISubscriptionGroupStore`
+port and its one implementation, `SubscriptionGroupStore`, over the context of seam 7;
 the in-flight events, their retry counts and their deadlines are in
-memory, in `PersistentGroup`, in the one instance that holds the group's lease.
+memory, in `SubscriptionGroupRuntime`, in the one instance that holds the group's lease.
 The lease is a row that only a free, expired or already owned lease lets an
 instance write, two instances racing for it told apart by the row's
 concurrency tokens, renewed while the consumer stays, released when it
@@ -394,6 +394,17 @@ connection whatever is configured.
   explicit expectation, the stored events from that revision on are compared
   with the batch by id, and an exact match returns the original result. Event
   ids are not enforced unique.
+- **Names** come in two vocabularies, on purpose. The contract, the wire and
+  the client say "persistent subscription" and "group", as the reference
+  does, so they read as the contract their callers already know:
+  `GroupSettings`, `GroupExistsException`, `GROUP_NOT_FOUND`. The server's
+  own types and tables say "subscription group" for the same thing:
+  `SubscriptionGroupStore`, `SubscriptionParkedEvent`. The difference stops
+  at the wire, and each contract type says so where it is declared.
+- **Data access** lives in a `Data` folder and namespace: the contexts, their
+  entities, and the migrations under `Data/Migrations`. A context exposes
+  every table it maps through a set named for its entity, the class name or
+  its plural, which the conventions check holds.
 - **Errors** cross the wire as a `google.rpc.Status` with an `ErrorInfo`
   detail whose reason is one of `errors.proto`'s; the client maps reasons to
   the shared exceptions, and unknown reasons stay `RpcException`.

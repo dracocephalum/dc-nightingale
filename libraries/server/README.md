@@ -54,13 +54,13 @@ The gateway's own tables are created by EF Core migrations, generated from
 the model in the server library into the backend that owns the provider.
 After changing the model, from the backend's project folder:
 
-    dotnet ef migrations add <Name> --context NightingaleDbContext --output-dir Migrations
+    dotnet ef migrations add <Name> --context NightingaleDbContext --output-dir Data/Migrations
 
 No database is needed for that, and the generated files are not edited; a
 unit test fails while the model has a change no migration carries.
 
 Until the first official release there is one migration, `Initial`, and it is
-regenerated rather than added to: delete the `Migrations` folder and run the
+regenerated rather than added to: delete the `Data/Migrations` folder and run the
 command with `Initial` as the name. No store from before the first release is
 migrated; it is initialized again. From the first release on `Initial` is
 frozen and every change is a migration of its own.

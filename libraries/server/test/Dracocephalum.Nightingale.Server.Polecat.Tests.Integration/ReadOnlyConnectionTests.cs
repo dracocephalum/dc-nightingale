@@ -1,6 +1,6 @@
 using System.Text;
 
-using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Dracocephalum.Nightingale.Server.Polecat.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Shouldly;

@@ -6,6 +6,10 @@ namespace Dracocephalum.Nightingale;
 /// after thirty seconds unacknowledged and parked after ten retries, and the checkpoint is
 /// written every thousand acknowledgements or every two seconds once ten have accrued.
 /// </summary>
+/// <remarks>
+/// The name is the contract's, kept on purpose: the reference client says "persistent subscription" and
+/// "group", and so do the wire and the client here. The server's own types say "subscription group".
+/// </remarks>
 /// <param name="Start">Where the group starts: <see cref="StreamPosition.Start"/>, <see cref="StreamPosition.End"/>, or a position, inclusive.</param>
 /// <param name="MessageTimeout">How long a delivered event may stay unacknowledged before it is redelivered.</param>
 /// <param name="MaxRetryCount">How many times an event is redelivered before it is parked.</param>

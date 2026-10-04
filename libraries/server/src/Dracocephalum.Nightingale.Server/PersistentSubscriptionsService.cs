@@ -16,7 +16,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="registry">The groups live in this instance.</param>
 /// <param name="address">Where this instance is reached, written with every lease it takes.</param>
 /// <param name="timeProvider">The clock.</param>
-public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamStore store, IStoreTail tail, GroupRegistry registry, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
+public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore groups, IStreamStore store, IStoreTail tail, SubscriptionGroupRegistry registry, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
 {
     /// <summary>How long a lease lasts; it is renewed at a third of this.</summary>
     public static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
@@ -59,7 +59,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
 
         try
         {
-            await groups.CreateAsync(new GroupDefinition(stream, group, settings, -1), context.CancellationToken).ConfigureAwait(false);
+            await groups.CreateAsync(new SubscriptionGroupDefinition(stream, group, settings, -1), context.CancellationToken).ConfigureAwait(false);
         }
         catch (GroupExistsException)
         {
@@ -110,7 +110,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         // A running group's consumer is woken by the instance that runs it, so a replay goes
         // there: refused with the owner's address, and the client repeats it there. With no
         // consumer anywhere, the move is done here and delivered at the next connection.
-        var holder = await groups.LeaseHolderAsync(GroupRegistry.LeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
+        var holder = await groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
         if (holder is not null && !string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal))
         {
             throw NightingaleErrors.GroupOwnedElsewhere(stream, group, holder);
@@ -118,9 +118,9 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
 
         // The caller's number is in the group's numbering: a revision for a plain stream, a
         // position for $all or a virtual stream, an ordinal for a group created under it.
-        var by = definition.Settings.Numbering == Numbering.Ordinal ? ParkedNumber.Ordinal
-            : StreamNames.IsReserved(stream) ? ParkedNumber.Position
-            : ParkedNumber.Revision;
+        var by = definition.Settings.Numbering == Numbering.Ordinal ? SubscriptionParkedNumber.Ordinal
+            : StreamNames.IsReserved(stream) ? SubscriptionParkedNumber.Position
+            : SubscriptionParkedNumber.Revision;
         long? position = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Position ? request.Position : null;
         var replayed = await groups.ReplayAsync(definition.Id, position, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false);
         if (position is { } wanted && replayed == 0)
@@ -171,7 +171,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         {
             // Refused with the owner's address: the client goes there itself, the way the
             // reference client follows a not-leader answer.
-            var lease = GroupRegistry.LeaseName(definition.Id);
+            var lease = SubscriptionGroupRegistry.LeaseName(definition.Id);
             var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
             if (owner is not null)
             {
@@ -244,9 +244,9 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         return parsed;
     }
 
-    private async Task ServeAsync(GroupDefinition definition, int buffer, string lease, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task ServeAsync(SubscriptionGroupDefinition definition, int buffer, string lease, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
-        await using var live = new PersistentGroup(store, tail, groups, timeProvider, definition, buffer);
+        await using var live = new SubscriptionGroupRuntime(store, tail, groups, timeProvider, definition, buffer);
         registry.Attach(definition.Id, live.Wake);
         await responseStream.WriteAsync(
             new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = Guid.NewGuid().ToString("D"), Checkpoint = live.Checkpoint } },
@@ -275,7 +275,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         }
     }
 
-    private static async Task SendAsync(PersistentGroup live, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
+    private static async Task SendAsync(SubscriptionGroupRuntime live, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
         await foreach (var message in live.Outgoing.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -285,7 +285,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
         }
     }
 
-    private static async Task ReceiveAsync(PersistentGroup live, IAsyncStreamReader<PersistentReadRequest> requestStream, CancellationToken cancellationToken)
+    private static async Task ReceiveAsync(SubscriptionGroupRuntime live, IAsyncStreamReader<PersistentReadRequest> requestStream, CancellationToken cancellationToken)
     {
         while (await requestStream.MoveNext(cancellationToken).ConfigureAwait(false))
         {
@@ -311,7 +311,7 @@ public sealed class PersistentSubscriptionsService(IGroupStore groups, IStreamSt
     }
 
     /// <summary>Renews the lease and redelivers what timed out, on a cadence tied to the message timeout.</summary>
-    private async Task KeepAsync(PersistentGroup live, string lease, TimeSpan messageTimeout, CancellationToken cancellationToken)
+    private async Task KeepAsync(SubscriptionGroupRuntime live, string lease, TimeSpan messageTimeout, CancellationToken cancellationToken)
     {
         var interval = TimeSpan.FromTicks(Math.Min(messageTimeout.Ticks / 2, LeaseDuration.Ticks / 3));
         while (true)

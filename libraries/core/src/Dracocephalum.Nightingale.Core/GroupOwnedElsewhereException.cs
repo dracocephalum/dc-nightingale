@@ -8,6 +8,10 @@ namespace Dracocephalum.Nightingale;
 /// where the same call succeeds; the client follows it on its own, the way the reference client
 /// follows a not-leader answer to the leader.
 /// </summary>
+/// <remarks>
+/// The name is the contract's, kept on purpose: the reference client says "persistent subscription" and
+/// "group", and so do the wire and the client here. The server's own types say "subscription group".
+/// </remarks>
 public sealed class GroupOwnedElsewhereException : InvalidOperationException
 {
     /// <summary>Initializes a new instance of the <see cref="GroupOwnedElsewhereException"/> class.</summary>

@@ -146,8 +146,8 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         using (var second = await TestDatabases.StartHostAsync(_name, Schemas))
         {
-            var groups = second.Services.GetRequiredService<IGroupStore>();
-            await groups.CreateAsync(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+            var groups = second.Services.GetRequiredService<ISubscriptionGroupStore>();
+            await groups.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
             (await groups.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken)).ShouldNotBeNull();
             await second.StopAsync(TestContext.Current.CancellationToken);
         }

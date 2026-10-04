@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 
-using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
 using JasperFx;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;

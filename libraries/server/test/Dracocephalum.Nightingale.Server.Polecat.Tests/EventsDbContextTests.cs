@@ -1,4 +1,5 @@
-using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Polecat.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Polecat;
@@ -51,11 +52,24 @@ public sealed class EventsDbContextTests
     }
 
     [Fact]
+    public void Sets_ShouldExposeEveryMappedTableUnderItsEntitysName()
+    {
+        // Arrange: the mirror keeps the owner's table and column names, so the model conventions
+        // are not its to follow; how it names its own sets is.
+        using var main = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
+        using var readOnly = new ReadOnlyEventsDbContext(new DbContextOptionsBuilder<ReadOnlyEventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
+
+        // Act & Assert
+        Should.NotThrow(() => ModelConventions.CheckSets(main));
+        Should.NotThrow(() => ModelConventions.CheckSets(readOnly));
+    }
+
+    [Fact]
     public void SaveChanges_ShouldRefuse()
     {
         // Arrange: the mirror reads a table the store owns; a write through it is always a mistake.
         using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("mirror-" + Guid.NewGuid().ToString("N")).Options, new EventStoreSchema("dbo"));
-        context.Progression.Add(new ProgressionRow { Name = EventsDbContext.HighWaterMark, LastSeqId = 1 });
+        context.ProgressionRows.Add(new ProgressionRow { Name = EventsDbContext.HighWaterMark, LastSeqId = 1 });
 
         // Act & Assert
         Should.Throw<InvalidOperationException>(() => context.SaveChanges());
@@ -70,7 +84,7 @@ public sealed class EventsDbContextTests
 
         // Act & Assert
         readOnly.Model.GetEntityTypes().Select(entity => entity.GetTableName()).ShouldBe(main.Model.GetEntityTypes().Select(entity => entity.GetTableName()));
-        readOnly.Events.Where(row => row.SeqId > 1).Select(row => row.SeqId).ToQueryString().ShouldBe(main.Events.Where(row => row.SeqId > 1).Select(row => row.SeqId).ToQueryString());
+        readOnly.EventRows.Where(row => row.SeqId > 1).Select(row => row.SeqId).ToQueryString().ShouldBe(main.EventRows.Where(row => row.SeqId > 1).Select(row => row.SeqId).ToQueryString());
     }
 
     [Fact]
@@ -83,9 +97,9 @@ public sealed class EventsDbContextTests
         var key = "orders";
 
         // Act
-        var byCategory = context.Events.Where(row => row.TenantId == tenant && row.Category == key).Select(row => row.SeqId).ToQueryString();
-        var byType = context.Events.Where(row => row.TenantId == tenant && row.Type == key).Select(row => row.SeqId).ToQueryString();
-        var mark = context.Progression.Where(row => row.Name == EventsDbContext.HighWaterMark).Select(row => row.LastSeqId).ToQueryString();
+        var byCategory = context.EventRows.Where(row => row.TenantId == tenant && row.Category == key).Select(row => row.SeqId).ToQueryString();
+        var byType = context.EventRows.Where(row => row.TenantId == tenant && row.Type == key).Select(row => row.SeqId).ToQueryString();
+        var mark = context.ProgressionRows.Where(row => row.Name == EventsDbContext.HighWaterMark).Select(row => row.LastSeqId).ToQueryString();
 
         // Assert
         byCategory.ShouldContain("varchar(250)");

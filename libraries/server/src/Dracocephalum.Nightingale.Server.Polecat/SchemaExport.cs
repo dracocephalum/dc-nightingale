@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;

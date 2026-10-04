@@ -1,6 +1,6 @@
 using System.Globalization;
 
-using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Data;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -27,9 +27,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 internal sealed partial class OrdinalSequencer(
-    IGroupStore leases,
+    ISubscriptionGroupStore leases,
     IStoreTail tail,
-    GroupRegistry registry,
+    SubscriptionGroupRegistry registry,
     string connectionString,
     string schemaName,
     string progressSchemaName,
