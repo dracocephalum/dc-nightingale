@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Dracocephalum.Nightingale.Server.Persistence;
 
@@ -15,7 +16,7 @@ namespace Dracocephalum.Nightingale.Server.Persistence;
 /// </summary>
 /// <param name="options">The provider and connection, from the backend.</param>
 /// <param name="tables">Where the tables live.</param>
-public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> options, NightingaleTables tables) : DbContext(options)
+public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> options, NightingaleTables tables) : DbContext(options), ISchemaScoped
 {
     private const string Name250 = "varchar(250)";
 
@@ -36,6 +37,13 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
 
     /// <summary>Gets the marker.</summary>
     public DbSet<StoreMarkerRow> Markers => Set<StoreMarkerRow>();
+
+    /// <inheritdoc/>
+    public string Schema => tables.Schema;
+
+    /// <inheritdoc/>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+        optionsBuilder.ReplaceService<IModelCacheKeyFactory, SchemaModelCacheKeyFactory>();
 
     /// <inheritdoc/>
     protected override void OnModelCreating(ModelBuilder modelBuilder)

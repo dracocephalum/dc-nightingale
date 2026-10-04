@@ -38,6 +38,12 @@ public sealed class NightingaleDbContextTests
         // Assert
         declared.Count.ShouldBe(6);
         mapped.Count.ShouldBe(declared.Count);
+
+        // A second context of the same type over another schema has a model of its own.
+        using var elsewhere = new NightingaleDbContext(options, new NightingaleTables("elsewhere"));
+        elsewhere.Model.GetDefaultSchema().ShouldBe("elsewhere");
+        context.Model.GetDefaultSchema().ShouldBe("dbo");
+
         foreach (var table in declared)
         {
             var entity = mapped.SingleOrDefault(candidate => candidate.Name == table.Identifier.Name).ShouldNotBeNull($"{table.Identifier.Name} is declared but not mapped");

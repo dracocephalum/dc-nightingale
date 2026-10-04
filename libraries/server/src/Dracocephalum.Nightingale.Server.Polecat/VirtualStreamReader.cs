@@ -1,33 +1,38 @@
-using System.Data;
-using System.Globalization;
-using System.Text;
+using System.Linq.Expressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-using Microsoft.Data.SqlClient;
+using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// Reads the virtual streams straight from the events table. The store's own query surface knows
-/// nothing of the persisted <c>category</c> column, and its type column is only reachable through
-/// its event-type registry, so the predicates are written here as SQL that the filtered indexes
-/// answer with a seek: tenant, key, then position, or tenant, key, then ordinal on a store with
-/// ordinals. Rows are hydrated into event records the way the store adapter hydrates the store's
-/// events, body re-serialized through the shared options and the two reserved metadata keys
-/// appended last, so an event reads the same through either path; an integration test holds the
-/// two paths to the same bytes.
+/// Reads the virtual streams, and <c>$all</c> below the mark, from the events table through the
+/// read-only mirror of it. The store's own query surface knows nothing of the persisted
+/// <c>category</c> column, and its type column is only reachable through its event-type
+/// registry, so the predicates are written here, as LINQ that the filtered indexes answer with a
+/// seek: tenant, key, then position, or tenant, key, then ordinal on a store with ordinals. Rows
+/// are hydrated into event records the way the store adapter hydrates the store's events, body
+/// re-serialized through the shared options and the two reserved metadata keys appended last, so
+/// an event reads the same through either path; an integration test holds the two paths to the
+/// same bytes. The queries run on the in-memory provider in unit tests, which is where their
+/// bounds and their paging are held; that the database seeks rather than scans is an integration
+/// test's to say.
 /// </summary>
-/// <param name="connectionString">The connection string the store uses.</param>
+/// <param name="options">The mirror's options: which provider, which connection.</param>
 /// <param name="schemaName">The schema the events table lives in.</param>
 /// <param name="tenantId">The tenant every read is scoped to.</param>
-internal sealed class VirtualStreamReader(string connectionString, string schemaName, string tenantId)
+internal sealed class VirtualStreamReader(DbContextOptions<EventsDbContext> options, string schemaName, string tenantId)
 {
-    private const string Columns = "seq_id, id, stream_id, version, data, type, timestamp, correlation_id, causation_id, headers";
+    private static readonly Expression<Func<EventRow, Raw>> Plain =
+        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, null);
 
-    // The schema name comes from the store's options, never from a request; it is bracketed as an
-    // identifier all the same.
-    private readonly string _schema = "[" + schemaName.Replace("]", "]]", StringComparison.Ordinal) + "]";
+    private static readonly Expression<Func<EventRow, Raw>> WithCategoryOrdinal =
+        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, e.CategoryOrdinal);
+
+    private static readonly Expression<Func<EventRow, Raw>> WithTypeOrdinal =
+        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, e.TypeOrdinal);
 
     /// <summary>The bounds of a virtual stream at or below a head.</summary>
     /// <param name="stream">The virtual stream.</param>
@@ -36,11 +41,18 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     /// <returns>The first and last positions, or <see langword="null"/> when there are none.</returns>
     public async Task<StreamHead?> HeadAsync(VirtualStreamName stream, long head, CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT MIN(seq_id), MAX(seq_id) FROM {0} WHERE {1} AND seq_id <= @head", Table, Predicate(stream)));
-        command.Parameters.AddWithValue("@head", head);
-        return await BoundsAsync(command, cancellationToken).ConfigureAwait(false);
+        // Two aggregates, each one row off its end of the index; asked for together under one
+        // grouping they would read every row between.
+        await using var context = Context();
+        var live = Live(context, stream).Where(e => e.SeqId <= head);
+        var first = await live.MinAsync(e => (long?)e.SeqId, cancellationToken).ConfigureAwait(false);
+        if (first is null)
+        {
+            return null;
+        }
+
+        var last = await live.MaxAsync(e => (long?)e.SeqId, cancellationToken).ConfigureAwait(false);
+        return new StreamHead(first.Value, last ?? first.Value);
     }
 
     /// <summary>One page of a virtual stream; see the port for the bounds.</summary>
@@ -53,24 +65,17 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadAsync(VirtualStreamName stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
-        var range = direction == Direction.Forwards
-            ? "seq_id >= @from AND seq_id <= @head ORDER BY seq_id"
-            : "seq_id <= @from ORDER BY seq_id DESC";
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT TOP (@count) {0} FROM {1} WHERE {2} AND {3}", Columns, Table, Predicate(stream), range));
-        command.Parameters.AddWithValue("@from", from);
-        command.Parameters.AddWithValue("@head", head);
-        command.Parameters.AddWithValue("@count", count);
-        return await PageAsync(command, count, ordinal: false, cancellationToken).ConfigureAwait(false);
+        await using var context = Context();
+        return await PageAsync(ByPosition(Live(context, stream), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// What this connection holds of one page by position, with the high-water mark as this
-    /// connection sees it, read in one round trip so both come from the same server: forwards, the
-    /// page's events at or below the lower of the mark and the head; backwards, the page when it
-    /// begins at or below the mark and nothing otherwise. Everything at or below the mark is on the
-    /// server that reports it, because the mark is written after the events it covers.
+    /// connection sees it, read on one open connection so both come from the same server:
+    /// forwards, the page's events at or below the lower of the mark and the head; backwards, the
+    /// page when it begins at or below the mark and nothing otherwise. Everything at or below the
+    /// mark is on the server that reports it, because the mark is written after the events it
+    /// covers.
     /// </summary>
     /// <param name="stream">The virtual stream, or <see langword="null"/> for <c>$all</c>.</param>
     /// <param name="direction">The direction to read in.</param>
@@ -81,42 +86,27 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     /// <returns>The mark and the events.</returns>
     public async Task<(long Mark, IReadOnlyList<EventRecord> Events)> ReadBelowMarkAsync(VirtualStreamName? stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
-        var predicate = stream is { } named ? Predicate(named) : "tenant_id = @tenant AND is_archived = 0";
-        var range = direction == Direction.Forwards
-            ? "seq_id >= @from AND seq_id <= IIF(@mark < @head, @mark, @head) ORDER BY seq_id"
-            : "seq_id <= @from AND @from <= @mark ORDER BY seq_id DESC";
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = string.Format(
-            CultureInfo.InvariantCulture,
-            "DECLARE @mark bigint = ISNULL((SELECT last_seq_id FROM {0}.[pc_event_progression] WHERE name = 'HighWaterMark'), 0); SELECT @mark; SELECT TOP (@count) {1} FROM {2} WHERE {3} AND {4}",
-            _schema,
-            Columns,
-            Table,
-            predicate,
-            range);
-        command.Parameters.Add("@tenant", SqlDbType.VarChar, 250).Value = tenantId;
-        if (stream is { } keyed)
+        await using var context = Context();
+        if (context.Database.IsRelational())
         {
-            command.Parameters.Add("@key", SqlDbType.VarChar, 500).Value = keyed.Key;
+            // Held open for both queries: a pooled connection handed back between them could come
+            // back as one to another server, whose mark says nothing about this one's events.
+            await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        command.Parameters.AddWithValue("@from", from);
-        command.Parameters.AddWithValue("@head", head);
-        command.Parameters.AddWithValue("@count", count);
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-        var mark = reader.GetInt64(0);
-        await reader.NextResultAsync(cancellationToken).ConfigureAwait(false);
-        var records = new List<EventRecord>(count);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        var mark = await context.Progression.AsNoTracking()
+            .Where(row => row.Name == EventsDbContext.HighWaterMark)
+            .Select(row => (long?)row.LastSeqId)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false) ?? 0;
+        var bound = Math.Min(mark, head);
+        if (from > (direction == Direction.Forwards ? bound : mark))
         {
-            records.Add(Hydrate(reader, ordinal: false));
+            return (mark, []);
         }
 
-        return (mark, records);
+        var events = await PageAsync(ByPosition(Live(context, stream), direction, from, bound), count, Plain, cancellationToken).ConfigureAwait(false);
+        return (mark, events);
     }
 
     /// <summary>How many live events of a virtual stream lie after a position, up to the head.</summary>
@@ -127,12 +117,8 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     /// <returns>The count.</returns>
     public async Task<long> CountAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT COUNT_BIG(*) FROM {0} WHERE {1} AND seq_id > @after AND seq_id <= @head", Table, Predicate(stream)));
-        command.Parameters.AddWithValue("@after", after);
-        command.Parameters.AddWithValue("@head", head);
-        return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        await using var context = Context();
+        return await Live(context, stream).LongCountAsync(e => e.SeqId > after && e.SeqId <= head, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -144,11 +130,19 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     /// <returns>The bounds, or <see langword="null"/> when nothing is numbered.</returns>
     public async Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
     {
-        var column = OrdinalColumn(stream);
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT MIN({2}), MAX({2}) FROM {0} WHERE {1} AND {2} IS NOT NULL", Table, KeyPredicate(stream), column));
-        return await BoundsAsync(command, cancellationToken).ConfigureAwait(false);
+        await using var context = Context();
+        var all = Keyed(context.Events.AsNoTracking().Where(e => e.TenantId == tenantId), stream);
+        var ordinals = stream.Kind == VirtualStreamKind.Category
+            ? all.Where(e => e.CategoryOrdinal != null).Select(e => e.CategoryOrdinal)
+            : all.Where(e => e.TypeOrdinal != null).Select(e => e.TypeOrdinal);
+        var first = await ordinals.MinAsync(cancellationToken).ConfigureAwait(false);
+        if (first is null)
+        {
+            return null;
+        }
+
+        var last = await ordinals.MaxAsync(cancellationToken).ConfigureAwait(false);
+        return new StreamHead(first.Value, last ?? first.Value);
     }
 
     /// <summary>One page of a virtual stream by ordinal, live rows only, each record carrying its ordinal.</summary>
@@ -160,99 +154,87 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken)
     {
-        var column = OrdinalColumn(stream);
-        var range = direction == Direction.Forwards
-            ? column + " >= @from ORDER BY " + column
-            : column + " <= @from ORDER BY " + column + " DESC";
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = Command(connection, stream, string.Format(CultureInfo.InvariantCulture, "SELECT TOP (@count) {0}, {4} FROM {1} WHERE {2} AND {3}", Columns, Table, Predicate(stream), range, column));
-        command.Parameters.AddWithValue("@from", from);
-        command.Parameters.AddWithValue("@count", count);
-        return await PageAsync(command, count, ordinal: true, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>The position every event up to which has its ordinals; 0 when none has.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The position.</returns>
-    public async Task<long> NumberedThroughAsync(CancellationToken cancellationToken)
-    {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = string.Format(CultureInfo.InvariantCulture, "SELECT ISNULL((SELECT numbered_through FROM {0}.[{1}] WHERE id = 1), CAST(0 AS bigint))", _schema, NightingaleTablesFeature.OrdinalsTable);
-        return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
-    }
-
-    private static string KeyPredicate(VirtualStreamName stream) =>
-        stream.Kind == VirtualStreamKind.Category
-            ? "tenant_id = @tenant AND category = @key"
-            : "tenant_id = @tenant AND [type] = @key";
-
-    private static string Predicate(VirtualStreamName stream) => KeyPredicate(stream) + " AND is_archived = 0";
-
-    private static string OrdinalColumn(VirtualStreamName stream) =>
-        stream.Kind == VirtualStreamKind.Category ? PatchedEventStoreFeature.CategoryOrdinalColumn : PatchedEventStoreFeature.TypeOrdinalColumn;
-
-    private static async Task<StreamHead?> BoundsAsync(SqlCommand command, CancellationToken cancellationToken)
-    {
-        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.IsDBNull(0))
+        await using var context = Context();
+        var live = Live(context, stream);
+        var forwards = direction == Direction.Forwards;
+        if (stream.Kind == VirtualStreamKind.Category)
         {
-            return null;
+            var ordered = forwards
+                ? live.Where(e => e.CategoryOrdinal >= from).OrderBy(e => e.CategoryOrdinal)
+                : live.Where(e => e.CategoryOrdinal <= from).OrderByDescending(e => e.CategoryOrdinal);
+            return await PageAsync(ordered, count, WithCategoryOrdinal, cancellationToken).ConfigureAwait(false);
         }
-
-        return new StreamHead(reader.GetInt64(0), reader.GetInt64(1));
+        else
+        {
+            var ordered = forwards
+                ? live.Where(e => e.TypeOrdinal >= from).OrderBy(e => e.TypeOrdinal)
+                : live.Where(e => e.TypeOrdinal <= from).OrderByDescending(e => e.TypeOrdinal);
+            return await PageAsync(ordered, count, WithTypeOrdinal, cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    private static async Task<IReadOnlyList<EventRecord>> PageAsync(SqlCommand command, int count, bool ordinal, CancellationToken cancellationToken)
+    private static IQueryable<EventRow> ByPosition(IQueryable<EventRow> events, Direction direction, long from, long head) =>
+        direction == Direction.Forwards
+            ? events.Where(e => e.SeqId >= from && e.SeqId <= head).OrderBy(e => e.SeqId)
+            : events.Where(e => e.SeqId <= from).OrderByDescending(e => e.SeqId);
+
+    private static IQueryable<EventRow> Keyed(IQueryable<EventRow> events, VirtualStreamName stream)
     {
-        var records = new List<EventRecord>(count);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        var key = stream.Key;
+        return stream.Kind == VirtualStreamKind.Category
+            ? events.Where(e => e.Category == key)
+            : events.Where(e => e.Type == key);
+    }
+
+    private static async Task<IReadOnlyList<EventRecord>> PageAsync(IQueryable<EventRow> ordered, int count, Expression<Func<EventRow, Raw>> columns, CancellationToken cancellationToken)
+    {
+        var rows = await ordered.Take(count).Select(columns).ToListAsync(cancellationToken).ConfigureAwait(false);
+        var records = new EventRecord[rows.Count];
+        for (var i = 0; i < rows.Count; i++)
         {
-            records.Add(Hydrate(reader, ordinal));
+            records[i] = Hydrate(rows[i]);
         }
 
         return records;
     }
 
-    private static EventRecord Hydrate(SqlDataReader reader, bool ordinal)
+    private static EventRecord Hydrate(Raw row)
     {
         // The body is re-serialized through the shared options rather than copied from the column,
         // so it comes back as the store adapter returns it, whatever escaping the store wrote.
-        using var body = JsonDocument.Parse(reader.GetString(4));
-        var metadata = reader.IsDBNull(9) ? [] : JsonNode.Parse(reader.GetString(9)) as JsonObject ?? [];
-        if (!reader.IsDBNull(7))
+        using var body = JsonDocument.Parse(row.Data);
+        var metadata = row.Headers is null ? [] : JsonNode.Parse(row.Headers) as JsonObject ?? [];
+        if (row.CorrelationId is not null)
         {
-            metadata["$correlationId"] = reader.GetString(7);
+            metadata["$correlationId"] = row.CorrelationId;
         }
 
-        if (!reader.IsDBNull(8))
+        if (row.CausationId is not null)
         {
-            metadata["$causationId"] = reader.GetString(8);
+            metadata["$causationId"] = row.CausationId;
         }
 
         return new EventRecord(
-            reader.GetGuid(1),
-            reader.GetString(2),
-            reader.GetInt64(3) - 1,
-            reader.GetInt64(0),
-            reader.GetString(5),
-            reader.GetFieldValue<DateTimeOffset>(6),
+            row.Id,
+            row.StreamId,
+            row.Version - 1,
+            row.SeqId,
+            row.Type,
+            row.Timestamp,
             JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Options),
             metadata,
-            ordinal ? reader.GetInt64(10) : null);
+            row.Ordinal);
     }
 
-    private string Table => _schema + ".[pc_events]";
+    private EventsDbContext Context() => new(options, schemaName);
 
-    private SqlCommand Command(SqlConnection connection, VirtualStreamName stream, string text)
+    /// <summary>The live events of the tenant, of one virtual stream or of all.</summary>
+    private IQueryable<EventRow> Live(EventsDbContext context, VirtualStreamName? stream)
     {
-        var command = connection.CreateCommand();
-        command.CommandText = text;
-        command.Parameters.Add("@tenant", SqlDbType.VarChar, 250).Value = tenantId;
-        command.Parameters.Add("@key", SqlDbType.VarChar, 500).Value = stream.Key;
-        return command;
+        var live = context.Events.AsNoTracking().Where(e => e.TenantId == tenantId && !e.IsArchived);
+        return stream is { } named ? Keyed(live, named) : live;
     }
+
+    /// <summary>The columns a read selects: never the whole row, since a store without ordinals has no ordinal columns.</summary>
+    private sealed record Raw(long SeqId, Guid Id, string StreamId, long Version, string Data, string Type, DateTimeOffset Timestamp, string? CorrelationId, string? CausationId, string? Headers, long? Ordinal);
 }

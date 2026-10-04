@@ -1,7 +1,6 @@
-using System.Globalization;
-
+using Dracocephalum.Nightingale.Server.Polecat.Persistence;
 using JasperFx.Events.Daemon;
-using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Polecat;
@@ -19,12 +18,12 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// is recorded in TODO.md.
 /// </summary>
 /// <param name="store">The store.</param>
-/// <param name="connectionString">The connection string the store uses.</param>
+/// <param name="events">The options of the mirror of the store's events table, over the main connection.</param>
 /// <param name="loggerFactory">Where the daemon's logger comes from.</param>
-internal sealed class PolecatStoreTail(IDocumentStore store, string connectionString, ILoggerFactory loggerFactory) : IStoreTail, IHostedService, IAsyncDisposable
+internal sealed class PolecatStoreTail(IDocumentStore store, DbContextOptions<EventsDbContext> events, ILoggerFactory loggerFactory) : IStoreTail, IHostedService, IAsyncDisposable
 {
     /// <summary>How many rows past the mark one refresh looks at.</summary>
-    private const int RefreshWindow = 100_000;
+    private const int RefreshWindow = 10_000;
 
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _stopping = new();
@@ -59,21 +58,19 @@ internal sealed class PolecatStoreTail(IDocumentStore store, string connectionSt
     /// <inheritdoc/>
     public async ValueTask<long> RefreshAsync(CancellationToken cancellationToken)
     {
-        // Row n after the mark is at position mark + n exactly when no number before it is missing,
-        // so the highest such row is the last position every event up to which is committed. The
-        // window bounds the scan when the poller is far behind; the poller closes the rest.
+        // The positions after the mark, as far as they follow it one by one: the last position
+        // every event up to which is committed. The window bounds the read when the poller is far
+        // behind; the poller closes the rest.
         var mark = Head;
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = string.Format(
-            CultureInfo.InvariantCulture,
-            "WITH following AS (SELECT TOP (@window) seq_id, ROW_NUMBER() OVER (ORDER BY seq_id) AS n FROM {0} WHERE seq_id > @mark ORDER BY seq_id) SELECT ISNULL(MAX(seq_id), @mark) FROM following WHERE seq_id = @mark + n",
-            EventsTable);
-        command.Parameters.AddWithValue("@mark", mark);
-        command.Parameters.AddWithValue("@window", RefreshWindow);
-        var current = (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
-        Publish(current);
+        await using var context = new EventsDbContext(events, store.Options.DatabaseSchemaName);
+        var following = await context.Events.AsNoTracking()
+            .Where(row => row.SeqId > mark)
+            .OrderBy(row => row.SeqId)
+            .Select(row => row.SeqId)
+            .Take(RefreshWindow)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        Publish(ContiguousPrefix.After(mark, following));
         return Head;
     }
 

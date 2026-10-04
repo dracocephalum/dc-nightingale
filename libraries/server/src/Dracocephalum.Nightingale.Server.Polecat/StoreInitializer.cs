@@ -2,8 +2,10 @@ using System.Data;
 using System.Globalization;
 using System.Reflection;
 
+using Dracocephalum.Nightingale.Server.Persistence;
 using JasperFx;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Polecat;
@@ -25,9 +27,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="store">The store whose tenancy answers the patched database.</param>
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="options">The host's options.</param>
+/// <param name="contexts">Makes the gateway's own context, for writing the marker once the schema is current.</param>
 /// <param name="timeProvider">The clock the marker is stamped with.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class StoreInitializer(IDocumentStore store, string connectionString, NightingaleOptions options, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
+internal sealed partial class StoreInitializer(IDocumentStore store, string connectionString, NightingaleOptions options, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
 {
     /// <summary>The schema a store initialized before the setting existed lives in: the store's default.</summary>
     private const string DefaultSchema = "dbo";
@@ -186,20 +189,20 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
             collation,
             timeProvider.GetUtcNow(),
             typeof(StoreInitializer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown");
-        await using (var insert = connection.CreateCommand())
+        await using (var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false))
         {
-            insert.CommandText = string.Format(
-                CultureInfo.InvariantCulture,
-                "INSERT INTO {0} (id, schema_version, partitioning, assign_ordinals, schema_name, collation, created_at, created_by) VALUES (1, @version, @partitioning, @ordinals, @schema, @collation, @created_at, @created_by)",
-                MarkerTable);
-            insert.Parameters.AddWithValue("@version", marker.SchemaVersion);
-            insert.Parameters.AddWithValue("@partitioning", marker.Partitioning.ToString());
-            insert.Parameters.AddWithValue("@ordinals", marker.AssignOrdinals);
-            insert.Parameters.AddWithValue("@schema", marker.Schema);
-            insert.Parameters.AddWithValue("@collation", marker.Collation);
-            insert.Parameters.AddWithValue("@created_at", marker.CreatedAt);
-            insert.Parameters.AddWithValue("@created_by", marker.CreatedBy);
-            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            context.Markers.Add(new StoreMarkerRow
+            {
+                Id = StoreMarkerRow.SingleRowId,
+                SchemaVersion = marker.SchemaVersion,
+                Partitioning = marker.Partitioning.ToString(),
+                AssignOrdinals = marker.AssignOrdinals,
+                SchemaName = marker.Schema,
+                Collation = marker.Collation,
+                CreatedAt = marker.CreatedAt,
+                CreatedBy = marker.CreatedBy,
+            });
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
         LogInitializedStore(name, marker.Schema, collation, marker.Partitioning, marker.AssignOrdinals);
@@ -208,12 +211,14 @@ internal sealed partial class StoreInitializer(IDocumentStore store, string conn
     /// <summary>After a change is applied, the marker says which version of the schema the store now has.</summary>
     private async Task StampSchemaVersionAsync(CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = string.Format(CultureInfo.InvariantCulture, "UPDATE {0} SET schema_version = @version WHERE id = 1 AND schema_version < @version", MarkerTable);
-        command.Parameters.AddWithValue("@version", StoreMarker.CurrentSchemaVersion);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        // The schema is current by now, so the model's row is the table's row.
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await context.Markers.SingleOrDefaultAsync(marker => marker.Id == StoreMarkerRow.SingleRowId, cancellationToken).ConfigureAwait(false);
+        if (row is not null && row.SchemaVersion < StoreMarker.CurrentSchemaVersion)
+        {
+            row.SchemaVersion = StoreMarker.CurrentSchemaVersion;
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task<StoreMarker?> ReadMarkerAsync(CancellationToken cancellationToken)

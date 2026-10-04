@@ -45,11 +45,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   unimplemented), group info, listing and updating, competing consumers,
   and the ordinal backfill, all in `PENDING.md`. Close by: group management
   next.
-- **The sequencer's progress is read as SQL text beside the context.** The
-  sequencer's batch is raw by design, and its progress row is read raw by the
-  virtual-stream reader too, although the context maps that row. Close by:
-  reading the progress through the context once the backend's stream store
-  takes the context factory.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,

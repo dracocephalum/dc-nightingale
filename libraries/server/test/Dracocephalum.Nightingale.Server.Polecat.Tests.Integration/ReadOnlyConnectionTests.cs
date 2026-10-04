@@ -1,5 +1,7 @@
 using System.Text;
 
+using Dracocephalum.Nightingale.Server.Polecat.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Shouldly;
 
@@ -16,7 +18,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class ReadOnlyConnectionTests(SqlServerTestDatabase database)
 {
-    private readonly VirtualStreamReader _reader = new(database.ConnectionString, "dbo", JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader _reader = new(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(database.ConnectionString).Options, "dbo", JasperFx.StorageConstants.DefaultTenantId);
 
     [Fact]
     public async Task ReadBelowMarkAsync_ShouldReturnTheMarkAndThePageUpToTheLowerOfTheMarkAndTheHead()
@@ -95,6 +97,48 @@ public sealed class ReadOnlyConnectionTests(SqlServerTestDatabase database)
         {
             await host.StopAsync(TestContext.Current.CancellationToken);
         }
+    }
+
+    [Fact]
+    public async Task ReadAsync_ShouldSeekTheIndexDeclaredForItAndNeverScanIt()
+    {
+        // Arrange: the queries are LINQ now, so what the database does with them is asked of the
+        // database: its own count of seeks and scans on the category index.
+        var category = "replica" + Guid.NewGuid().ToString("N")[..8];
+        var stream = new VirtualStreamName(VirtualStreamKind.Category, category);
+        var appended = await database.Store.AppendAsync(category + "-1", StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        const string Index = "ix_pc_events_category_seq";
+        var before = await IndexUseAsync(Index);
+
+        // Act: a page, the bounds and a count, each by tenant, category and position.
+        var page = await _reader.ReadAsync(stream, Direction.Forwards, 0, appended.Position, 10, TestContext.Current.CancellationToken);
+        var afterPage = await IndexUseAsync(Index);
+        var head = await _reader.HeadAsync(stream, appended.Position, TestContext.Current.CancellationToken);
+        var afterHead = await IndexUseAsync(Index);
+        var count = await _reader.CountAsync(stream, 0, appended.Position, TestContext.Current.CancellationToken);
+        var after = await IndexUseAsync(Index);
+
+        // Assert
+        page.Count.ShouldBe(2);
+        head.ShouldBe(new StreamHead(appended.Position - 1, appended.Position));
+        count.ShouldBe(2);
+
+        // The bounds and the count are answered from the index alone, so they seek it at any size.
+        // The page also needs columns the index does not hold, and on a table this small the
+        // database reads the table itself instead; its predicate is the same one, so what is
+        // asserted for it is that it never scans the index.
+        afterPage.Scans.ShouldBe(before.Scans);
+        (afterHead.Seeks - afterPage.Seeks).ShouldBe(2, "the bounds are a seek from each end");
+        (after.Seeks - afterHead.Seeks).ShouldBe(1, "the count is one seek");
+        after.Scans.ShouldBe(before.Scans);
+    }
+
+    private async Task<(long Seeks, long Scans)> IndexUseAsync(string index)
+    {
+        const string Sql = "SELECT ISNULL(SUM(s.{0}), 0) FROM sys.indexes i LEFT JOIN sys.dm_db_index_usage_stats s ON s.object_id = i.object_id AND s.index_id = i.index_id AND s.database_id = DB_ID() WHERE i.name = '{1}'";
+        var seeks = await TestDatabases.ScalarAsync<long>(database.Name, string.Format(System.Globalization.CultureInfo.InvariantCulture, Sql, "user_seeks", index));
+        var scans = await TestDatabases.ScalarAsync<long>(database.Name, string.Format(System.Globalization.CultureInfo.InvariantCulture, Sql, "user_scans", index));
+        return (seeks, scans);
     }
 
     private static EventData Event() =>
