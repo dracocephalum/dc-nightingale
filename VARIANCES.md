@@ -98,6 +98,21 @@ or pinned.
 **Nightingale:** one consumer per group for now; a second is refused with
 `CONSUMER_LIMIT_REACHED`. Competing consumers are in `PENDING.md`.
 
+## A connection string lists instances, not gossip seeds
+
+The client is opened from one connection string in the reference's shape,
+with our scheme: hosts, optional credentials, settings as a query. The
+reference's hosts are seeds from which the client gossips its way to the
+leader; ours has no leader and no gossip, every instance serves every call,
+so several hosts are used in rotation and the `+discover` form resolves one
+DNS name to the instances. The settings that steer gossip, the node
+preference and the discovery attempts, interval and timeout, do not exist
+here and are refused like any key the client does not know, rather than
+accepted and ignored: a string carried over from the reference is edited
+once, and a misspelt key never passes for a default. Credentials in the
+string are read and held, and not sent while the server has no
+authentication.
+
 ## Subscription start positions are inclusive
 
 **Reference:** a subscription starts after a position: `FromStream.After(x)`

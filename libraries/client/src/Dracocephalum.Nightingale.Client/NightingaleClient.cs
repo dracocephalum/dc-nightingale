@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using Dracocephalum.Nightingale.Protocol;
 using Dracocephalum.Nightingale.Protocol.V1;
 using Grpc.Core;
+using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
 
 namespace Dracocephalum.Nightingale.Client;
@@ -22,19 +23,29 @@ public sealed class NightingaleClient : IAsyncDisposable
     private readonly ConcurrentBag<GrpcChannel> _ownedChannels = [];
     private readonly ConcurrentDictionary<Uri, PersistentSubscriptions.PersistentSubscriptionsClient> _owners = new();
     private readonly Func<Uri, CallInvoker> _redirects;
+    private readonly NightingaleClientSettings? _settings;
     private readonly Streams.StreamsClient _streams;
     private readonly PersistentSubscriptions.PersistentSubscriptionsClient _persistent;
 
-    /// <summary>Initializes a new instance of the <see cref="NightingaleClient"/> class that owns its channels.</summary>
-    /// <param name="options">Where the server is.</param>
-    public NightingaleClient(NightingaleClientOptions options)
+    /// <summary>Initializes a new instance of the <see cref="NightingaleClient"/> class from a connection string; the client owns its channels.</summary>
+    /// <param name="connectionString">The connection string, as <see cref="NightingaleClientSettings.Parse"/> reads it.</param>
+    /// <exception cref="FormatException">The string is not a Nightingale connection string.</exception>
+    public NightingaleClient(string connectionString)
+        : this(NightingaleClientSettings.Parse(connectionString))
     {
-        ArgumentNullException.ThrowIfNull(options);
-        options.Validate();
-        var channel = GrpcChannel.ForAddress(options.Address);
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="NightingaleClient"/> class that owns its channels.</summary>
+    /// <param name="settings">How the server is reached.</param>
+    public NightingaleClient(NightingaleClientSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        _settings = settings;
+        var channel = ClientChannels.Open(settings);
         _ownedChannels.Add(channel);
-        _streams = new Streams.StreamsClient(channel);
-        _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(channel);
+        var invoker = Invoker(channel);
+        _streams = new Streams.StreamsClient(invoker);
+        _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(invoker);
         _redirects = OwnedChannelFor;
     }
 
@@ -359,8 +370,13 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private CallInvoker OwnedChannelFor(Uri address)
     {
-        var channel = GrpcChannel.ForAddress(address);
+        var channel = _settings is null ? GrpcChannel.ForAddress(address) : ClientChannels.OpenTo(_settings, address);
         _ownedChannels.Add(channel);
-        return channel.CreateCallInvoker();
+        return Invoker(channel);
     }
+
+    private CallInvoker Invoker(GrpcChannel channel) =>
+        _settings?.DefaultDeadline is { } deadline
+            ? channel.Intercept(new DefaultDeadlineInterceptor(deadline, TimeProvider.System))
+            : channel.CreateCallInvoker();
 }

@@ -24,11 +24,13 @@ public static class Scenario
     /// <param name="SecondConsumerRefusal">The name of the exception the second consumer got, asked of the other instance.</param>
     /// <param name="Replayed">How many messages the replay, asked of the other instance, put back.</param>
     /// <param name="ReplayedType">The type of the event the consumer received after the replay.</param>
+    /// <param name="ReadInRotation">How many events two reads returned to a client given both instances in one connection string.</param>
     public sealed record Report(
         IReadOnlyList<string> Delivered,
         string SecondConsumerRefusal,
         int Replayed,
-        string ReplayedType);
+        string ReplayedType,
+        int ReadInRotation);
 
     /// <summary>Runs the scenario.</summary>
     /// <param name="masterConnectionString">A connection string to the server's master database.</param>
@@ -85,10 +87,25 @@ public static class Scenario
         await consumer.AckAsync(messages.Current.Record.Id).ConfigureAwait(false);
         await output.WriteLineAsync($"6. Replayed the parked message through the second instance: sent to the first, {replayed} put back, and the consumer received the {replayedType} at once.").ConfigureAwait(false);
 
-        await messages.DisposeAsync().ConfigureAwait(false);
-        await output.WriteLineAsync("7. Disposed the consumer; dropping the database.").ConfigureAwait(false);
+        var readInRotation = 0;
+        await using (var toBoth = ExampleConnection.ToCluster(first, second))
+        {
+            for (var read = 0; read < 2; read++)
+            {
+                await using var result = toBoth.Client.ReadStreamAsync(Direction.Forwards, Stream, StreamPosition.Start, cancellationToken: cancellationToken);
+                await foreach (var record in result.WithCancellation(cancellationToken).ConfigureAwait(false))
+                {
+                    readInRotation++;
+                }
+            }
 
-        return new Report(delivered, refusal, replayed, replayedType);
+            await output.WriteLineAsync($"7. A client opened from {toBoth.ConnectionString}, both instances in one connection string, read the stream twice, one read from each in rotation: {readInRotation} events.").ConfigureAwait(false);
+        }
+
+        await messages.DisposeAsync().ConfigureAwait(false);
+        await output.WriteLineAsync("8. Disposed the consumer; dropping the database.").ConfigureAwait(false);
+
+        return new Report(delivered, refusal, replayed, replayedType, readInRotation);
     }
 
     private static EventData Event(string type) =>

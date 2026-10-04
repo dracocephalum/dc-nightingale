@@ -21,7 +21,8 @@ group and writes its address on the group's lease; ask the second instance for
 a second consumer and see the client sent to the first and refused there, as
 the group's one consumer is taken; replay the parked message through the second
 instance and see the client sent to the first, where the consumer receives it
-at once. Then it disposes the consumer and drops the database. The test
+at once; and open a third client from one connection string naming both
+instances, which reads the stream from each in rotation. Then it disposes the consumer and drops the database. The test
 project runs exactly the same code and asserts the report it returns.
 
 ## Run it
@@ -31,7 +32,7 @@ project runs exactly the same code and asserts the report it returns.
 
     dotnet run --project src/Dracocephalum.Nightingale.Examples.ClusterRedirect
 
-The program prints the seven steps and exits with a non-zero code if any fails.
+The program prints the eight steps and exits with a non-zero code if any fails.
 
 ## Configuration
 

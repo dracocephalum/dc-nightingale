@@ -25,5 +25,6 @@ public sealed class ScenarioTests
         report.SecondConsumerRefusal.ShouldBe("ConsumerLimitReachedException");
         report.Replayed.ShouldBe(1);
         report.ReplayedType.ShouldBe("order_placed");
+        report.ReadInRotation.ShouldBe(4);
     }
 }

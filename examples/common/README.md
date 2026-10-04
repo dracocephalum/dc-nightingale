@@ -16,7 +16,8 @@ Four things every sample program needs: the environment's `master`
 connection string, from `NIGHTINGALE_SQLSERVER` or the local default; a
 throwaway database name the server creates and the sample drops; the
 Polecat-backed server hosted in the sample's own process on a loopback port,
-with a client connected to it that bypasses any HTTP proxy the machine names;
+with a client opened from its connection string, one server's or several
+servers' together;
 and the program shell that runs a scenario, narrates it, prints one closing
 line and turns success or failure into an exit code. A sample's `Scenario`
 uses the first three and its `Program.cs` is one line over the fourth.
