@@ -73,5 +73,19 @@ public sealed class NightingaleJsonTests
         options.Converters.Count.ShouldBe(1);
     }
 
+    [Fact]
+    public void Configure_WhenAskedToIndent_ShouldIndentAndTheDefaultsShouldNot()
+    {
+        // Act
+        var indented = JsonSerializer.Serialize(new Paint("Sky", Colour.DeepBlue), NightingaleJson.Configure(new JsonSerializerOptions(), writeIndented: true));
+        var compact = JsonSerializer.Serialize(new Paint("Sky", Colour.DeepBlue), NightingaleJson.Default);
+
+        // Assert: indentation is part of the bytes, so what passes a document through never has it.
+        indented.ShouldContain("\n");
+        indented.ReplaceLineEndings(string.Empty).Replace(" ", string.Empty, StringComparison.Ordinal).ShouldBe(compact);
+        NightingaleJson.Default.WriteIndented.ShouldBeFalse();
+        NightingaleJson.PascalCase.WriteIndented.ShouldBeFalse();
+    }
+
     private sealed record Paint(string DisplayName, Colour Colour);
 }

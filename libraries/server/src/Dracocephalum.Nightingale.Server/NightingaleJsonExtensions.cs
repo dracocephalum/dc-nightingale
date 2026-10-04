@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Dracocephalum.Nightingale.Server;
 
@@ -12,12 +13,19 @@ public static class NightingaleJsonExtensions
 {
     /// <summary>Applies Nightingale's JSON settings to the host's minimal-endpoint and controller JSON options.</summary>
     /// <param name="services">The service collection.</param>
+    /// <param name="environment">
+    /// The host's environment, when the host wants its JSON readable while it is being worked on:
+    /// given, and anything but production, the host's JSON is written indented. Not given, or
+    /// production, it is written compact. Only the host's own JSON is affected, never what the
+    /// gateway passes through.
+    /// </param>
     /// <returns>The same collection, for chaining.</returns>
-    public static IServiceCollection AddNightingaleJson(this IServiceCollection services)
+    public static IServiceCollection AddNightingaleJson(this IServiceCollection services, IHostEnvironment? environment = null)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options => NightingaleJson.Configure(options.SerializerOptions));
-        services.Configure<Microsoft.AspNetCore.Mvc.JsonOptions>(options => NightingaleJson.Configure(options.JsonSerializerOptions));
+        var indented = environment is not null && !environment.IsProduction();
+        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options => NightingaleJson.Configure(options.SerializerOptions, indented));
+        services.Configure<Microsoft.AspNetCore.Mvc.JsonOptions>(options => NightingaleJson.Configure(options.JsonSerializerOptions, indented));
         return services;
     }
 }

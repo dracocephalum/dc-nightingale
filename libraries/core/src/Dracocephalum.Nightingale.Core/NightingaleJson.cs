@@ -38,10 +38,16 @@ public static class NightingaleJson
     /// not.
     /// </summary>
     /// <param name="options">The options to configure.</param>
+    /// <param name="writeIndented">
+    /// Whether the JSON is written indented, for a person to read. It is for a host's own JSON,
+    /// outside production; the defaults above never are, because indentation is part of the bytes
+    /// and a document passed through must come back as it went in.
+    /// </param>
     /// <returns>The same options, for chaining.</returns>
-    public static JsonSerializerOptions Configure(JsonSerializerOptions options)
+    public static JsonSerializerOptions Configure(JsonSerializerOptions options, bool writeIndented = false)
     {
         ArgumentNullException.ThrowIfNull(options);
+        options.WriteIndented = writeIndented;
         options.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         options.PropertyNameCaseInsensitive = true;
         options.NumberHandling = JsonNumberHandling.AllowReadingFromString;
