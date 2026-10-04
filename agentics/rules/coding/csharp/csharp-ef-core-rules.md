@@ -5,6 +5,21 @@ The general rules in [csharp-coding-rules.md](csharp-coding-rules.md) still
 apply; this file adds what is specific to EF Core, and it is read only when a
 task touches it.
 
+## Where it lives
+
+A context, its entities and its migrations live in a folder and namespace
+called `Data` in the project that owns them: `Data/AppDbContext.cs`, the
+entities beside it, and the migrations under `Data/Migrations`. Not
+`Persistence`, `Storage` or `Infrastructure`: `Data` is what the .NET
+templates use, and one name across repositories means nobody looks twice.
+The tool puts migrations in `Migrations` at the project root unless told
+otherwise, so say where:
+
+    dotnet ef migrations add <Name> --output-dir Data/Migrations
+
+A context that mirrors another owner's tables lives in `Data` too; it has no
+migrations.
+
 ## A schema another tool owns
 
 Everything below assumes the context owns its tables: it names them, keys
@@ -50,6 +65,14 @@ loop. The fix is always the explicit configuration the message names.
 - **Table name is the entity class name, singular.** `.ToTable("Order")` on
   every entity. EF's default is the `DbSet` property name, which is usually
   plural.
+- **Every table has a set, named for its entity.** Each entity the context
+  maps is exposed through a `DbSet` property, and the property is the class
+  name or its plural where it has one: `Orders` for `Order`,
+  `SequencerProgress` for `SequencerProgress`. Not a looser word for what the
+  set holds: `Parked` for `SubscriptionParkedEvent` gives one table two
+  names, depending on where it is read. A table with no set is reachable
+  only through `Set<T>()`, which a reader of the context does not see. This
+  rule applies to a mirror as well.
 - **One primary key per table: a `Guid` column called `Id`.** Let EF generate
   the value — the SQL Server provider makes sequential GUIDs client-side; on
   other providers use `Guid.CreateVersion7()` so the clustered index does not
@@ -188,6 +211,39 @@ relationships pass; a defaulted entity fails on every line at once.
             }
         }
 
+        public static void CheckSets(DbContext context)
+        {
+            var violations = new List<string>();
+            var sets = context.GetType().GetProperties()
+                .Where(p => p.PropertyType.IsGenericType && p.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>))
+                .ToList();
+            foreach (var entity in context.Model.GetEntityTypes().Where(e => !e.IsOwned()))
+            {
+                var name = entity.ClrType.Name;
+                var own = sets.Where(s => s.PropertyType.GetGenericArguments()[0] == entity.ClrType).ToList();
+                if (own.Count == 0)
+                {
+                    violations.Add($"{name}: the context has no DbSet<{name}> - every table it maps is exposed, as '{name}' or its plural");
+                }
+
+                foreach (var set in own.Where(s => !IsNameOrPlural(s.Name, name)))
+                {
+                    violations.Add($"{context.GetType().Name}.{set.Name}: a set is named for its entity - '{name}' or its plural");
+                }
+            }
+
+            if (violations.Count > 0)
+            {
+                throw new InvalidOperationException("Model conventions violated:" + Environment.NewLine + string.Join(Environment.NewLine, violations));
+            }
+        }
+
+        private static bool IsNameOrPlural(string candidate, string name) =>
+            candidate == name
+            || candidate == name + "s"
+            || candidate == name + "es"
+            || (name.EndsWith('y') && candidate == name[..^1] + "ies");
+
         private static Type StoreType(IProperty property) => property.GetTypeMapping().Converter?.ProviderClrType ?? property.ClrType;
     }
 
@@ -205,6 +261,7 @@ The test, one per `DbContext`:
         // Act + Assert - throws with every violation listed. A column that refers to a table
         // this context does not own is named here: ModelConventions.Check(context.Model, "Order.EventId")
         ModelConventions.Check(context.Model);
+        ModelConventions.CheckSets(context);
     }
 
 Extend the check when a rule is added here; never loosen it to make a
@@ -216,7 +273,7 @@ Every migration runs against a live database while the **previous release is
 still serving**. The generator does not know that, so generating is step one
 and editing the generated file against these rules is step two.
 
-- **Generate, never hand-write.** `dotnet ef migrations add <Name>`. Add
+- **Generate, never hand-write.** `dotnet ef migrations add <Name> --output-dir Data/Migrations`. Add
   `dotnet-ef` to `.config/dotnet-tools.json` as a local tool when the first
   `DbContext` arrives — it does not ship there by default — and pin it to the
   same version as `Microsoft.EntityFrameworkCore.Design`. A hand-written
