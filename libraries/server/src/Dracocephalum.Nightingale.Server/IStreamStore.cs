@@ -39,6 +39,23 @@ public interface IStreamStore
     Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Reads one page of a stream for a caller that accepts a view which may lag behind the latest
+    /// append: a bounded read asked for by a client, never a subscription, which must see what the
+    /// tail said is there. A backend with a read replica may serve it from there when the host
+    /// asks it to; one without serves it as <see cref="ReadAsync"/> does, which is the default.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction; <see langword="null"/> means the start
+    /// for a forwards read and the end for a backwards read.</param>
+    /// <param name="count">The most events to return. Positive.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The head and the events of the page, or <see langword="null"/>.</returns>
+    /// <exception cref="StreamDeletedException">The stream was soft-deleted.</exception>
+    Task<StreamSlice?> ReadEventualAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken) =>
+        ReadAsync(stream, direction, from, count, cancellationToken);
+
+    /// <summary>
     /// Reads one page of <c>$all</c>: every live event in position order. Forwards, the page holds the
     /// events at positions from <paramref name="from"/> up to <paramref name="head"/>, both inclusive,
     /// so a caller that took the head from the tail never reads past what is committed. Backwards,

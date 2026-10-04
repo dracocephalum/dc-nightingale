@@ -131,36 +131,30 @@ with a delay or a nack that says later, which is an outbox row with a due
 time in the future and a timer in the group's loop, the outbox already
 having the column.
 
-## Reads from a readable secondary
+## More reads from the read-only connection
 
-A switch, on by default, with `Nightingale:ReadOnlyConnectionStringName`
-beside it. With the name set, that string is used for read-only connections
-exactly as written; without it, the main string is used with
-`ApplicationIntent=ReadOnly` set, which an availability-group listener with
-read-only routing, or a managed database with read scale-out, sends to a
-readable secondary, and which every other server ignores, so the default
-costs a standalone server a second connection pool and nothing else. The
-store has no read/write split of its own, so the split is the gateway's: its
-raw readers take the read-only string, and what is read through the store's
-sessions today needs a raw reader of its own first.
+Shipped (`DESIGN.md`, seam 8): pages of `$all` and of the virtual streams by
+position are served from the read-only connection as far as its own
+high-water mark reaches, exactly, and bounded reads of plain streams when the
+host asks, eventually consistent. Pending:
 
-What may be read there is narrow, because a secondary applies the log after
-the primary commits, under synchronous commit too: a range of `$all` or of a
-virtual stream that lies wholly at or below the mark as the secondary has it,
-the store's progression row read on the same connection. A read on the
-secondary bounded by the primary's mark would skip, silently and inside a
-subscription, the events the secondary has not applied yet. So catch-up over
-history goes to the secondary and everything near the head stays on the
-primary: live delivery, reads of a plain stream, since a client reads what it
-has just appended, heads, every write, the leases and the sequencer.
-
-The gain is isolation, not throughput. A from-start replay over a large
-store pulls cold pages through the primary's memory and pushes out the hot
-tail that appends and live subscribers depend on; on a secondary it does
-neither. Consumers at the head read pages already in memory, and moving them
-would gain nothing and cost freshness. None of it is measurable without an
-availability group: built when one is at hand, with a replay's effect on
-append latency measured both ways.
+- **Reads by ordinal.** The numbered rows a secondary holds are a prefix of
+  the primary's, so a full page from it is the primary's page; what is
+  missing is the cheap way to know a reader is at the head and skip the
+  secondary, which the position reads get from the mark. The sequencer's
+  progress row, replicated like the mark, is that signal.
+- **Heads and counts.** A virtual stream's bounds and the fell-behind count
+  are index seeks and stay on the main connection; each could move when its
+  head is at or below the secondary's mark.
+- **A subscription that follows the secondary.** Live delivery follows the
+  primary's tail. A host with a secondary far stronger than its primary may
+  prefer subscriptions that never touch the primary, at the price of the
+  secondary's lag on every event: a tail over the secondary's mark, chosen
+  per host.
+- **A measurement.** None of it has run against an availability group. The
+  gain to measure is a from-start replay's effect on append latency with the
+  read-only connection on and off, and what a stronger secondary does for
+  read throughput.
 
 ## Binary event bodies
 

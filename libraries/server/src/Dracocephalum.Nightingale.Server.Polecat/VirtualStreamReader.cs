@@ -65,6 +65,60 @@ internal sealed class VirtualStreamReader(string connectionString, string schema
         return await PageAsync(command, count, ordinal: false, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// What this connection holds of one page by position, with the high-water mark as this
+    /// connection sees it, read in one round trip so both come from the same server: forwards, the
+    /// page's events at or below the lower of the mark and the head; backwards, the page when it
+    /// begins at or below the mark and nothing otherwise. Everything at or below the mark is on the
+    /// server that reports it, because the mark is written after the events it covers.
+    /// </summary>
+    /// <param name="stream">The virtual stream, or <see langword="null"/> for <c>$all</c>.</param>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
+    /// <param name="head">The highest position a forwards page may hold.</param>
+    /// <param name="count">The most events to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The mark and the events.</returns>
+    public async Task<(long Mark, IReadOnlyList<EventRecord> Events)> ReadBelowMarkAsync(VirtualStreamName? stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
+    {
+        var predicate = stream is { } named ? Predicate(named) : "tenant_id = @tenant AND is_archived = 0";
+        var range = direction == Direction.Forwards
+            ? "seq_id >= @from AND seq_id <= IIF(@mark < @head, @mark, @head) ORDER BY seq_id"
+            : "seq_id <= @from AND @from <= @mark ORDER BY seq_id DESC";
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = string.Format(
+            CultureInfo.InvariantCulture,
+            "DECLARE @mark bigint = ISNULL((SELECT last_seq_id FROM {0}.[pc_event_progression] WHERE name = 'HighWaterMark'), 0); SELECT @mark; SELECT TOP (@count) {1} FROM {2} WHERE {3} AND {4}",
+            _schema,
+            Columns,
+            Table,
+            predicate,
+            range);
+        command.Parameters.Add("@tenant", SqlDbType.VarChar, 250).Value = tenantId;
+        if (stream is { } keyed)
+        {
+            command.Parameters.Add("@key", SqlDbType.VarChar, 500).Value = keyed.Key;
+        }
+
+        command.Parameters.AddWithValue("@from", from);
+        command.Parameters.AddWithValue("@head", head);
+        command.Parameters.AddWithValue("@count", count);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        var mark = reader.GetInt64(0);
+        await reader.NextResultAsync(cancellationToken).ConfigureAwait(false);
+        var records = new List<EventRecord>(count);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            records.Add(Hydrate(reader, ordinal: false));
+        }
+
+        return (mark, records);
+    }
+
     /// <summary>How many live events of a virtual stream lie after a position, up to the head.</summary>
     /// <param name="stream">The virtual stream.</param>
     /// <param name="after">The position already delivered, exclusive.</param>

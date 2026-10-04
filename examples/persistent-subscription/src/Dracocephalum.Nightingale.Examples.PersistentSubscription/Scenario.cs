@@ -123,15 +123,13 @@ public static class Scenario
     {
         for (var attempt = 1; ; attempt++)
         {
-            var subscription = await client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken);
             try
             {
-                await subscription.Confirmed.ConfigureAwait(false);
-                return subscription;
+                // The call returns once the server has confirmed the consumer, and throws when it refuses.
+                return await client.SubscribeToPersistentSubscriptionAsync(stream, group, bufferSize: 5, cancellationToken).ConfigureAwait(false);
             }
             catch (ConsumerLimitReachedException) when (attempt < 50)
             {
-                await subscription.DisposeAsync().ConfigureAwait(false);
                 await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
             }
         }

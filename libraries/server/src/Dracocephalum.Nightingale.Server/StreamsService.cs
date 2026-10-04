@@ -300,7 +300,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         while (remaining > 0)
         {
             var pageSize = (int)Math.Min(remaining, PageSize);
-            var page = await ReadPage(stream, direction, from, pageSize, cancellationToken).ConfigureAwait(false);
+            var page = await ReadPage(stream, direction, from, pageSize, cancellationToken, eventual: true).ConfigureAwait(false);
             if (page is null)
             {
                 await responseStream.WriteAsync(new ReadResponse { StreamNotFound = new StreamNotFound { Stream = stream } }, cancellationToken).ConfigureAwait(false);
@@ -703,11 +703,14 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     private static long OrdinalOf(EventRecord record) =>
         record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.");
 
-    private async Task<StreamSlice?> ReadPage(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
+    /// <summary>One page of a plain stream; a bounded read accepts a view that may lag, a subscription does not.</summary>
+    private async Task<StreamSlice?> ReadPage(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken, bool eventual = false)
     {
         try
         {
-            return await store.ReadAsync(stream, direction, from, count, cancellationToken).ConfigureAwait(false);
+            return eventual
+                ? await store.ReadEventualAsync(stream, direction, from, count, cancellationToken).ConfigureAwait(false)
+                : await store.ReadAsync(stream, direction, from, count, cancellationToken).ConfigureAwait(false);
         }
         catch (StreamDeletedException deleted)
         {

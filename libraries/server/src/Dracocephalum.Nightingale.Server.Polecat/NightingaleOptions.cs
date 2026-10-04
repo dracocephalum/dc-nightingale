@@ -36,6 +36,34 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public bool ApplySchemaChanges { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the server opens a second, read-only connection and
+    /// serves from it the reads a readable secondary can answer exactly: pages of <c>$all</c> and of
+    /// the virtual streams, by position, at or below the high-water mark as that connection sees
+    /// it. On by default, because where there is no secondary it costs a second connection pool
+    /// and nothing else: the read-only connection reaches the same server. Appends, live delivery,
+    /// heads, leases and the sequencer always use the main connection.
+    /// </summary>
+    public bool UseReadOnlyConnection { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the name of the entry under <c>ConnectionStrings</c> used for the read-only
+    /// connection, exactly as written. Unset, the main connection string is used with its
+    /// application intent set to read-only, which a listener with read-only routing sends to a
+    /// readable secondary and every other server ignores.
+    /// </summary>
+    public string? ReadOnlyConnectionStringName { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a bounded read of a plain stream is served from the
+    /// read-only connection too. Off by default, because such a read is then only eventually
+    /// consistent: a client that reads a stream it has just appended to may not see the append
+    /// yet, and an append made on what it read is refused with a revision conflict more often.
+    /// Nothing is ever lost or reordered, and an append's expected revision is always checked on
+    /// the main connection. Subscriptions to a plain stream are not affected.
+    /// </summary>
+    public bool ReadStreamsFromReadOnlyConnection { get; set; }
+
+    /// <summary>
     /// Gets or sets the settings fixed when the store is initialized and checked on every later
     /// start.
     /// </summary>

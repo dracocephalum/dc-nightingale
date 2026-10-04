@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using JasperFx.Events;
+using Microsoft.Extensions.Logging;
 using Polecat;
 using Polecat.Exceptions;
 using Polecat.Linq;
@@ -15,13 +16,25 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// comparison is done here, the reference way: on a conflict with an explicit expectation, the
 /// events from that revision onward are compared with the batch by id, and an exact match means
 /// the append already happened.
+/// <para>
+/// With a read-only connection, a page of <c>$all</c> or of a virtual stream by position is taken
+/// from it as far as it reaches and from the main connection beyond, so the answer is the one the
+/// main connection alone would give; a bounded read of a plain stream is taken from it only when
+/// the host asks, and may then lag. Everything else uses the main connection.
+/// </para>
 /// </summary>
 /// <param name="store">The store.</param>
 /// <param name="connectionString">The connection string the store uses, for the virtual streams read straight from the table.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
-internal sealed class PolecatStreamStore(IDocumentStore store, string connectionString, bool ordinals) : IStreamStore
+/// <param name="readOnlyConnectionString">The read-only connection string, or <see langword="null"/> when the host uses none.</param>
+/// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by this instance, or <see langword="null"/> when they stay on the main connection.</param>
+/// <param name="timeProvider">The clock.</param>
+/// <param name="logger">The logger.</param>
+internal sealed class PolecatStreamStore(IDocumentStore store, string connectionString, bool ordinals, string? readOnlyConnectionString, IDocumentStore? readOnlyStore, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
 {
     private readonly VirtualStreamReader _virtual = new(connectionString, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader? _replica = readOnlyConnectionString is null ? null : new(readOnlyConnectionString, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
+    private readonly ReplicaRouter _router = new(timeProvider, logger);
 
     /// <inheritdoc/>
     public bool OrdinalsEnabled => ordinals;
@@ -91,12 +104,30 @@ internal sealed class PolecatStreamStore(IDocumentStore store, string connection
     }
 
     /// <inheritdoc/>
-    public async Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
+    public Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken) =>
+        ReadFromAsync(store, stream, direction, from, count, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<StreamSlice?> ReadEventualAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken) =>
+        readOnlyStore is null
+            ? ReadFromAsync(store, stream, direction, from, count, cancellationToken)
+            : _router.PreferReplicaAsync(
+                token => ReadFromAsync(readOnlyStore, stream, direction, from, count, token),
+                token => ReadFromAsync(store, stream, direction, from, count, token),
+                cancellationToken);
+
+    /// <inheritdoc/>
+    public void Dispose() => readOnlyStore?.Dispose();
+
+    /// <inheritdoc/>
+    public ValueTask DisposeAsync() => readOnlyStore?.DisposeAsync() ?? ValueTask.CompletedTask;
+
+    private static async Task<StreamSlice?> ReadFromAsync(IDocumentStore reads, string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
 
-        await using var session = store.QuerySession();
+        await using var session = reads.QuerySession();
         var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
         if (state is null || state.Version == 0)
         {
@@ -141,10 +172,23 @@ internal sealed class PolecatStreamStore(IDocumentStore store, string connection
     }
 
     /// <inheritdoc/>
-    public async Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        return _replica is null
+            ? ReadAllFromPrimaryAsync(direction, from, head, count, cancellationToken)
+            : _router.ReadAsync(
+                direction,
+                from,
+                head,
+                count,
+                token => _replica.ReadBelowMarkAsync(null, direction, from, head, count, token),
+                (start, most, token) => ReadAllFromPrimaryAsync(direction, start, head, most, token),
+                cancellationToken);
+    }
 
+    private async Task<IReadOnlyList<EventRecord>> ReadAllFromPrimaryAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
+    {
         // The store's query hides archived events and scopes to the session's tenant on its own.
         await using var session = store.QuerySession();
         var query = session.Events.QueryAllRawEvents();
@@ -168,7 +212,16 @@ internal sealed class PolecatStreamStore(IDocumentStore store, string connection
     public Task<IReadOnlyList<EventRecord>> ReadVirtualAsync(VirtualStreamName stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
-        return _virtual.ReadAsync(stream, direction, from, head, count, cancellationToken);
+        return _replica is null
+            ? _virtual.ReadAsync(stream, direction, from, head, count, cancellationToken)
+            : _router.ReadAsync(
+                direction,
+                from,
+                head,
+                count,
+                token => _replica.ReadBelowMarkAsync(stream, direction, from, head, count, token),
+                (start, most, token) => _virtual.ReadAsync(stream, direction, start, head, most, token),
+                cancellationToken);
     }
 
     /// <inheritdoc/>
