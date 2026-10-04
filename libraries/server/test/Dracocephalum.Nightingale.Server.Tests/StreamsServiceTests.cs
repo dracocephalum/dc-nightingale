@@ -142,7 +142,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     public async Task Read_WhenStreamHasNoEvents_ShouldSendStreamNotFoundAndNothingElse()
     {
         // Arrange
-        A.CallTo(() => _store.ReadAsync("orders-9", Direction.Forwards, null, 10, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadEventualAsync("orders-9", Direction.Forwards, null, 10, A<CancellationToken>._))
             .Returns((StreamSlice?)null);
         var client = new Streams.StreamsClient(_channel);
 
@@ -161,7 +161,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         // Arrange
         var first = Record("orders-1", 0, 10, "order_placed");
         var second = Record("orders-1", 1, 11, "order_paid");
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, null, 2, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadEventualAsync("orders-1", Direction.Forwards, null, 2, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 1), [first, second]));
         var client = new Streams.StreamsClient(_channel);
 
@@ -185,7 +185,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     public async Task Read_WhenBackwardsFromEnd_ShouldAskTheStoreForTheEndAndStopAtRevisionZero()
     {
         // Arrange
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Backwards, null, 5, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadEventualAsync("orders-1", Direction.Backwards, null, 5, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 1, 11, "order_paid"), Record("orders-1", 0, 10, "order_placed")]));
         var client = new Streams.StreamsClient(_channel);
 

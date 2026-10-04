@@ -273,6 +273,43 @@ nothing else; the lease is written so that it needs nothing else, an
 optimistic write settled by the row's concurrency tokens, and the integration
 suite still runs the same tests on SQL Server.
 
+### 8. History is read from a read-only connection
+
+The backend opens a second connection, read-only, and by default it is the
+main connection string with a read-only application intent: a listener with
+read-only routing sends it to a readable secondary, and any other server
+ignores the intent, so a standalone server pays a second connection pool and
+nothing else. The store has no read and write split of its own; this one is
+the backend's.
+
+A secondary applies the log after the primary commits, under synchronous
+commit too, so it holds a prefix of the events. Reading it bounded by the
+primary's high-water mark would skip, silently and inside a subscription,
+whatever it has not applied yet. The mark is replicated with the events, and
+it is written after the events it covers, so everything at or below the mark
+*as the secondary reports it* is on that secondary. A page of `$all` or of a
+virtual stream by position is therefore asked of the read-only connection
+together with its mark, in one round trip so both come from the same server:
+the part of the page at or below that mark comes back, and the main
+connection supplies whatever lies above. The page is the one the main
+connection alone would have returned. A reader working through history is
+served by the secondary; a reader at the head is not sent there at all, a
+position above a mark seen within the last second going straight to the main
+connection; a secondary that fails is left alone for ten seconds.
+
+What a deletion changes is the one thing that can differ: an event archived
+on the primary a moment ago may still be read from the secondary, as it
+would have been by a reader a moment earlier.
+
+Bounded reads of a plain stream stay on the main connection, because a
+client reads what it has just appended and appends on what it read. A host
+may move them, `Nightingale:ReadStreamsFromReadOnlyConnection`: they are
+then eventually consistent, nothing lost or reordered, and the cost is a
+revision conflict where the read was behind, since an append's expected
+revision is always checked on the main connection. Subscriptions, heads,
+ordinal reads, every write, the leases and the sequencer use the main
+connection whatever is configured.
+
 ## Conventions the code relies on
 
 - **Expected states** are the reference client's: any, no stream, stream

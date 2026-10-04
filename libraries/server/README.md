@@ -60,6 +60,9 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:ConnectionStringName` | `Nightingale` | which entry under `ConnectionStrings` the server uses |
 | `Nightingale:CreateDatabase` | `true` | create the database when it does not exist; off, a missing database is an error, for a host whose login may not create one |
 | `Nightingale:ApplySchemaChanges` | `false` | apply pending schema changes at startup to a store initialized earlier; off, a schema that differs is refused with the change in the message |
+| `Nightingale:UseReadOnlyConnection` | `true` | open a second, read-only connection and serve from it the pages of `$all` and of the virtual streams that lie at or below its own high-water mark; exact, and where there is no readable secondary it reaches the same server |
+| `Nightingale:ReadOnlyConnectionStringName` | none | which entry under `ConnectionStrings` the read-only connection uses, exactly as written; unset, the main string with `ApplicationIntent=ReadOnly`, which a listener with read-only routing sends to a secondary |
+| `Nightingale:ReadStreamsFromReadOnlyConnection` | `false` | serve bounded reads of plain streams from the read-only connection too; they are then eventually consistent, and an append made on a read that was behind is refused with a revision conflict |
 | `Nightingale:Deletion:AllowDelete` | `false` | accept `Delete`: a stream's events leave every read and it cannot be appended to again; the rows stay |
 | `Nightingale:Deletion:AllowTombstone` | `false` | accept `Tombstone`: a stream and its events are removed for good and the name is free again; irreversible, so a switch of its own |
 | `Nightingale:Store:Collation` | none, the server's default | the collation the database is created with; a binary one such as `Latin1_General_100_BIN2` makes stream names case-sensitive |

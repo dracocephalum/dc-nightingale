@@ -165,6 +165,24 @@ reads are unaffected: versions are dense under the stream lock.
 
 **Why:** reading past the high-water mark can skip an event forever.
 
+## Reading from a replica is the host's choice, not the call's
+
+**Reference:** a client chooses a node preference, and a call that must not
+be served by a follower says so; a read from a follower may lag.
+
+**Nightingale:** there is no leader to prefer, and a client sets nothing. The
+host has a read-only connection, on by default, and what is served from it by
+default is exact: a page of `$all` or of a virtual stream is taken from it
+only as far as its own high-water mark reaches, and completed from the main
+connection, so a client cannot tell the difference. Only when the host sets
+`Nightingale:ReadStreamsFromReadOnlyConnection` does a bounded read of a
+plain stream lag as a follower read does, and then for every client of that
+host.
+
+**Why:** the common case, a replay of history, should not need a decision
+from each client; and the one read that can go stale is the one an append is
+usually based on, so it is opt-in and decided where the database is known.
+
 ## Stream name case sensitivity follows the database collation
 
 **Reference:** stream names are case-sensitive; `Orders-1` and `orders-1` are

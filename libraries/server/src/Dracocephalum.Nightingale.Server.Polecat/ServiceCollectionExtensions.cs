@@ -41,7 +41,7 @@ public static class ServiceCollectionExtensions
                 $"ConnectionStrings:{options.ConnectionStringName} is not configured. {NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.ConnectionStringName)} names the connection string the server uses.");
         }
 
-        return Register(services, connectionString, options);
+        return Register(services, connectionString, options, ReadOnlyConnection.Resolve(connectionString, options, configuration.GetConnectionString));
     }
 
     /// <summary>
@@ -50,15 +50,16 @@ public static class ServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="connectionString">The SQL Server connection string, naming the database to use.</param>
     /// <param name="configure">Adjusts the options; the defaults create a missing database with the server's default collation and no partitioning.</param>
+    /// <param name="readOnlyConnectionString">The connection string of the read-only connection, used as written; unset, the main one with a read-only application intent, unless the options turn the read-only connection off.</param>
     /// <returns>The same collection, for chaining.</returns>
-    public static IServiceCollection AddNightingalePolecat(this IServiceCollection services, string connectionString, Action<NightingaleOptions>? configure = null)
+    public static IServiceCollection AddNightingalePolecat(this IServiceCollection services, string connectionString, Action<NightingaleOptions>? configure = null, string? readOnlyConnectionString = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         var options = new NightingaleOptions();
         configure?.Invoke(options);
-        return Register(services, connectionString, options);
+        return Register(services, connectionString, options, ReadOnlyConnection.Resolve(connectionString, options, named: null, readOnlyConnectionString));
     }
 
     /// <summary>
@@ -67,26 +68,28 @@ public static class ServiceCollectionExtensions
     /// its own schema management off; the initializer applies the schema instead, and the tailer
     /// starts after it, once the progression table it writes to exists.
     /// </summary>
-    private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options)
+    private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options, string? readOnlyConnectionString)
     {
         options.Store.Validate();
         services.AddNightingaleOptions(options);
         services.AddPolecat((StoreOptions store) =>
         {
-            store.Connection(connectionString);
-            store.DatabaseSchemaName = options.Store.Schema;
-            store.Events.StreamIdentity = StreamIdentity.AsString;
-            store.Events.TenancyStyle = TenancyStyle.Conjoined;
-            store.EventGraph.UseTenantPartitionedEvents = options.Store.Partitioning == NightingaleOptions.StoreSettings.PartitioningMode.Tenant;
-            store.EventGraph.UseArchivedStreamPartitioning = options.Store.Partitioning == NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream;
-            store.Events.EnableCorrelationId = true;
-            store.Events.EnableCausationId = true;
-            store.Events.EnableHeaders = true;
-            store.AutoCreateSchemaObjects = AutoCreate.None;
+            Configure(store, connectionString, options);
             store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals), connectionString);
         }).UseLightweightSessions();
 
-        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(provider.GetRequiredService<IDocumentStore>(), connectionString, options.Store.AssignOrdinals));
+        // The second store exists only for bounded reads of plain streams on the read-only
+        // connection, and only when the host asks for them: it reads and never migrates.
+        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(
+            provider.GetRequiredService<IDocumentStore>(),
+            connectionString,
+            options.Store.AssignOrdinals,
+            readOnlyConnectionString,
+            readOnlyConnectionString is not null && options.ReadStreamsFromReadOnlyConnection
+                ? DocumentStore.For(store => Configure(store, readOnlyConnectionString, options))
+                : null,
+            provider.GetService<TimeProvider>() ?? TimeProvider.System,
+            provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddNightingaleGroupStore(options.Store.Schema, JasperFx.StorageConstants.DefaultTenantId, context => context.UseSqlServer(connectionString));
@@ -113,5 +116,19 @@ public static class ServiceCollectionExtensions
         }
 
         return services;
+    }
+
+    private static void Configure(StoreOptions store, string connectionString, NightingaleOptions options)
+    {
+        store.Connection(connectionString);
+        store.DatabaseSchemaName = options.Store.Schema;
+        store.Events.StreamIdentity = StreamIdentity.AsString;
+        store.Events.TenancyStyle = TenancyStyle.Conjoined;
+        store.EventGraph.UseTenantPartitionedEvents = options.Store.Partitioning == NightingaleOptions.StoreSettings.PartitioningMode.Tenant;
+        store.EventGraph.UseArchivedStreamPartitioning = options.Store.Partitioning == NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream;
+        store.Events.EnableCorrelationId = true;
+        store.Events.EnableCausationId = true;
+        store.Events.EnableHeaders = true;
+        store.AutoCreateSchemaObjects = AutoCreate.None;
     }
 }
