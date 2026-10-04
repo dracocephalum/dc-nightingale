@@ -214,6 +214,74 @@ other files to learn why this one exists.
   changed setting is refused rather than silently disagreeing with what
   exists.
 
+### JSON
+
+- **One definition of how the repository serializes, and nothing serializes
+  without it.** A static class in the component every other one references
+  holds the options; a call to `JsonSerializer` with no options, or with a
+  set made on the spot, is a second opinion about what the JSON looks like.
+- **The default: web defaults, enums by name, non-ASCII as itself.**
+  Camel-case property names, read without regard to case; numbers readable
+  from strings; `JsonStringEnumConverter`, so a payload carries `"Shipped"`
+  and not `2`; and the relaxed encoder, so `é` is written as `é` and not as
+  an escape. Everything JSON requires escaped still is.
+- **One initializer, used by the library and the host alike.** The settings
+  are applied by a single method. The static default is built by calling it,
+  and an extension method on the service collection calls it on the host's
+  own JSON options, minimal endpoints and controllers both, so what the
+  library writes and what the host serves cannot drift:
+
+      public static class ThingJson
+      {
+          public static JsonSerializerOptions Default { get; } = Configure(new JsonSerializerOptions());
+
+          public static JsonSerializerOptions Configure(JsonSerializerOptions options, IHostEnvironment? environment = null)
+          {
+              options.WriteIndented = environment is not null && !environment.IsProduction();
+              options.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+              options.PropertyNameCaseInsensitive = true;
+              options.NumberHandling = JsonNumberHandling.AllowReadingFromString;
+              options.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
+              if (!options.Converters.OfType<JsonStringEnumConverter>().Any())
+              {
+                  options.Converters.Add(new JsonStringEnumConverter());
+              }
+
+              return options;
+          }
+      }
+
+      public static IServiceCollection AddThingJson(this IServiceCollection services, IHostEnvironment? environment = null)
+      {
+          services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o => ThingJson.Configure(o.SerializerOptions, environment));
+          services.Configure<Microsoft.AspNetCore.Mvc.JsonOptions>(o => ThingJson.Configure(o.JsonSerializerOptions, environment));
+          return services;
+      }
+
+  The settings are written out rather than taken from
+  `JsonSerializerDefaults.Web`, because the host's options already exist when
+  they are configured and cannot be constructed from a default.
+- **Indented for a person, outside production, and only the host's JSON.**
+  The initializer takes the host's environment as an optional argument:
+  given, and anything but production, the JSON is written indented, which is
+  what someone reading a response while working on the service wants. Not
+  given, it is compact, and the static default is always built without it:
+  indentation is part of the bytes, so options that pass a document through
+  must never have it. In a repository whose defining component must not
+  reference hosting, a client built on it for one, the initializer takes a
+  plain `bool` and the extension method, which lives with the host, works it
+  out from the environment.
+- **A variation is derived, never defined again.** JSON whose property names
+  are read as configuration paths keeps them as declared, so they match a
+  settings file: `new JsonSerializerOptions(ThingJson.Default) { PropertyNamingPolicy = null }`,
+  a named property beside the default.
+- **A document passed through is not changed by any of this.** A naming
+  policy and an enum converter act on a type's own properties and values; a
+  parsed document has neither, and its names and text are written back as
+  they came. Only the encoder matters to it, which is why the relaxed one is
+  in the default. Where a component returns JSON it did not write, hold that
+  with a test that compares the bytes.
+
 ### gRPC contracts
 
 - The proto package is the component's namespace plus `Protocol.V1`, and the
