@@ -36,6 +36,8 @@ banned-API list. The authority for each item is
 | `DeleteBehavior.Cascade` or `ClientCascade`; `ON UPDATE CASCADE` in a migration | EF Core, Model | `issue (blocking)` |
 | Composite or non-`Guid` primary key, or a key column not named `Id` | EF Core, Model | `issue` |
 | Plural table name; `HasDefaultSchema` missing or the schema not confirmed | EF Core, Model | `issue` |
+| A mapped table with no `DbSet`, or a `DbSet` not named for its entity (the class name or its plural) | EF Core, Model | `issue` |
+| A context, its entities or its migrations outside `Data`; migrations at the project root instead of `Data/Migrations` | EF Core, *Where it lives* | `suggestion` |
 | Column referring to another table not named `<Table>Id`; reference to one of the context's own tables without a foreign key; a foreign key added to a table the context does not own | EF Core, Model | `issue` |
 | Migration with `DropColumn`, `DropTable`, `RenameColumn`, or a narrowing `AlterColumn` | EF Core, Migrations | `issue (blocking)` — breaks the release still running |
 | `AddColumn` with `nullable: false` or `defaultValue:` on an existing table | EF Core, Migrations | `issue (blocking)` |
