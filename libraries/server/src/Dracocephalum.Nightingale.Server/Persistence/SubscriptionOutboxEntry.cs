@@ -4,13 +4,13 @@ namespace Dracocephalum.Nightingale.Server.Persistence;
 /// An event due to be delivered to a group again: a parked event a replay put back. An event is
 /// parked or on the outbox, never both.
 /// </summary>
-public sealed class OutboxEntry
+public sealed class SubscriptionOutboxEntry
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }
 
     /// <summary>Gets or sets the id of the group the event is due to.</summary>
-    public Guid GroupId { get; set; }
+    public Guid SubscriptionGroupId { get; set; }
 
     /// <summary>Gets or sets the event's global position, unique within the group.</summary>
     public long Position { get; set; }

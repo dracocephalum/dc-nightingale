@@ -17,6 +17,9 @@ public sealed class NightingaleDbContextTests
 {
     private const string DesignTime = "Server=localhost;Database=design-time;Integrated Security=true";
 
+    /// <summary>The columns that refer to an event in the store's table, which is the store's and takes no foreign key of ours.</summary>
+    private static readonly string[] ExternalReferences = ["SubscriptionParkedEvent.EventId", "SubscriptionOutboxEntry.EventId"];
+
     [Fact]
     public void Model_WhenBuilt_ShouldFollowConventions()
     {
@@ -24,7 +27,7 @@ public sealed class NightingaleDbContextTests
         using var context = Context(NightingaleSchema.Default);
 
         // Act & Assert: throws with every violation listed.
-        ModelConventions.Check(context.Model);
+        ModelConventions.Check(context.Model, ExternalReferences);
     }
 
     [Fact]
@@ -63,10 +66,10 @@ public sealed class NightingaleDbContextTests
         script.ShouldSatisfyAllConditions(
             text => text.ShouldContain("CREATE SCHEMA [elsewhere]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[SubscriptionGroup]"),
-            text => text.ShouldContain("CREATE TABLE [elsewhere].[ParkedEvent]"),
-            text => text.ShouldContain("CREATE TABLE [elsewhere].[OutboxEntry]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[SubscriptionParkedEvent]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[SubscriptionOutboxEntry]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[Lease]"),
-            text => text.ShouldContain("CREATE TABLE [elsewhere].[ProgressMark]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[SequencerProgress]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[Setting]"),
             text => text.ShouldContain("[elsewhere].[__EFMigrationsHistory]"),
             text => text.ShouldNotContain("[" + NightingaleSchema.Default + "]"));

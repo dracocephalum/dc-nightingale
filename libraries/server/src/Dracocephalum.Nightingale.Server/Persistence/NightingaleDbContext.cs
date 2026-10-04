@@ -20,16 +20,16 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
     public DbSet<SubscriptionGroup> Groups => Set<SubscriptionGroup>();
 
     /// <summary>Gets the parked events.</summary>
-    public DbSet<ParkedEvent> Parked => Set<ParkedEvent>();
+    public DbSet<SubscriptionParkedEvent> Parked => Set<SubscriptionParkedEvent>();
 
     /// <summary>Gets the outbox.</summary>
-    public DbSet<OutboxEntry> Outbox => Set<OutboxEntry>();
+    public DbSet<SubscriptionOutboxEntry> Outbox => Set<SubscriptionOutboxEntry>();
 
     /// <summary>Gets the leases.</summary>
     public DbSet<Lease> Leases => Set<Lease>();
 
-    /// <summary>Gets the progress rows.</summary>
-    public DbSet<ProgressMark> Progress => Set<ProgressMark>();
+    /// <summary>Gets the sequencer's progress.</summary>
+    public DbSet<SequencerProgress> SequencerProgress => Set<SequencerProgress>();
 
     /// <summary>Gets the settings the store was initialized with.</summary>
     public DbSet<Setting> Settings => Set<Setting>();
@@ -47,7 +47,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         modelBuilder.HasDefaultSchema(schema.Name);
 
         // Names are compared by the database's own rule for which names are the same; nothing
-        // here folds case. They are not Unicode because the event store's are not.
+        // here folds case. They are not Unicode because the event store's are not. A column that
+        // refers to a row of another of these tables is named for that table and is a foreign key
+        // to it, never cascading: a group's rows are deleted with it, by the code that deletes it.
         modelBuilder.Entity<SubscriptionGroup>(group =>
         {
             group.ToTable(nameof(SubscriptionGroup));
@@ -58,20 +60,22 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             group.HasIndex(row => new { row.TenantId, row.Stream, row.Name }).IsUnique();
         });
 
-        modelBuilder.Entity<ParkedEvent>(parked =>
+        modelBuilder.Entity<SubscriptionParkedEvent>(parked =>
         {
-            parked.ToTable(nameof(ParkedEvent));
+            parked.ToTable(nameof(SubscriptionParkedEvent));
             parked.HasKey(row => row.Id);
             parked.Property(row => row.Reason).HasMaxLength(1000);
-            parked.HasIndex(row => new { row.GroupId, row.Position }).IsUnique();
+            parked.HasIndex(row => new { row.SubscriptionGroupId, row.Position }).IsUnique();
+            parked.HasOne<SubscriptionGroup>().WithMany().HasForeignKey(row => row.SubscriptionGroupId).OnDelete(DeleteBehavior.Restrict);
         });
 
-        modelBuilder.Entity<OutboxEntry>(outbox =>
+        modelBuilder.Entity<SubscriptionOutboxEntry>(outbox =>
         {
-            outbox.ToTable(nameof(OutboxEntry));
+            outbox.ToTable(nameof(SubscriptionOutboxEntry));
             outbox.HasKey(row => row.Id);
             outbox.Property(row => row.Reason).HasMaxLength(1000);
-            outbox.HasIndex(row => new { row.GroupId, row.Position }).IsUnique();
+            outbox.HasIndex(row => new { row.SubscriptionGroupId, row.Position }).IsUnique();
+            outbox.HasOne<SubscriptionGroup>().WithMany().HasForeignKey(row => row.SubscriptionGroupId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Lease>(lease =>
@@ -85,9 +89,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             lease.HasIndex(row => row.Name).IsUnique();
         });
 
-        modelBuilder.Entity<ProgressMark>(progress =>
+        modelBuilder.Entity<SequencerProgress>(progress =>
         {
-            progress.ToTable(nameof(ProgressMark));
+            progress.ToTable(nameof(SequencerProgress));
             progress.HasKey(row => row.Id);
             progress.Property(row => row.Name).HasMaxLength(100).IsUnicode(false);
             progress.HasIndex(row => row.Name).IsUnique();

@@ -254,8 +254,8 @@ internal sealed class PolecatStreamStore(IDocumentStore store, IDbContextFactory
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         // Named in full: the store's own LINQ has a method of the same name.
-        var progress = context.Progress.AsNoTracking()
-            .Where(row => row.Name == ProgressMark.Ordinals)
+        var progress = context.SequencerProgress.AsNoTracking()
+            .Where(row => row.Name == SequencerProgress.Ordinals)
             .Select(row => (long?)row.Position);
         return await EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(progress, cancellationToken).ConfigureAwait(false) ?? 0;
     }

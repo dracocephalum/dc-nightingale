@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 /// What a store was initialized with, as rows and back: written one row per value, read by the
 /// same binder that reads the configuration, into the same settings type.
 /// </summary>
-public sealed class SettingRowsTests
+public sealed class SettingsExtensionsTests
 {
     private static readonly DateTimeOffset Created = new(2026, 9, 19, 8, 0, 0, TimeSpan.Zero);
 
@@ -23,7 +23,7 @@ public sealed class SettingRowsTests
         var settings = Settings();
 
         // Act
-        var pairs = SettingRows.Flatten(settings).ToDictionary(pair => pair.Key, pair => pair.Value);
+        var pairs = SettingsExtensions.Flatten(settings).ToDictionary(pair => pair.Key, pair => pair.Value);
 
         // Assert: an enum by its name, a null by no row at all.
         pairs["Store:Partitioning"].ShouldBe("ArchivedStream");
@@ -32,7 +32,7 @@ public sealed class SettingRowsTests
         pairs["Store:Collation"].ShouldBe("Latin1_General_100_BIN2");
         pairs["CreatedBy"].ShouldBe("1.0.0+abcdef12");
         pairs.ShouldContainKey("CreatedAt");
-        SettingRows.Flatten(new StoredSettings()).Select(pair => pair.Key).ShouldNotContain("Store:Collation");
+        SettingsExtensions.Flatten(new StoredSettings()).Select(pair => pair.Key).ShouldNotContain("Store:Collation");
     }
 
     [Fact]
@@ -44,14 +44,14 @@ public sealed class SettingRowsTests
         // Act
         await using (var context = Context())
         {
-            await SettingRows.WriteAsync(context, settings, TestContext.Current.CancellationToken);
+            await context.WriteSettingsAsync(settings, TestContext.Current.CancellationToken);
         }
 
         StoredSettings read;
         int rows;
         await using (var context = Context())
         {
-            read = await SettingRows.ReadAsync<StoredSettings>(context, TestContext.Current.CancellationToken);
+            read = await context.ReadSettingsAsync<StoredSettings>(TestContext.Current.CancellationToken);
             rows = await context.Settings.CountAsync(TestContext.Current.CancellationToken);
         }
 
@@ -72,18 +72,18 @@ public sealed class SettingRowsTests
         // Arrange
         await using (var context = Context())
         {
-            await SettingRows.WriteAsync(context, Settings(), TestContext.Current.CancellationToken);
+            await context.WriteSettingsAsync(Settings(), TestContext.Current.CancellationToken);
         }
 
         // Act: one value written on its own, as an upgrade records the library it applied.
         await using (var context = Context())
         {
-            await SettingRows.WriteAsync(context, new { StoreLibrary = "9.9.9" }, TestContext.Current.CancellationToken);
+            await context.WriteSettingAsync(nameof(StoredSettings.StoreLibrary), "9.9.9", TestContext.Current.CancellationToken);
         }
 
         // Assert
         await using var check = Context();
-        var read = await SettingRows.ReadAsync<StoredSettings>(check, TestContext.Current.CancellationToken);
+        var read = await check.ReadSettingsAsync<StoredSettings>(TestContext.Current.CancellationToken);
         read.StoreLibrary.ShouldBe("9.9.9");
         read.Store.Schema.ShouldBe("events");
         (await check.Settings.CountAsync(TestContext.Current.CancellationToken)).ShouldBe(7);
@@ -93,7 +93,7 @@ public sealed class SettingRowsTests
     public void Bind_WhenARowIsMissing_ShouldTakeTheDefault()
     {
         // Act: a store initialized before a setting existed has no row for it.
-        var read = SettingRows.Bind<StoredSettings>([new("Store:Partitioning", "Tenant")]);
+        var read = SettingsExtensions.Bind<StoredSettings>([new("Store:Partitioning", "Tenant")]);
 
         // Assert
         read.Store.Partitioning.ShouldBe(NightingaleOptions.StoreSettings.PartitioningMode.Tenant);
@@ -105,7 +105,7 @@ public sealed class SettingRowsTests
     public void Bind_WhenARowIsUnknown_ShouldIgnoreIt()
     {
         // Act: a store initialized by a newer server has a row this one has no setting for.
-        var read = SettingRows.Bind<StoredSettings>([new("Store:Schema", "events"), new("Store:SomethingNewer", "42")]);
+        var read = SettingsExtensions.Bind<StoredSettings>([new("Store:Schema", "events"), new("Store:SomethingNewer", "42")]);
 
         // Assert
         read.Store.Schema.ShouldBe("events");

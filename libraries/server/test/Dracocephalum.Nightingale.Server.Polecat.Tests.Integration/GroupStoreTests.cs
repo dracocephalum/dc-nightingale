@@ -114,6 +114,26 @@ public sealed class GroupStoreTests(SqlServerTestDatabase database)
     }
 
     [Fact]
+    public async Task Park_ForAGroupThatWasDeleted_ShouldLeaveNothingBehind()
+    {
+        // Arrange: a consumer still holds an event while its group is deleted under it.
+        var sut = Store();
+        var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
+        await sut.CreateAsync(new GroupDefinition(stream, group, GroupSettings.Default, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(id, 10, 10, null, Guid.NewGuid(), "poison", 1, Now), TestContext.Current.CancellationToken);
+        await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
+
+        // Act: the park arrives after the delete. The foreign key refuses a row for a group that
+        // is gone, and the store takes that for what it is.
+        await sut.ParkAsync(new ParkedMessage(id, 11, 11, null, Guid.NewGuid(), "poison", 1, Now), TestContext.Current.CancellationToken);
+
+        // Assert: the delete took the group's parked event with it, and the late one left no row.
+        var orphans = await TestDatabases.ScalarAsync<int>(database.Name, $"SELECT COUNT(*) FROM nightingale.SubscriptionParkedEvent WHERE SubscriptionGroupId = '{id}'");
+        orphans.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Get_UnderAnotherSpelling_ShouldReturnTheGroupUnderTheNamesItWasCreatedWith()
     {
         // Arrange: whether another spelling is the same group is the database's to say.

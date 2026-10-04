@@ -93,7 +93,7 @@ public sealed class SchemaExportTests
                 text => text.ShouldContain("type_ordinal"),
                 text => text.ShouldContain("ix_pc_events_category_ordinal"),
                 text => text.ShouldContain("ix_pc_events_type_ordinal"),
-                text => text.ShouldContain("CREATE TABLE [nightingale].[ProgressMark]"));
+                text => text.ShouldContain("CREATE TABLE [nightingale].[SequencerProgress]"));
         }
         finally
         {

@@ -98,12 +98,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   data, and dropping it is the way out. Close by: recognizing a database that
   holds only the store's own tables, all empty, as one to carry on
   initializing.
-- **The gateway's tables reference each other by id without foreign keys.** A
-  parked event and an outbox entry carry their group's id, and deleting a
-  group removes them in the same write, but nothing in the database says so:
-  a consumer that parks an event while its group is being deleted leaves a
-  row no group owns. Close by: foreign keys with no cascade, and the park
-  treating the refused write as the group being gone.
 - **The sequencer's takeover is not tested with two instances.** The lease
   logic is the group store's, tested there, and the batch transaction reads
   the progress row under an update lock so an overlapping sequencer continues

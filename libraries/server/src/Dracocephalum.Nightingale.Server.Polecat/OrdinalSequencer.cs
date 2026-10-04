@@ -91,7 +91,7 @@ internal sealed partial class OrdinalSequencer(
             progress.Transaction = transaction;
             progress.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
-                "SELECT [Position] FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE [Name] = '" + ProgressMark.Ordinals + "'",
+                "SELECT [Position] FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE [Name] = '" + SequencerProgress.Ordinals + "'",
                 OrdinalsTable);
             var value = await progress.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (value is long known)
@@ -103,7 +103,7 @@ internal sealed partial class OrdinalSequencer(
                 from = 0;
                 await using var insert = connection.CreateCommand();
                 insert.Transaction = transaction;
-                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} ([Id], [Name], [Position]) VALUES (NEWID(), '" + ProgressMark.Ordinals + "', 0)", OrdinalsTable);
+                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} ([Id], [Name], [Position]) VALUES (NEWID(), '" + SequencerProgress.Ordinals + "', 0)", OrdinalsTable);
                 await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
         }
@@ -142,7 +142,7 @@ internal sealed partial class OrdinalSequencer(
                 + " JOIN batch b ON b.seq_id = e.seq_id"
                 + " JOIN categories c ON c.tenant_id = b.tenant_id AND c.category = b.category"
                 + " JOIN types t ON t.tenant_id = b.tenant_id AND t.[type] = b.[type];"
-                + " UPDATE {1} SET [Position] = @to WHERE [Name] = '" + ProgressMark.Ordinals + "'",
+                + " UPDATE {1} SET [Position] = @to WHERE [Name] = '" + SequencerProgress.Ordinals + "'",
                 EventsTable,
                 OrdinalsTable);
             number.Parameters.AddWithValue("@from", from);
@@ -161,7 +161,7 @@ internal sealed partial class OrdinalSequencer(
 
     private string EventsTable => Schema + ".[pc_events]";
 
-    private string OrdinalsTable => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + nameof(ProgressMark) + "]";
+    private string OrdinalsTable => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + nameof(SequencerProgress) + "]";
 
     private async Task RunAsync(CancellationToken stopping)
     {

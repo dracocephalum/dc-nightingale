@@ -59,6 +59,12 @@ After changing the model, from the backend's project folder:
 No database is needed for that, and the generated files are not edited; a
 unit test fails while the model has a change no migration carries.
 
+Until the first official release there is one migration, `Initial`, and it is
+regenerated rather than added to: delete the `Migrations` folder and run the
+command with `Initial` as the name. No store from before the first release is
+migrated; it is initialized again. From the first release on `Initial` is
+frozen and every change is a migration of its own.
+
 ## Configuration
 
 The server library reads nothing; configuration belongs to the host.

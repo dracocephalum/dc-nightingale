@@ -273,12 +273,21 @@ single ordinal sequence and is served under global numbering only.
 
 ### 7. The gateway's own tables are one model, and its own schema
 
-The tables the gateway keeps, groups, parked events, the outbox, leases, the
-progress of its background processes and the settings rows, are one EF Core
-context, `NightingaleDbContext`, in the server library. The context owns
+The tables the gateway keeps, subscription groups, their parked events and
+outbox, leases, the sequencer's progress and the settings rows, are one EF
+Core context, `NightingaleDbContext`, in the server library. The context owns
 them, under the repository's EF rules for a context that does: a `Guid`
 key named `Id` on each, singular table names, natural keys as unique
-indexes, a check that fails a test when a line is forgotten. It names no
+indexes, a check that fails a test when a line is forgotten. A column that
+refers to a row of another table is named for that table, `SubscriptionGroupId`;
+when the table is the gateway's own the column is a foreign key to it, never
+cascading, and the check holds the name and the key to each other. When the
+table is the event store's, the column keeps the name and takes no
+constraint: the store's tables are the store's, an event's id has no unique
+index to refer to there, and the store deletes events of a tombstoned stream
+whatever refers to them. Such a column is listed by name where the check is
+run, and anything that joins to the store's events joins on the position,
+which is their key. It names no
 provider and no column type, only lengths and whether a string is Unicode,
 so each backend generates its own migrations from the one model, with
 `dotnet ef migrations add`, into its own project: SQL Server's are in the
@@ -302,6 +311,8 @@ group name sit under a unique index: the names find a group, by whatever
 rule the database's collation has for which names are the same, and the id
 is the group. Its parked events, its outbox and its lease go by the id, so
 nothing downstream of the lookup depends on how a name is spelt or compared.
+A park that arrives for a group deleted meanwhile is refused by the foreign
+key and taken for what it is: the group is gone.
 
 The backend has a second, read-only context beside it, a mirror of two
 tables the store owns: its events, with the columns the gateway adds, and

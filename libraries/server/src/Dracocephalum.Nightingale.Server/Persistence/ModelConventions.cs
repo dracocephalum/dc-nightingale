@@ -14,11 +14,17 @@ public static class ModelConventions
 
     /// <summary>Checks a model.</summary>
     /// <param name="model">The model.</param>
+    /// <param name="externalReferences">
+    /// The columns that refer to a row of a table outside the model, each as <c>Entity.Property</c>.
+    /// Such a column is named like a foreign key and cannot be one: the table is another owner's.
+    /// </param>
     /// <exception cref="InvalidOperationException">The model breaks a convention; the message lists every violation.</exception>
-    public static void Check(IModel model)
+    public static void Check(IModel model, params string[] externalReferences)
     {
         ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(externalReferences);
         var violations = new List<string>();
+        var tables = model.GetEntityTypes().Where(e => !e.IsOwned()).Select(e => e.GetTableName()).ToHashSet(StringComparer.Ordinal);
         foreach (var entity in model.GetEntityTypes().Where(e => !e.IsOwned()))
         {
             var name = entity.DisplayName();
@@ -36,9 +42,18 @@ public static class ModelConventions
                 }
             }
 
-            foreach (var fk in entity.GetForeignKeys().Where(fk => !fk.IsOwnership && fk.DeleteBehavior is not (DeleteBehavior.Restrict or DeleteBehavior.NoAction)))
+            foreach (var fk in entity.GetForeignKeys().Where(fk => !fk.IsOwnership))
             {
-                violations.Add($"{name} -> {fk.PrincipalEntityType.DisplayName()}: {fk.DeleteBehavior} - .OnDelete(DeleteBehavior.Restrict)");
+                var principal = fk.PrincipalEntityType.GetTableName();
+                if (fk.DeleteBehavior is not (DeleteBehavior.Restrict or DeleteBehavior.NoAction))
+                {
+                    violations.Add($"{name} -> {fk.PrincipalEntityType.DisplayName()}: {fk.DeleteBehavior} - .OnDelete(DeleteBehavior.Restrict)");
+                }
+
+                if (fk.Properties.Count != 1 || fk.Properties[0].Name != principal + "Id")
+                {
+                    violations.Add($"{name} -> {fk.PrincipalEntityType.DisplayName()}: the foreign key column must be '{principal}Id', the table it refers to and Id");
+                }
             }
 
             foreach (var property in entity.GetProperties())
@@ -52,6 +67,22 @@ public static class ModelConventions
                 if (clr == typeof(decimal) && MoneySuffixes.Any(s => property.Name.EndsWith(s, StringComparison.Ordinal)) && property.GetPrecision() is null)
                 {
                     violations.Add($"{name}.{property.Name}: money needs an explicit precision - .HasPrecision(19, 4), or the agreed crypto precision");
+                }
+
+                // A Guid column named <Something>Id says it refers to a row of <Something>. Either
+                // that is a table of this model and the column is a foreign key to it, or the
+                // table is another owner's and the column is listed as an external reference.
+                if (clr == typeof(Guid) && property.Name != "Id" && property.Name.EndsWith("Id", StringComparison.Ordinal) && !property.IsForeignKey())
+                {
+                    var referred = property.Name[..^2];
+                    if (tables.Contains(referred))
+                    {
+                        violations.Add($"{name}.{property.Name}: refers to {referred} by name and is not a foreign key to it - .HasOne<{referred}>().WithMany().HasForeignKey(...).OnDelete(DeleteBehavior.Restrict)");
+                    }
+                    else if (Array.IndexOf(externalReferences, $"{entity.ClrType.Name}.{property.Name}") < 0)
+                    {
+                        violations.Add($"{name}.{property.Name}: named like a reference to a table '{referred}' this model does not have - name it for the table it refers to, or list it as an external reference");
+                    }
                 }
             }
         }

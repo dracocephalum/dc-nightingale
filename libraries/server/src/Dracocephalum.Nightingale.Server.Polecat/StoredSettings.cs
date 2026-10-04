@@ -1,3 +1,5 @@
+using Dracocephalum.Nightingale.Server.Persistence;
+
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
@@ -7,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// every start and refuses to serve a store whose record disagrees, so a setting that is fixed
 /// at initialization cannot drift under a running system.
 /// </summary>
-internal sealed class StoredSettings
+internal sealed class StoredSettings : INightingaleSettings
 {
     /// <summary>Gets or sets the settings the store was initialized with; the collation is the database's actual one.</summary>
     public NightingaleOptions.StoreSettings Store { get; set; } = new();

@@ -4,13 +4,13 @@ namespace Dracocephalum.Nightingale.Server.Persistence;
 /// An event a group could not process, kept until a replay: one row per group and position,
 /// with every number the event has so it can be addressed by whichever one the group speaks.
 /// </summary>
-public sealed class ParkedEvent
+public sealed class SubscriptionParkedEvent
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }
 
     /// <summary>Gets or sets the id of the group the event is parked for.</summary>
-    public Guid GroupId { get; set; }
+    public Guid SubscriptionGroupId { get; set; }
 
     /// <summary>Gets or sets the event's global position, unique within the group.</summary>
     public long Position { get; set; }

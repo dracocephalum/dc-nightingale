@@ -159,7 +159,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Assert
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'events' AND name = 'pc_events'")).ShouldBe(1);
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'gateway' AND name IN ('Setting', 'SubscriptionGroup', 'ParkedEvent', 'OutboxEntry', 'Lease', 'ProgressMark', '__EFMigrationsHistory')")).ShouldBe(7);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'gateway' AND name IN ('Setting', 'SubscriptionGroup', 'SubscriptionParkedEvent', 'SubscriptionOutboxEntry', 'Lease', 'SequencerProgress', '__EFMigrationsHistory')")).ShouldBe(7);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) IN ('dbo', 'nightingale')")).ShouldBe(0);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM gateway.SubscriptionGroup")).ShouldBe(1);
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM gateway.Setting WHERE [Name] = 'Store:Schema'")).ShouldBe("events");

@@ -1,10 +1,10 @@
 namespace Dracocephalum.Nightingale.Server.Persistence;
 
 /// <summary>
-/// How far a background process of the gateway has come, by name: the sequencer's is the
-/// position every event up to which has its ordinals.
+/// How far the sequencer has come: the position every event up to which has its ordinals. One
+/// row, found by its name.
 /// </summary>
-public sealed class ProgressMark
+public sealed class SequencerProgress
 {
     /// <summary>The name of the sequencer's row.</summary>
     public const string Ordinals = "Ordinals";

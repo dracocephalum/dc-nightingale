@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
 {
     [DbContext(typeof(NightingaleDbContext))]
-    [Migration("20261004032621_Initial")]
+    [Migration("20261004041600_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -62,90 +62,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                     b.ToTable("Lease", "nightingale");
                 });
 
-            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.OutboxEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("int");
-
-                    b.Property<DateTimeOffset>("DueAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("GroupId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<long?>("Ordinal")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("Position")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTimeOffset>("QueuedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GroupId", "Position")
-                        .IsUnique();
-
-                    b.ToTable("OutboxEntry", "nightingale");
-                });
-
-            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.ParkedEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("GroupId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<long?>("Ordinal")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTimeOffset>("ParkedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<long>("Position")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GroupId", "Position")
-                        .IsUnique();
-
-                    b.ToTable("ParkedEvent", "nightingale");
-                });
-
-            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.ProgressMark", b =>
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.SequencerProgress", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -165,7 +82,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("ProgressMark", "nightingale");
+                    b.ToTable("SequencerProgress", "nightingale");
                 });
 
             modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.Setting", b =>
@@ -232,6 +149,107 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                         .IsUnique();
 
                     b.ToTable("SubscriptionGroup", "nightingale");
+                });
+
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.SubscriptionOutboxEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("DueAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long?>("Ordinal")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Position")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("QueuedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SubscriptionGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubscriptionGroupId", "Position")
+                        .IsUnique();
+
+                    b.ToTable("SubscriptionOutboxEntry", "nightingale");
+                });
+
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.SubscriptionParkedEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long?>("Ordinal")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("ParkedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long>("Position")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SubscriptionGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubscriptionGroupId", "Position")
+                        .IsUnique();
+
+                    b.ToTable("SubscriptionParkedEvent", "nightingale");
+                });
+
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.SubscriptionOutboxEntry", b =>
+                {
+                    b.HasOne("Dracocephalum.Nightingale.Server.Persistence.SubscriptionGroup", null)
+                        .WithMany()
+                        .HasForeignKey("SubscriptionGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Persistence.SubscriptionParkedEvent", b =>
+                {
+                    b.HasOne("Dracocephalum.Nightingale.Server.Persistence.SubscriptionGroup", null)
+                        .WithMany()
+                        .HasForeignKey("SubscriptionGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

@@ -43,7 +43,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         var applied = (await context.Database.GetAppliedMigrationsAsync(cancellationToken).ConfigureAwait(false)).ToList();
         var initialized = applied.Count > 0;
         IReadOnlyList<string> conflicts = initialized
-            ? (await SettingRows.ReadAsync<StoredSettings>(context, cancellationToken).ConfigureAwait(false)).DifferencesFrom(options.Store)
+            ? (await context.ReadSettingsAsync<StoredSettings>(cancellationToken).ConfigureAwait(false)).DifferencesFrom(options.Store)
             : [];
 
         // The store's tables are compared under the configured settings, which shape them; under
@@ -88,7 +88,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
 
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
-        await SettingRows.WriteAsync(context, new { StoreLibrary = StoreLibraryVersion }, cancellationToken).ConfigureAwait(false);
+        await context.WriteSettingAsync(nameof(StoredSettings.StoreLibrary), StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Records what an empty database was initialized with.</summary>
@@ -98,7 +98,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     public async Task WriteSettingsAsync(StoredSettings settings, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        await SettingRows.WriteAsync(context, settings, cancellationToken).ConfigureAwait(false);
+        await context.WriteSettingsAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads what the store was initialized with.</summary>
@@ -107,7 +107,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     public async Task<StoredSettings> ReadSettingsAsync(CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        return await SettingRows.ReadAsync<StoredSettings>(context, cancellationToken).ConfigureAwait(false);
+        return await context.ReadSettingsAsync<StoredSettings>(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The change the event store's tables need, or <see langword="null"/> when they match.</summary>
