@@ -73,16 +73,42 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     /// The store's settings as a host of this backend configures them: the four every store is
     /// initialized with, from the base, and the check that they are values SQL Server and this
     /// backend can take. The schema is the store's default, <c>dbo</c>, unless said otherwise,
-    /// and is created with the tables when it does not exist. The collation is only used when the
-    /// server creates the database, a database provisioned by hand keeps its own and the setting,
-    /// when given, must match it; SQL Server's default collations do not tell case apart, a binary
-    /// one such as <c>Latin1_General_100_BIN2</c> does, and a UTF-8 one is what lets a stream name
-    /// hold characters outside the collation's code page. Ordinals fit partitioning by tenant by
+    /// and is created with the tables when it does not exist. The collation must be a UTF-8 one,
+    /// whichever it is: the event store keeps names in columns that are not Unicode, and under
+    /// any other collation a character outside the code page is stored as a question mark, so
+    /// two names in another script become one. The server refuses to create a database with
+    /// another, and refuses a database provisioned by hand that has another. A database
+    /// provisioned by hand keeps the collation it has, and the setting must match it. Ordinals fit partitioning by tenant by
     /// construction, and are refused with it only until the sequencer follows a high-water mark
     /// per tenant, which the multi-tenancy work brings.
     /// </summary>
     public sealed partial class StoreOptions : StoreSettings
     {
+        /// <summary>
+        /// The collation a database is created with unless the host names another: binary, so two
+        /// names that differ in case are two names, as they are in the reference event store and
+        /// in PostgreSQL, and UTF-8, so a name holds any character.
+        /// </summary>
+        public const string DefaultCollation = "Latin1_General_100_BIN2_UTF8";
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the server works with a collation that is not
+        /// UTF-8. Off, such a collation is refused. On, it is the host's own considered choice,
+        /// for a database that already has another collation or a server too old to have a
+        /// UTF-8 one, and its consequence is the host's too: a character of a stream name, an
+        /// event type, a tenant or a correlation or causation id that is outside the collation's
+        /// code page is stored as a question mark, so two such names can become one. Names that
+        /// stay within the code page are unaffected. It is a choice of the host and not a
+        /// setting of the store, so it is not recorded with the store's settings.
+        /// </summary>
+        public bool IgnoreCollationCompatibility { get; set; }
+
+        /// <summary>Initializes a new instance of the <see cref="StoreOptions"/> class with this backend's defaults.</summary>
+        public StoreOptions()
+        {
+            Collation = DefaultCollation;
+        }
+
         /// <summary>Checks the settings are consistent.</summary>
         /// <exception cref="InvalidOperationException">A setting is not a value it can take.</exception>
         public void Validate()

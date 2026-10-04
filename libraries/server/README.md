@@ -87,7 +87,8 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:Deletion:AllowDelete` | `false` | accept `Delete`: a stream's events leave every read and it cannot be appended to again; the rows stay |
 | `Nightingale:Deletion:AllowTombstone` | `false` | accept `Tombstone`: a stream and its events are removed for good and the name is free again; irreversible, so a switch of its own |
 | `Nightingale:Store:Schema` | `dbo` | the schema the event store's tables live in |
-| `Nightingale:Store:Collation` | none, the server's default | the collation the database is created with; a binary one such as `Latin1_General_100_BIN2` makes stream names case-sensitive |
+| `Nightingale:Store:Collation` | `Latin1_General_100_BIN2_UTF8` | the collation the database is created with, and the one a database provisioned by hand must have. It must be a UTF-8 collation: any other is refused, because names in another script would collide. The default is binary, so names that differ in case are different names; a case-insensitive UTF-8 collation makes them one |
+| `Nightingale:Store:IgnoreCollationCompatibility` | `false` | work with a collation that is not UTF-8, for a database that already has one or a server older than SQL Server 2019. The host's own choice and consequence: a character of a name outside the collation's code page is stored as a question mark, so two such names can become one. Not recorded with the store; the server logs a warning at every start |
 | `Nightingale:Store:Partitioning` | `None` | `Tenant` partitions the events table by tenant, each with its own sequence, and the wildcard tenant is then refused; `ArchivedStream` partitions it by the archived flag, so deleted streams' events sit apart; one mode, because a table has one partition scheme |
 
 The settings under `Nightingale:Store` are fixed when the store is

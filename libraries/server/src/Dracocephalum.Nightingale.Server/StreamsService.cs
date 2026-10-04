@@ -174,6 +174,14 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         {
             throw NightingaleErrors.StreamDeleted(deleted.Stream);
         }
+        catch (ValueTooLongException tooLong) when (tooLong.What == ValueTooLongException.StreamName)
+        {
+            throw NightingaleErrors.InvalidStreamName(stream, "it is longer than the store holds");
+        }
+        catch (ValueTooLongException tooLong)
+        {
+            throw NightingaleErrors.InvalidArgument(tooLong.Message);
+        }
     }
 
     /// <inheritdoc/>

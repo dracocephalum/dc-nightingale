@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
 {
     [DbContext(typeof(NightingaleDbContext))]
-    [Migration("20261004052827_Initial")]
+    [Migration("20261004060731_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -39,20 +39,17 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(100)");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Owner")
                         .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(64)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(64)");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("OwnerAddress")
                         .HasMaxLength(500)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(500)");
+                        .HasColumnType("nvarchar(500)");
 
                     b.HasKey("Id");
 
@@ -71,8 +68,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(100)");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<long>("Position")
                         .HasColumnType("bigint");
@@ -94,8 +90,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(200)");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("Value")
                         .HasMaxLength(1000)

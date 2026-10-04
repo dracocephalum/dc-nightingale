@@ -42,10 +42,18 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         {
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception)
         {
-            // Created by someone else between the check and the write: the group exists.
-            throw new GroupExistsException(group.Stream, group.Group);
+            // Created by someone else between the check and the write: the group exists. Anything
+            // else the database refused is not that, and the usual cause is a name longer than
+            // its column, which the database measures and the store does not second-guess.
+            await using var check = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            if (await check.Groups.AnyAsync(row => row.TenantId == tenantId && row.Stream == group.Stream && row.Name == group.Group, cancellationToken).ConfigureAwait(false))
+            {
+                throw new GroupExistsException(group.Stream, group.Group);
+            }
+
+            throw new ValueTooLongException("stream or group name", exception);
         }
     }
 

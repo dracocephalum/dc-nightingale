@@ -48,6 +48,29 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         }
     }
 
+    [Theory]
+    [InlineData("stream name", "INVALID_STREAM_NAME")]
+    [InlineData("event type", "INVALID_ARGUMENT")]
+    public async Task Append_WhenTheStoreSaysAValueIsTooLong_ShouldFailAsTheCallersMistake(string what, string reason)
+    {
+        // Arrange: the store is what measures a name; the service only translates its answer.
+        A.CallTo(() => _store.AppendAsync(A<string>._, A<StreamState>._, A<IReadOnlyList<EventData>>._, A<CancellationToken>._))
+            .Throws(new ValueTooLongException(what));
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Append(cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = "orders-1", ExpectedRevision = -2 } }, TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new AppendRequest { Event = new ProposedEvent { Id = Guid.NewGuid().ToString("D"), EventType = "order_placed", Data = Google.Protobuf.ByteString.CopyFromUtf8("{}") } }, TestContext.Current.CancellationToken);
+        await call.RequestStream.CompleteAsync();
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await call.ResponseAsync);
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Reason.ShouldBe(reason);
+        exception.Status.Detail.ShouldContain("longer than the store holds");
+    }
+
     [Fact]
     public async Task Append_WhenStoreAccepts_ShouldPassEventsThroughAndReturnLastRevisionAndPosition()
     {
@@ -131,8 +154,13 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         // Act
         using var call = client.Append(cancellationToken: TestContext.Current.CancellationToken);
         await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = "$all", ExpectedRevision = -2 } }, TestContext.Current.CancellationToken);
-        await call.RequestStream.CompleteAsync();
-        var exception = await Should.ThrowAsync<RpcException>(async () => await call.ResponseAsync);
+
+        // The server refuses on the first message, so completing the request can be what fails.
+        var exception = await Should.ThrowAsync<RpcException>(async () =>
+        {
+            await call.RequestStream.CompleteAsync();
+            await call.ResponseAsync;
+        });
 
         // Assert
         exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");

@@ -139,8 +139,9 @@ and a host of its own calls `GetNightingaleSchemaReportAsync` and
 
 The settings under `Nightingale:Store` are the ones fixed at initialization
 because each shapes the store's tables or where they live: the schema they
-are in, `dbo` unless said otherwise; the collation, which decides whether
-stream names are case-sensitive; the partitioning mode, one of none, by
+are in, `dbo` unless said otherwise; the collation, which must be a UTF-8 one so
+that a name holds any character, and which decides whether names that differ
+in case are the same name, binary and so case-sensitive unless said otherwise; the partitioning mode, one of none, by
 tenant, which gives each tenant its own sequence, or by the archived flag,
 which keeps deleted streams' events out of every live read, one mode rather
 than one switch per scheme because a table has one partition scheme; and

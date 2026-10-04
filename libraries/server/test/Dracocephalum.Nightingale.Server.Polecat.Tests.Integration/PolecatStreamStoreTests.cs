@@ -15,6 +15,30 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
 {
+    [Fact]
+    public async Task Append_WhenANameIsLongerThanTheStoreHolds_ShouldSayWhichAndStoreNothing()
+    {
+        // Arrange: the store's columns hold so many bytes of UTF-8, and the database measures.
+        var sut = database.Store;
+        var fits = "fits-" + Guid.NewGuid().ToString("N") + "-" + new string('订', 60);
+        var tooLong = "long-" + Guid.NewGuid().ToString("N") + "-" + new string('a', 250);
+        var tooManyBytes = "wide-" + Guid.NewGuid().ToString("N") + "-" + new string('订', 90);
+
+        // Act
+        var stored = await sut.AppendAsync(fits, StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", "{}"u8.ToArray(), [])], TestContext.Current.CancellationToken);
+        var stream = await Should.ThrowAsync<ValueTooLongException>(() => sut.AppendAsync(tooLong, StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", "{}"u8.ToArray(), [])], TestContext.Current.CancellationToken));
+        var bytes = await Should.ThrowAsync<ValueTooLongException>(() => sut.AppendAsync(tooManyBytes, StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", "{}"u8.ToArray(), [])], TestContext.Current.CancellationToken));
+        var type = await Should.ThrowAsync<ValueTooLongException>(() => sut.AppendAsync("typed-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [new EventData(Guid.NewGuid(), new string('t', 600), "{}"u8.ToArray(), [])], TestContext.Current.CancellationToken));
+
+        // Assert: a name of 60 characters in another script is 180 bytes and fits; 90 are 270 and
+        // do not, though that is fewer characters than the 250 the column is declared with.
+        stored.Revision.ShouldBe(0);
+        stream.What.ShouldBe(ValueTooLongException.StreamName);
+        bytes.What.ShouldBe(ValueTooLongException.StreamName);
+        type.What.ShouldBe("event type");
+        (await sut.ReadAsync(tooLong, Direction.Forwards, null, 1, TestContext.Current.CancellationToken)).ShouldBeNull();
+    }
+
     private static readonly byte[] PlacedBody = Encoding.UTF8.GetBytes("{\"orderId\":1,\"total\":42.5}");
     private static readonly byte[] PaidBody = Encoding.UTF8.GetBytes("{\"orderId\":1}");
 

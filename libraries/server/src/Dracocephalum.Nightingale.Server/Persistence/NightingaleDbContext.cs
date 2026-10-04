@@ -47,10 +47,10 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         modelBuilder.HasDefaultSchema(schema.Name);
 
         // Names are compared by the database's own rule for which names are the same; nothing
-        // here folds case. A tenant and a stream are not Unicode because the event store's
-        // columns for them are not, and a value that could not be stored there has no business
-        // here; a group's name is the gateway's own and is Unicode, so two names in another
-        // script are two groups whatever the database's code page. A column that
+        // here folds case. Every text column is Unicode but two: a tenant and a stream are typed
+        // as the event store types its own columns for them, so the same value fits both and
+        // compares without conversion. Under the collation the server requires those hold any
+        // character too, so no name loses one anywhere. A column that
         // refers to a row of another of these tables is named for that table and is a foreign key
         // to it, never cascading: a group's rows are deleted with it, by the code that deletes it.
         modelBuilder.Entity<SubscriptionGroup>(group =>
@@ -85,9 +85,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         {
             lease.ToTable(nameof(Lease));
             lease.HasKey(row => row.Id);
-            lease.Property(row => row.Name).HasMaxLength(100).IsUnicode(false);
-            lease.Property(row => row.Owner).HasMaxLength(64).IsUnicode(false).IsConcurrencyToken();
-            lease.Property(row => row.OwnerAddress).HasMaxLength(500).IsUnicode(false);
+            lease.Property(row => row.Name).HasMaxLength(100);
+            lease.Property(row => row.Owner).HasMaxLength(64).IsConcurrencyToken();
+            lease.Property(row => row.OwnerAddress).HasMaxLength(500);
             lease.Property(row => row.ExpiresAt).IsConcurrencyToken();
             lease.HasIndex(row => row.Name).IsUnique();
         });
@@ -96,7 +96,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         {
             progress.ToTable(nameof(SequencerProgress));
             progress.HasKey(row => row.Id);
-            progress.Property(row => row.Name).HasMaxLength(100).IsUnicode(false);
+            progress.Property(row => row.Name).HasMaxLength(100);
             progress.HasIndex(row => row.Name).IsUnique();
         });
 
@@ -104,7 +104,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
         {
             setting.ToTable(nameof(Setting));
             setting.HasKey(row => row.Id);
-            setting.Property(row => row.Name).HasMaxLength(200).IsUnicode(false);
+            setting.Property(row => row.Name).HasMaxLength(200);
             setting.Property(row => row.Value).HasMaxLength(1000);
             setting.HasIndex(row => row.Name).IsUnique();
         });
