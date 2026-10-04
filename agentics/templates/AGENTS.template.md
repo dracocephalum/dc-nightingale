@@ -52,6 +52,7 @@ exist.
 | `libraries/` | packages published to NuGet |
 | `jobs/` | scheduled executables (Kubernetes CronJobs and similar) |
 | `tools/` | internal tooling, never shipped to production |
+| `examples/` | runnable samples of this repository's own libraries, never shipped |
 | `infrastructure/` | provisioning (Terraform and similar) |
 | `ui/` | front-end applications |
 | `agentics/` | what agents follow — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/` |
@@ -89,6 +90,7 @@ makes it selectable from a plain-language request.
 | Starting work on a ticket, naming a branch, publishing the repository, committing, or opening / updating / merging a pull request | [`agentics/rules/source-control/source-control.md`](agentics/rules/source-control/source-control.md), then the host file it names |
 | Reviewing a pull request, a diff, or a set of changes | [`agentics/rules/coding/code-review.md`](agentics/rules/coding/code-review.md) — then the C# or markdown checklist it names |
 | Scrubbing, sweeping or auditing this repository for drift or inconsistency — or after any move, rename or restructure | [`agentics/rules/scrub.md`](agentics/rules/scrub.md) |
+| Measuring what this repository's documents cost an agent to read, or compacting them | [`agentics/rules/optimize.md`](agentics/rules/optimize.md) — measures unless asked for more |
 | Bringing this repository up to a newer version of the toolkit it was initialized with | the toolkit's own `repo/upgrade.md` — it diffs two commits of dc-agentics, so a checkout of it must be present; `.agentics.yaml` records which commit this repository came from |
 | Finding what exists — which component does what, where something lives | `README.md` here; in a monorepo, each category's `README.md` is the map of its components, and each component's `README.md` says how to run it |
 | Understanding how the pieces fit, or why the code is shaped the way it is | `DESIGN.md` at the root — the seams and the reasons; type comments say what, it says why. Written the day a reader could not infer it; see *Root documents* in [`agentics/rules/layout.md`](agentics/rules/layout.md) |
@@ -100,12 +102,13 @@ makes it selectable from a plain-language request.
 The documents above are the substance, for every tool. In Claude Code some
 are also invocable through a shim in `.claude/skills/` -
 `/new [project|component] <name>`, `/review [PR# | branch | paths | comments PR#]`,
-`/change-tracking new|find`, `/scrub [paths...]`, `/upgrade`,
+`/change-tracking new|find`, `/scrub [paths...]`, `/optimize`, `/upgrade`,
 `/source-control start|commit|pr|setup`, or just ask in plain language - each
 following the same document. `/review` is the rules pass; the built-in
 `/code-review` is the bug-hunting pass, and the two complement each other.
 `/scrub` is neither: it looks for drift and inconsistency, and reports rather
-than fixing.
+than fixing. `/optimize` is about what the documents cost to read, and only
+measures unless asked for more.
 
 Add a row whenever a rules document is added under `agentics/rules/`. A document
 nobody is pointed at will not be read.
@@ -150,9 +153,11 @@ it cheaper, so it is a repair and a pre-commit step rather than a prefix to
 every build.
 
 **Keep build output out of context.** Build with `--nologo -v:q` and grep for
-`error|warning`. Test output is already terse — the platform's `dotnet test`
-rejects `--nologo` — so grep it for `total:|failed:|error` and report those
-lines, never a full log.
+`error|warning`. Test output is already terse, so grep it for
+`total:|failed:|error` and report those lines, never a full log. **Never pass
+`--nologo` to `dotnet test`**: the platform's test host rejects it, and not
+with a message about the flag — it reports `Zero tests ran` and exit code 5,
+which reads as a flake and is not one.
 
 **Warnings are errors.** StyleCop rules set to `Warning` fail the build; rules
 at `Info` never surface at build time and appear only in the editor.
