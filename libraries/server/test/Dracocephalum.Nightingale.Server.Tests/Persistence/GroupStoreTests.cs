@@ -15,6 +15,7 @@ namespace Dracocephalum.Nightingale.Server.Tests.Persistence;
 public sealed class GroupStoreTests
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 22, 8, 0, 0, TimeSpan.Zero);
+    private static readonly Guid Billing = Guid.Parse("0198f3a2-0000-7000-8000-000000000001");
 
     private readonly FakeTimeProvider _time = new(Now);
     private readonly InMemoryContexts _contexts = new();
@@ -27,12 +28,12 @@ public sealed class GroupStoreTests
         var settings = GroupSettings.Default with { Start = StreamPosition.From(3), MaxRetryCount = 4, MessageTimeout = TimeSpan.FromSeconds(7), Numbering = Numbering.Ordinal };
 
         // Act
-        await sut.CreateAsync(new GroupDefinition("orders-1", "billing", settings, -1), TestContext.Current.CancellationToken);
-        await Should.ThrowAsync<GroupExistsException>(() => sut.CreateAsync(new GroupDefinition("orders-1", "billing", settings, -1), TestContext.Current.CancellationToken));
-        await sut.SaveCheckpointAsync("orders-1", "billing", 41, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage("orders-1", "billing", 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage("orders-1", "billing", 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ReplayAsync("orders-1", "billing", 42, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new GroupDefinition("orders-1", "billing", settings, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<GroupExistsException>(() => sut.CreateAsync(new GroupDefinition("orders-1", "billing", settings, -1) { Id = Billing }, TestContext.Current.CancellationToken));
+        await sut.SaveCheckpointAsync(Billing, 41, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(Billing, 42, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         var read = await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken);
         var deleted = await sut.DeleteAsync("orders-1", "billing", TestContext.Current.CancellationToken);
         var again = await sut.DeleteAsync("orders-1", "billing", TestContext.Current.CancellationToken);
@@ -43,8 +44,8 @@ public sealed class GroupStoreTests
         deleted.ShouldBeTrue();
         again.ShouldBeFalse();
         (await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken)).ShouldBeNull();
-        (await sut.DueAsync("orders-1", "billing", Now, TestContext.Current.CancellationToken)).ShouldBeEmpty();
-        (await sut.ReplayAsync("orders-1", "billing", null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken)).ShouldBe(0);
+        (await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+        (await sut.ReplayAsync(Billing, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
     [Fact]
@@ -52,12 +53,12 @@ public sealed class GroupStoreTests
     {
         // Arrange
         var sut = Store();
-        await sut.CreateAsync(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
 
         // Act
         await sut.CreateAsync(new GroupDefinition("orders-2", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
         await sut.CreateAsync(new GroupDefinition("orders-1", "shipping", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
-        await sut.SaveCheckpointAsync("orders-1", "billing", 5, TestContext.Current.CancellationToken);
+        await sut.SaveCheckpointAsync(Billing, 5, TestContext.Current.CancellationToken);
 
         // Assert
         (await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken))!.Checkpoint.ShouldBe(5);
@@ -70,20 +71,20 @@ public sealed class GroupStoreTests
     {
         // Arrange
         var sut = Store();
-        await sut.CreateAsync(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage("orders-1", "billing", 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage("orders-1", "billing", 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), TestContext.Current.CancellationToken);
 
         // Act
-        var before = await sut.DueAsync("orders-1", "billing", Now, TestContext.Current.CancellationToken);
-        var one = await sut.ReplayAsync("orders-1", "billing", 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var missing = await sut.ReplayAsync("orders-1", "billing", 99, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var sameAgain = await sut.ReplayAsync("orders-1", "billing", 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var afterOne = await sut.DueAsync("orders-1", "billing", Now, TestContext.Current.CancellationToken);
-        var rest = await sut.ReplayAsync("orders-1", "billing", null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var afterAll = await sut.DueAsync("orders-1", "billing", Now, TestContext.Current.CancellationToken);
-        await sut.DequeueAsync("orders-1", "billing", 10, TestContext.Current.CancellationToken);
-        var afterDequeue = await sut.DueAsync("orders-1", "billing", Now, TestContext.Current.CancellationToken);
+        var before = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
+        var one = await sut.ReplayAsync(Billing, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var missing = await sut.ReplayAsync(Billing, 99, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var sameAgain = await sut.ReplayAsync(Billing, 12, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterOne = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
+        var rest = await sut.ReplayAsync(Billing, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var afterAll = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
+        await sut.DequeueAsync(Billing, 10, TestContext.Current.CancellationToken);
+        var afterDequeue = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
 
         // Assert
         before.ShouldBeEmpty();
@@ -105,12 +106,12 @@ public sealed class GroupStoreTests
     {
         // Arrange: a message put on the outbox for later.
         var sut = Store();
-        await sut.ParkAsync(new ParkedMessage("orders-1", "billing", 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
-        await sut.ReplayAsync("orders-1", "billing", null, ParkedNumber.Position, Now.AddMinutes(5), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(Billing, null, ParkedNumber.Position, Now.AddMinutes(5), TestContext.Current.CancellationToken);
 
         // Act
-        var now = await sut.DueAsync("orders-1", "billing", Now, TestContext.Current.CancellationToken);
-        var later = await sut.DueAsync("orders-1", "billing", Now.AddMinutes(5), TestContext.Current.CancellationToken);
+        var now = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
+        var later = await sut.DueAsync(Billing, Now.AddMinutes(5), TestContext.Current.CancellationToken);
 
         // Assert
         now.ShouldBeEmpty();
@@ -122,15 +123,15 @@ public sealed class GroupStoreTests
     {
         // Arrange: one event at position 40, revision 2 in its stream, ordinal 7 in its category.
         var sut = Store();
-        await sut.ParkAsync(new ParkedMessage("$ce-orders", "billing", 40, 2, 7, Guid.NewGuid(), "poison", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 40, 2, 7, Guid.NewGuid(), "poison", 1, Now), TestContext.Current.CancellationToken);
 
         // Act
-        var byWrongNumber = await sut.ReplayAsync("$ce-orders", "billing", 40, ParkedNumber.Ordinal, Now, TestContext.Current.CancellationToken);
-        var byOrdinal = await sut.ReplayAsync("$ce-orders", "billing", 7, ParkedNumber.Ordinal, Now, TestContext.Current.CancellationToken);
-        var due = await sut.DueAsync("$ce-orders", "billing", Now, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new ParkedMessage("$ce-orders", "billing", 40, 2, 7, Guid.NewGuid(), "poison again", 2, Now), TestContext.Current.CancellationToken);
-        var backOnParked = await sut.DueAsync("$ce-orders", "billing", Now, TestContext.Current.CancellationToken);
-        var byRevision = await sut.ReplayAsync("$ce-orders", "billing", 2, ParkedNumber.Revision, Now, TestContext.Current.CancellationToken);
+        var byWrongNumber = await sut.ReplayAsync(Billing, 40, ParkedNumber.Ordinal, Now, TestContext.Current.CancellationToken);
+        var byOrdinal = await sut.ReplayAsync(Billing, 7, ParkedNumber.Ordinal, Now, TestContext.Current.CancellationToken);
+        var due = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 40, 2, 7, Guid.NewGuid(), "poison again", 2, Now), TestContext.Current.CancellationToken);
+        var backOnParked = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
+        var byRevision = await sut.ReplayAsync(Billing, 2, ParkedNumber.Revision, Now, TestContext.Current.CancellationToken);
 
         // Assert
         byWrongNumber.ShouldBe(0);
@@ -149,12 +150,12 @@ public sealed class GroupStoreTests
         // Arrange: a replayed message that fails again is parked under the same key.
         var sut = Store();
         var id = Guid.NewGuid();
-        await sut.ParkAsync(new ParkedMessage("orders-1", "billing", 10, 10, null, id, "first", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 10, 10, null, id, "first", 1, Now), TestContext.Current.CancellationToken);
 
         // Act
-        await sut.ParkAsync(new ParkedMessage("orders-1", "billing", 10, 10, null, id, "second", 3, Now.AddMinutes(1)), TestContext.Current.CancellationToken);
-        await sut.ReplayAsync("orders-1", "billing", null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        var due = await sut.DueAsync("orders-1", "billing", Now, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new ParkedMessage(Billing, 10, 10, null, id, "second", 3, Now.AddMinutes(1)), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(Billing, null, ParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        var due = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
 
         // Assert
         var message = due.ShouldHaveSingleItem();

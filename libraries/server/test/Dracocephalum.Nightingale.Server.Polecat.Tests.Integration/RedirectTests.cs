@@ -90,7 +90,7 @@ public sealed class RedirectTests : IAsyncLifetime
         address.ShouldBe(firstAddress);
         replayed.ShouldBe(1);
         again.Event.Id.ShouldBe(placed.Id);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT owner_address FROM dbo.nightingale_leases WHERE name = 'group:orders-1:billing'")).ShouldBe(firstAddress.ToString());
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT owner_address FROM dbo.nightingale_leases WHERE name LIKE 'group:%'")).ShouldBe(firstAddress.ToString());
         _ = first;
     }
 

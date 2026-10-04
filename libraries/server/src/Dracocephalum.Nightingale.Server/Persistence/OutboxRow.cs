@@ -8,14 +8,8 @@ namespace Dracocephalum.Nightingale.Server.Persistence;
 /// </summary>
 public sealed class OutboxRow
 {
-    /// <summary>Gets or sets the tenant.</summary>
-    public required string TenantId { get; set; }
-
-    /// <summary>Gets or sets the stream.</summary>
-    public required string Stream { get; set; }
-
-    /// <summary>Gets or sets the group name.</summary>
-    public required string GroupName { get; set; }
+    /// <summary>Gets or sets the id of the group the message belongs to.</summary>
+    public Guid GroupId { get; set; }
 
     /// <summary>Gets or sets the event's global position.</summary>
     public long Position { get; set; }

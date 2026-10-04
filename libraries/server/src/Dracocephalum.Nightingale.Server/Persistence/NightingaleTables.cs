@@ -14,6 +14,9 @@ public sealed record NightingaleTables(string Schema)
     /// <summary>The groups table.</summary>
     public const string GroupsTable = "nightingale_groups";
 
+    /// <summary>The unique index that makes a group's names its own: tenant, stream and group name.</summary>
+    public const string GroupsNameIndex = "ux_nightingale_groups_name";
+
     /// <summary>The parked messages table.</summary>
     public const string ParkedTable = "nightingale_parked";
 

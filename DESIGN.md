@@ -260,9 +260,13 @@ is what the filtered indexes were declared for.
 The context deviates on purpose from the toolkit's EF rules for a context
 that owns its tables. It owns nothing: the backend's schema feature creates
 the tables, so one initializer applies one schema under the marker protocol
-and the context never migrates; the keys are the natural ones the contract
-addresses a group by, tenant, stream and group; the names follow the store's
-convention and the tables sit in the store's schema. A unit test builds the
+and the context never migrates; the names follow the store's convention and
+the tables sit in the store's schema. A group's key is an id made with the
+group, and its tenant, stream and group name sit under a unique index: the
+names find a group, by whatever rule the database's collation has for which
+names are the same, and the id is the group. Its parked messages, its outbox
+and its lease go by the id, so nothing downstream of the lookup depends on
+how a name is spelt or compared. A unit test builds the
 model with the provider's type mappings and holds it equal to the schema
 feature's definition, column for column, so the two cannot drift apart.
 

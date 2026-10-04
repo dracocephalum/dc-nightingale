@@ -18,25 +18,22 @@ public sealed class GroupRegistry
     public string InstanceId { get; } = Guid.NewGuid().ToString("N");
 
     /// <summary>The lease name of a group.</summary>
-    /// <param name="stream">The stream.</param>
-    /// <param name="group">The group.</param>
+    /// <param name="groupId">The group's id.</param>
     /// <returns>The name.</returns>
-    public static string LeaseName(string stream, string group) => "group:" + stream + ":" + group;
+    public static string LeaseName(Guid groupId) => "group:" + groupId.ToString("N");
 
     /// <summary>Claims a group for a consumer in this instance.</summary>
-    /// <param name="stream">The stream.</param>
-    /// <param name="group">The group.</param>
+    /// <param name="groupId">The group's id.</param>
     /// <returns>True when no consumer holds it here; false when one does.</returns>
-    public bool TryClaim(string stream, string group) => _live.TryAdd(LeaseName(stream, group), null);
+    public bool TryClaim(Guid groupId) => _live.TryAdd(LeaseName(groupId), null);
 
     /// <summary>Attaches the wake-up of a running group, once it runs.</summary>
-    /// <param name="stream">The stream.</param>
-    /// <param name="group">The group.</param>
+    /// <param name="groupId">The group's id.</param>
     /// <param name="wake">What to call so the group looks at its outbox.</param>
-    public void Attach(string stream, string group, Action wake)
+    public void Attach(Guid groupId, Action wake)
     {
         ArgumentNullException.ThrowIfNull(wake);
-        var name = LeaseName(stream, group);
+        var name = LeaseName(groupId);
         if (_live.ContainsKey(name))
         {
             _live[name] = wake;
@@ -44,12 +41,11 @@ public sealed class GroupRegistry
     }
 
     /// <summary>Wakes a group running here, so it looks at its outbox.</summary>
-    /// <param name="stream">The stream.</param>
-    /// <param name="group">The group.</param>
+    /// <param name="groupId">The group's id.</param>
     /// <returns>True when a running group was woken; false when none runs here.</returns>
-    public bool Wake(string stream, string group)
+    public bool Wake(Guid groupId)
     {
-        if (!_live.TryGetValue(LeaseName(stream, group), out var wake) || wake is null)
+        if (!_live.TryGetValue(LeaseName(groupId), out var wake) || wake is null)
         {
             return false;
         }
@@ -59,7 +55,6 @@ public sealed class GroupRegistry
     }
 
     /// <summary>Releases a group a consumer held here.</summary>
-    /// <param name="stream">The stream.</param>
-    /// <param name="group">The group.</param>
-    public void Release(string stream, string group) => _live.TryRemove(LeaseName(stream, group), out _);
+    /// <param name="groupId">The group's id.</param>
+    public void Release(Guid groupId) => _live.TryRemove(LeaseName(groupId), out _);
 }
