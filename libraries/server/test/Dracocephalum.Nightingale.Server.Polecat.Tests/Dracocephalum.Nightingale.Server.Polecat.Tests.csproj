@@ -13,4 +13,9 @@
     <ProjectReference Include="../../src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The approved copy of the event store's schema, read from the output folder by the test that compares it. -->
+    <None Include="Approved/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

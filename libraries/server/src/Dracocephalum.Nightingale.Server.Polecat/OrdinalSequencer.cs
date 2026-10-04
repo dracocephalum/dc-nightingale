@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using Dracocephalum.Nightingale.Server.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,7 +22,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="tail">The head the sequencer never passes.</param>
 /// <param name="registry">The instance id the lease is taken under.</param>
 /// <param name="connectionString">The connection string the store uses.</param>
-/// <param name="schemaName">The schema the tables live in.</param>
+/// <param name="schemaName">The schema the event store's tables live in.</param>
+/// <param name="progressSchemaName">The schema the gateway's own tables live in, the progress row among them.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 internal sealed partial class OrdinalSequencer(
@@ -30,6 +32,7 @@ internal sealed partial class OrdinalSequencer(
     GroupRegistry registry,
     string connectionString,
     string schemaName,
+    string progressSchemaName,
     TimeProvider timeProvider,
     ILogger<OrdinalSequencer> logger) : IHostedService, IDisposable
 {
@@ -88,7 +91,7 @@ internal sealed partial class OrdinalSequencer(
             progress.Transaction = transaction;
             progress.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
-                "SELECT numbered_through FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE id = 1",
+                "SELECT [Position] FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE [Name] = '" + SequencerProgress.Ordinals + "'",
                 OrdinalsTable);
             var value = await progress.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (value is long known)
@@ -100,7 +103,7 @@ internal sealed partial class OrdinalSequencer(
                 from = 0;
                 await using var insert = connection.CreateCommand();
                 insert.Transaction = transaction;
-                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} (id, numbered_through) VALUES (1, 0)", OrdinalsTable);
+                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} ([Id], [Name], [Position]) VALUES (NEWID(), '" + SequencerProgress.Ordinals + "', 0)", OrdinalsTable);
                 await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
         }
@@ -139,7 +142,7 @@ internal sealed partial class OrdinalSequencer(
                 + " JOIN batch b ON b.seq_id = e.seq_id"
                 + " JOIN categories c ON c.tenant_id = b.tenant_id AND c.category = b.category"
                 + " JOIN types t ON t.tenant_id = b.tenant_id AND t.[type] = b.[type];"
-                + " UPDATE {1} SET numbered_through = @to WHERE id = 1",
+                + " UPDATE {1} SET [Position] = @to WHERE [Name] = '" + SequencerProgress.Ordinals + "'",
                 EventsTable,
                 OrdinalsTable);
             number.Parameters.AddWithValue("@from", from);
@@ -158,7 +161,7 @@ internal sealed partial class OrdinalSequencer(
 
     private string EventsTable => Schema + ".[pc_events]";
 
-    private string OrdinalsTable => Schema + ".[" + NightingaleTablesFeature.OrdinalsTable + "]";
+    private string OrdinalsTable => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + nameof(SequencerProgress) + "]";
 
     private async Task RunAsync(CancellationToken stopping)
     {

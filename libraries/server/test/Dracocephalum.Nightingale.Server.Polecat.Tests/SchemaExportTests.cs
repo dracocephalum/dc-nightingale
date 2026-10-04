@@ -44,15 +44,14 @@ public sealed class SchemaExportTests
     {
         // Arrange: the store is registered as a host registers it, against a server nobody connects to.
         var services = new ServiceCollection();
-        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream);
+        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.Partitioning = PartitioningMode.ArchivedStream);
         using var provider = services.BuildServiceProvider();
-        var store = provider.GetRequiredService<IDocumentStore>();
         var path = Path.Combine(Path.GetTempPath(), "nightingale-schema-" + Guid.NewGuid().ToString("N") + ".sql");
 
         try
         {
             // Act
-            await SchemaExport.ExportAsync(store, path, TestContext.Current.CancellationToken);
+            await SchemaExport.ExportAsync(provider, path, TestContext.Current.CancellationToken);
 
             // Assert
             var script = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
@@ -61,7 +60,9 @@ public sealed class SchemaExportTests
                 text => text.ShouldContain("category"),
                 text => text.ShouldContain("ix_pc_events_category_seq"),
                 text => text.ShouldContain("ix_pc_events_type_seq"),
-                text => text.ShouldContain("nightingale_store"),
+                text => text.ShouldContain("CREATE TABLE [nightingale].[Setting]"),
+                text => text.ShouldContain("CREATE TABLE [nightingale].[SubscriptionGroup]"),
+                text => text.ShouldContain("__EFMigrationsHistory"),
                 text => text.ShouldContain("PARTITION"),
                 text => text.ShouldNotContain("category_ordinal"));
         }
@@ -78,13 +79,12 @@ public sealed class SchemaExportTests
         var services = new ServiceCollection();
         services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.AssignOrdinals = true);
         using var provider = services.BuildServiceProvider();
-        var store = provider.GetRequiredService<IDocumentStore>();
         var path = Path.Combine(Path.GetTempPath(), "nightingale-schema-" + Guid.NewGuid().ToString("N") + ".sql");
 
         try
         {
             // Act
-            await SchemaExport.ExportAsync(store, path, TestContext.Current.CancellationToken);
+            await SchemaExport.ExportAsync(provider, path, TestContext.Current.CancellationToken);
 
             // Assert
             var script = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
@@ -93,7 +93,7 @@ public sealed class SchemaExportTests
                 text => text.ShouldContain("type_ordinal"),
                 text => text.ShouldContain("ix_pc_events_category_ordinal"),
                 text => text.ShouldContain("ix_pc_events_type_ordinal"),
-                text => text.ShouldContain("nightingale_ordinals"));
+                text => text.ShouldContain("CREATE TABLE [nightingale].[SequencerProgress]"));
         }
         finally
         {

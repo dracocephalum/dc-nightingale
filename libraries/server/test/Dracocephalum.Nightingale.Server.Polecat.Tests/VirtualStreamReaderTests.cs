@@ -2,6 +2,7 @@ using System.Text;
 
 using Dracocephalum.Nightingale.Server.Polecat.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
@@ -19,17 +20,19 @@ public sealed class VirtualStreamReaderTests
     private static readonly VirtualStreamName Orders = new(VirtualStreamKind.Category, "orders");
     private static readonly VirtualStreamName Placed = new(VirtualStreamKind.EventType, "order_placed");
 
-    private readonly DbContextOptions<EventsDbContext> _options = new DbContextOptionsBuilder<EventsDbContext>()
-        .UseInMemoryDatabase("events-" + Guid.NewGuid().ToString("N"))
-        .Options;
+    private static readonly EventStoreSchema Schema = new("dbo");
+
+    private readonly InMemoryDatabaseRoot _root = new();
+    private readonly DbContextOptions<EventsDbContext> _options;
 
     private readonly VirtualStreamReader _sut;
 
     public VirtualStreamReaderTests()
     {
-        _sut = new VirtualStreamReader(_options, "dbo", Tenant);
-        using var context = new EventsDbContext(_options, "dbo");
-        context.Events.AddRange(
+        _options = new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("events", _root).Options;
+        _sut = new VirtualStreamReader(() => new EventsDbContext(_options, Schema), Tenant);
+        using var context = new Seeding(_root);
+        context.Set<EventRow>().AddRange(
             Row(1, "orders-1", 1, "order_placed", categoryOrdinal: 0, typeOrdinal: 0),
             Row(2, "shipments-1", 1, "shipment_sent"),
             Row(3, "orders-1", 2, "order_paid", categoryOrdinal: 1),
@@ -38,7 +41,7 @@ public sealed class VirtualStreamReaderTests
             Row(6, "orders-4", 1, "order_placed", categoryOrdinal: 3, typeOrdinal: 2),
             Row(7, "orders-4", 2, "order_paid", categoryOrdinal: 4),
             Row(8, "orders-4", 3, "order_shipped"));
-        context.Progression.Add(new ProgressionRow { Name = EventsDbContext.HighWaterMark, LastSeqId = 6 });
+        context.Set<ProgressionRow>().Add(new ProgressionRow { Name = EventsDbContext.HighWaterMark, LastSeqId = 6 });
         context.SaveChanges();
     }
 
@@ -161,19 +164,33 @@ public sealed class VirtualStreamReaderTests
     public async Task ReadBelowMarkAsync_WhenTheMarkWasNeverWritten_ShouldAnswerNothing()
     {
         // Arrange
-        var options = new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("events-" + Guid.NewGuid().ToString("N")).Options;
-        await using (var context = new EventsDbContext(options, "dbo"))
+        var root = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("events", root).Options;
+        await using (var context = new Seeding(root))
         {
-            context.Events.Add(Row(1, "orders-1", 1, "order_placed"));
+            context.Set<EventRow>().Add(Row(1, "orders-1", 1, "order_placed"));
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         // Act
-        var (mark, events) = await new VirtualStreamReader(options, "dbo", Tenant).ReadBelowMarkAsync(Orders, Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+        var (mark, events) = await new VirtualStreamReader(() => new EventsDbContext(options, Schema), Tenant).ReadBelowMarkAsync(Orders, Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
 
         // Assert
         mark.ShouldBe(0);
         events.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Writes the rows the mirror reads. The mirror itself refuses to save, so the table is
+    /// filled through a context of the test's own over the same in-memory database root.
+    /// </summary>
+    private sealed class Seeding(InMemoryDatabaseRoot root) : DbContext(new DbContextOptionsBuilder<Seeding>().UseInMemoryDatabase("events", root).Options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<EventRow>().HasKey(row => row.SeqId);
+            modelBuilder.Entity<ProgressionRow>().HasKey(row => row.Name);
+        }
     }
 
     private static EventRow Row(long position, string stream, long version, string type, string tenant = Tenant, bool archived = false, long? categoryOrdinal = null, long? typeOrdinal = null) =>

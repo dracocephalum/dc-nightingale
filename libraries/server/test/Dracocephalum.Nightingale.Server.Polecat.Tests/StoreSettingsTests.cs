@@ -8,7 +8,7 @@ public sealed class StoreSettingsTests
     public void Validate_WhenPartitioningIsNotAKnownMode_ShouldRefuse()
     {
         // Arrange: a value the binder cannot have produced from a name, but a cast can.
-        var sut = new NightingaleOptions.StoreSettings { Partitioning = (NightingaleOptions.StoreSettings.PartitioningMode)7 };
+        var sut = new NightingaleOptions.StoreOptions { Partitioning = (PartitioningMode)7 };
 
         // Act
         var exception = Should.Throw<InvalidOperationException>(sut.Validate);
@@ -21,7 +21,7 @@ public sealed class StoreSettingsTests
     public void Validate_WhenOrdinalsMeetTenantPartitioning_ShouldRefuse()
     {
         // Arrange: ordinals number one global sequence; a sequence per tenant has none.
-        var sut = new NightingaleOptions.StoreSettings { AssignOrdinals = true, Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant };
+        var sut = new NightingaleOptions.StoreOptions { AssignOrdinals = true, Partitioning = PartitioningMode.Tenant };
 
         // Act
         var exception = Should.Throw<InvalidOperationException>(sut.Validate);
@@ -37,7 +37,7 @@ public sealed class StoreSettingsTests
     public void Validate_WhenSchemaIsNotAName_ShouldRefuse(string schema)
     {
         // Arrange
-        var sut = new NightingaleOptions.StoreSettings { Schema = schema };
+        var sut = new NightingaleOptions.StoreOptions { Schema = schema };
 
         // Act
         var exception = Should.Throw<InvalidOperationException>(sut.Validate);
@@ -53,7 +53,7 @@ public sealed class StoreSettingsTests
     public void Validate_WhenSchemaIsAName_ShouldAccept(string schema)
     {
         // Arrange
-        var sut = new NightingaleOptions.StoreSettings { Schema = schema };
+        var sut = new NightingaleOptions.StoreOptions { Schema = schema };
 
         // Act & Assert
         Should.NotThrow(sut.Validate);
@@ -66,7 +66,7 @@ public sealed class StoreSettingsTests
     public void Validate_WhenCollationIsAName_ShouldAccept(string? collation)
     {
         // Arrange
-        var sut = new NightingaleOptions.StoreSettings { Collation = collation };
+        var sut = new NightingaleOptions.StoreOptions { Collation = collation };
 
         // Act & Assert
         Should.NotThrow(sut.Validate);
@@ -79,7 +79,7 @@ public sealed class StoreSettingsTests
     public void Validate_WhenCollationIsNotAName_ShouldRefuse(string collation)
     {
         // Arrange
-        var sut = new NightingaleOptions.StoreSettings { Collation = collation };
+        var sut = new NightingaleOptions.StoreOptions { Collation = collation };
 
         // Act
         var exception = Should.Throw<InvalidOperationException>(sut.Validate);

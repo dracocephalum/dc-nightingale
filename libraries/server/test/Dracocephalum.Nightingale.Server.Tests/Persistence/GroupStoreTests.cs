@@ -231,7 +231,7 @@ public sealed class GroupStoreTests
 
         public Func<Task>? BeforeSave { get; set; }
 
-        public NightingaleDbContext CreateDbContext() => new(_options, new NightingaleTables("dbo"));
+        public NightingaleDbContext CreateDbContext() => new(_options, new NightingaleSchema(NightingaleSchema.Default));
 
         private sealed class BeforeSaveInterceptor(InMemoryContexts owner) : SaveChangesInterceptor
         {

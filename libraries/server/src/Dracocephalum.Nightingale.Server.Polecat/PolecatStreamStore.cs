@@ -27,17 +27,17 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </para>
 /// </summary>
 /// <param name="store">The store.</param>
-/// <param name="events">The options of the mirror of the store's events table over the main connection, for the virtual streams.</param>
+/// <param name="events">Makes the mirror of the store's events table over the main connection, for the virtual streams.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
-/// <param name="readOnlyEvents">The same mirror over the read-only connection, or <see langword="null"/> when the host uses none.</param>
+/// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
 /// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by this instance, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="contexts">Makes the gateway's own context, for the sequencer's progress.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed class PolecatStreamStore(IDocumentStore store, DbContextOptions<EventsDbContext> events, bool ordinals, DbContextOptions<EventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
+internal sealed class PolecatStreamStore(IDocumentStore store, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
 {
-    private readonly VirtualStreamReader _virtual = new(events, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
-    private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
 
     /// <inheritdoc/>
@@ -254,9 +254,9 @@ internal sealed class PolecatStreamStore(IDocumentStore store, DbContextOptions<
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         // Named in full: the store's own LINQ has a method of the same name.
-        var progress = context.SequencingProgress.AsNoTracking()
-            .Where(row => row.Id == SequencingProgressRow.SingleRowId)
-            .Select(row => (long?)row.NumberedThrough);
+        var progress = context.SequencerProgress.AsNoTracking()
+            .Where(row => row.Name == SequencerProgress.Ordinals)
+            .Select(row => (long?)row.Position);
         return await EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(progress, cancellationToken).ConfigureAwait(false) ?? 0;
     }
 
@@ -326,7 +326,7 @@ internal sealed class PolecatStreamStore(IDocumentStore store, DbContextOptions<
             stored.Sequence,
             stored.EventTypeName,
             stored.Timestamp,
-            stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, NightingaleJson.Options) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, NightingaleJson.Options),
+            stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, NightingaleJson.Default) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, NightingaleJson.Default),
             JsonEvent.MetadataOf(stored));
 
     /// <summary>

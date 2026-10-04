@@ -87,7 +87,7 @@ public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
         var record = slice.ShouldNotBeNull().Events.ShouldHaveSingleItem();
         record.Type.ShouldBe("OrderPlaced");
         Encoding.UTF8.GetString(record.Data.Span).ShouldBe(body);
-        record.Metadata.ToJsonString(NightingaleJson.Options).ShouldBe(metadata);
+        record.Metadata.ToJsonString(NightingaleJson.Default).ShouldBe(metadata);
     }
 
     [Fact]

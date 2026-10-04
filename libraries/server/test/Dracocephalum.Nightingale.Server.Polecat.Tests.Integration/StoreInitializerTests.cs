@@ -17,6 +17,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class StoreInitializerTests : IAsyncLifetime
 {
+    /// <summary>One row per value of what a store is initialized with: four settings, who and when, and the store library.</summary>
+    private const int SettingRowCount = 7;
+
     private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
     private readonly string _name = TestDatabases.NewName();
 
@@ -35,10 +38,12 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         using var second = await TestDatabases.StartHostAsync(_name);
 
-        // Assert: one marker row, recording the settings and the database's actual collation.
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM dbo.nightingale_store")).ShouldBe(1);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT collation FROM dbo.nightingale_store")).ShouldNotBeNullOrWhiteSpace();
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT partitioning FROM dbo.nightingale_store")).ShouldBe("None");
+        // Assert: one row per setting, recording what shaped the store and the database's actual
+        // collation, and the gateway's migrations recorded in its own schema.
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting")).ShouldBe(SettingRowCount);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldNotBeNullOrWhiteSpace();
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("None");
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.__EFMigrationsHistory")).ShouldBeGreaterThan(0);
         await second.StopAsync(TestContext.Current.CancellationToken);
     }
 
@@ -63,7 +68,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         using var host = await TestDatabases.StartHostAsync(_name, options => options.CreateDatabase = false);
 
         // Assert
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM dbo.nightingale_store")).ShouldBe(1);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting")).ShouldBe(SettingRowCount);
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
 
@@ -82,7 +87,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WhenSettingsDifferFromTheMarker_ShouldRefuse()
+    public async Task Start_WhenSettingsDifferFromWhatTheStoreWasInitializedWith_ShouldRefuse()
     {
         // Arrange
         using (var first = await TestDatabases.StartHostAsync(_name))
@@ -92,7 +97,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Act
         var exception = await Should.ThrowAsync<StoreInitializationException>(
-            () => TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant));
+            () => TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.Tenant));
 
         // Assert
         exception.Message.ShouldContain("Partitioning is Tenant but the store was initialized with None");
@@ -121,29 +126,116 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WithASchema_ShouldPutEveryTableInItServeItAgainAndRefuseAnotherSchema()
+    public async Task Start_WithSchemas_ShouldPutEachSetOfTablesInItsOwnServeThemAgainAndRefuseOthers()
     {
-        // Arrange & Act: the store's tables and the gateway's alike land in the configured schema,
-        // a second start finds the store there, and a start configured for another schema does not.
-        using (var first = await TestDatabases.StartHostAsync(_name, options => options.Store.Schema = "events"))
+        // Arrange & Act: the event store's tables land in the schema named for them and the
+        // gateway's in the one named for those; a second start finds both, and a group is created
+        // and read through the gateway's schema.
+        static void Schemas(NightingaleOptions options)
+        {
+            options.Store.Schema = "events";
+            options.Schema = "gateway";
+        }
+
+        using (var first = await TestDatabases.StartHostAsync(_name, Schemas))
         {
             var appended = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", Body)], TestContext.Current.CancellationToken);
             appended.Position.ShouldBe(1);
             await first.StopAsync(TestContext.Current.CancellationToken);
         }
 
-        using (var second = await TestDatabases.StartHostAsync(_name, options => options.Store.Schema = "events"))
+        using (var second = await TestDatabases.StartHostAsync(_name, Schemas))
         {
+            var groups = second.Services.GetRequiredService<IGroupStore>();
+            await groups.CreateAsync(new GroupDefinition("orders-1", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+            (await groups.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken)).ShouldNotBeNull();
             await second.StopAsync(TestContext.Current.CancellationToken);
         }
 
-        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
+        // A host that names neither schema finds tables and none of its migrations; one that names
+        // the gateway's schema finds the store, and that it was initialized in another schema.
+        var notOurs = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
+        var otherStoreSchema = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.Schema = "gateway"));
 
         // Assert
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'events' AND name IN ('pc_events', 'nightingale_store', 'nightingale_groups')")).ShouldBe(3);
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'dbo'")).ShouldBe(0);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT schema_name FROM events.nightingale_store")).ShouldBe("events");
-        refused.Message.ShouldContain("not initialized by Nightingale");
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'events' AND name = 'pc_events'")).ShouldBe(1);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'gateway' AND name IN ('Setting', 'SubscriptionGroup', 'SubscriptionParkedEvent', 'SubscriptionOutboxEntry', 'Lease', 'SequencerProgress', '__EFMigrationsHistory')")).ShouldBe(7);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) IN ('dbo', 'nightingale')")).ShouldBe(0);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM gateway.SubscriptionGroup")).ShouldBe(1);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM gateway.Setting WHERE [Name] = 'Store:Schema'")).ShouldBe("events");
+        notOurs.Message.ShouldContain("not initialized by Nightingale");
+        otherStoreSchema.Message.ShouldContain("Schema is dbo but the store was initialized in events");
+    }
+
+    [Fact]
+    public async Task Start_WhenTheStoreIsNewerThanTheServer_ShouldRefuse()
+    {
+        // Arrange: a store a newer server has migrated carries a migration this one does not have.
+        using (var first = await TestDatabases.StartHostAsync(_name))
+        {
+            await first.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        await TestDatabases.ExecuteAsync(_name, "INSERT INTO nightingale.__EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('29990101000000_FromTheFuture', '99.0.0')");
+
+        // Act
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
+        var evenWhenToldToApply = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.ApplySchemaChanges = true));
+
+        // Assert
+        refused.Message.ShouldContain("newer than this server");
+        refused.Message.ShouldContain("29990101000000_FromTheFuture");
+        evenWhenToldToApply.Message.ShouldContain("newer than this server");
+    }
+
+    [Fact]
+    public async Task SchemaReport_ShouldSayWhatStartupWouldRefuseAndApplyShouldBringItUpToDate()
+    {
+        // Arrange: an initialized store whose event table has drifted from what the server expects.
+        using (var first = await TestDatabases.StartHostAsync(_name))
+        {
+            await first.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        await TestDatabases.ExecuteAsync(_name, "DROP INDEX ix_pc_events_category_seq ON dbo.pc_events");
+        var services = new ServiceCollection();
+        services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name));
+        await using var provider = services.BuildServiceProvider();
+
+        // Act: the report and the apply a host calls without starting the server.
+        var before = await provider.GetNightingaleSchemaReportAsync(TestContext.Current.CancellationToken);
+        await provider.ApplyNightingaleSchemaAsync(TestContext.Current.CancellationToken);
+        var after = await provider.GetNightingaleSchemaReportAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        before.IsCurrent.ShouldBeFalse();
+        before.Initialized.ShouldBeTrue();
+        before.PendingMigrations.ShouldBeEmpty();
+        before.StoreChanges.ShouldNotBeNull().ShouldContain("ix_pc_events_category_seq");
+        before.Describe().ShouldContain("Changes to the event store's tables to apply");
+        after.IsCurrent.ShouldBeTrue();
+        after.Describe().ShouldContain("is current");
+    }
+
+    [Fact]
+    public async Task SchemaReport_WhenTheDatabaseIsMissing_ShouldSaySoAndApplyShouldInitializeIt()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name));
+        await using var provider = services.BuildServiceProvider();
+
+        // Act
+        var before = await provider.GetNightingaleSchemaReportAsync(TestContext.Current.CancellationToken);
+        await provider.ApplyNightingaleSchemaAsync(TestContext.Current.CancellationToken);
+        var after = await provider.GetNightingaleSchemaReportAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        before.DatabaseExists.ShouldBeFalse();
+        before.IsCurrent.ShouldBeFalse();
+        before.PendingMigrations.ShouldNotBeEmpty();
+        after.IsCurrent.ShouldBeTrue();
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting")).ShouldBe(SettingRowCount);
     }
 
     [Fact]
@@ -160,7 +252,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Assert: two streams, and the record says which collation the database has.
         lower.Revision.ShouldBe(0);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT collation FROM dbo.nightingale_store")).ShouldBe(collation);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldBe(collation);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM dbo.pc_streams")).ShouldBe(2);
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
@@ -181,7 +273,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async Task Start_WithTenantPartitioning_ShouldAppendReadAndKeepTheSchemaStable()
     {
         // Arrange
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.Tenant);
+        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.Tenant);
         var store = host.Store();
 
         // Act: the first append provisions the default tenant's partition and sequence.
@@ -191,7 +283,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         // Assert
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.Count.ShouldBe(2);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT partitioning FROM dbo.nightingale_store")).ShouldBe("Tenant");
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("Tenant");
         await AssertNoSchemaDelta(host);
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
@@ -200,7 +292,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async Task Start_WithArchivedStreamPartitioning_ShouldAppendReadAndKeepTheSchemaStable()
     {
         // Arrange
-        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream);
+        using var host = await TestDatabases.StartHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.ArchivedStream);
         var store = host.Store();
 
         // Act
@@ -210,7 +302,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         // Assert
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.ShouldHaveSingleItem().Revision.ShouldBe(1);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT partitioning FROM dbo.nightingale_store")).ShouldBe("ArchivedStream");
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("ArchivedStream");
         await AssertNoSchemaDelta(host);
         await host.StopAsync(TestContext.Current.CancellationToken);
     }

@@ -1,3 +1,8 @@
+using Dracocephalum.Nightingale.Server.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection;
 using Polecat;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
@@ -39,15 +44,22 @@ public static class SchemaExport
     }
 
     /// <summary>Writes the creation script of every database the store's tenancy knows.</summary>
-    /// <param name="store">The store, registered through the gateway.</param>
+    /// <param name="services">The host's services, with the backend registered.</param>
     /// <param name="path">The file to write.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the file is written.</returns>
-    public static async Task ExportAsync(IDocumentStore store, string path, CancellationToken cancellationToken)
+    public static async Task ExportAsync(IServiceProvider services, string path, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        // The event store's tables first, then the gateway's own: the order they are applied in.
+        var store = services.GetRequiredService<IDocumentStore>();
         var databases = await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false);
         await databases[0].WriteCreationScriptToFileAsync(path, cancellationToken).ConfigureAwait(false);
+
+        await using var context = await services.GetRequiredService<IDbContextFactory<NightingaleDbContext>>().CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var migrations = context.GetService<IMigrator>().GenerateScript(options: MigrationsSqlGenerationOptions.Idempotent);
+        await File.AppendAllTextAsync(path, Environment.NewLine + "-- The gateway's own tables, as its migrations create them." + Environment.NewLine + migrations, cancellationToken).ConfigureAwait(false);
     }
 }

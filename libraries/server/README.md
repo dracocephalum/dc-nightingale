@@ -41,9 +41,29 @@ local SQL Server and live in the `*.Tests.Integration` project, which a plain
     dotnet test Dracocephalum.Nightingale.Server.slnx -p:RunIntegrationTests=true
 
 From this folder, the default host: `dotnet run --project src/Dracocephalum.Nightingale.Server.Polecat`.
-The same host writes the creation script it would apply, with the gateway's
-additions, and exits: append `-- --export-schema schema.sql`. Nothing is
-connected to for that.
+Three switches make the same host do one thing and exit instead of serving;
+append them after `--`:
+
+| Switch | Does |
+|---|---|
+| `--export-schema schema.sql` | writes the creation script of a new store: the event store's tables with the gateway's additions, then the gateway's own tables; connects to nothing |
+| `--schema-report` | prints what the configured database needs: changes to the event store's tables, the gateway's pending migrations, and settings the configuration contradicts; exit code 0 when it is current, 1 when it is not |
+| `--apply-schema` | brings the configured database up to date, the event store's tables first and the gateway's after, whatever `Nightingale:ApplySchemaChanges` says |
+
+The gateway's own tables are created by EF Core migrations, generated from
+the model in the server library into the backend that owns the provider.
+After changing the model, from the backend's project folder:
+
+    dotnet ef migrations add <Name> --context NightingaleDbContext --output-dir Migrations
+
+No database is needed for that, and the generated files are not edited; a
+unit test fails while the model has a change no migration carries.
+
+Until the first official release there is one migration, `Initial`, and it is
+regenerated rather than added to: delete the `Migrations` folder and run the
+command with `Initial` as the name. No store from before the first release is
+migrated; it is initialized again. From the first release on `Initial` is
+frozen and every change is a migration of its own.
 
 ## Configuration
 
@@ -59,16 +79,18 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `ConnectionStrings:<name>` | a local server, trusted login, database `nightingale` | the SQL Server connection string; it must name a database other than `master` |
 | `Nightingale:ConnectionStringName` | `Nightingale` | which entry under `ConnectionStrings` the server uses |
 | `Nightingale:CreateDatabase` | `true` | create the database when it does not exist; off, a missing database is an error, for a host whose login may not create one |
-| `Nightingale:ApplySchemaChanges` | `false` | apply pending schema changes at startup to a store initialized earlier; off, a schema that differs is refused with the change in the message |
+| `Nightingale:ApplySchemaChanges` | `false` | apply what a store initialized earlier needs at startup: changes to the event store's tables, then the gateway's pending migrations; off, a database that is behind is refused with what would be applied in the message |
+| `Nightingale:Schema` | `nightingale` | the schema the gateway keeps its own tables and its migrations history in; it may be the event store's schema |
 | `Nightingale:UseReadOnlyConnection` | `true` | open a second, read-only connection and serve from it the pages of `$all` and of the virtual streams that lie at or below its own high-water mark; exact, and where there is no readable secondary it reaches the same server |
 | `Nightingale:ReadOnlyConnectionStringName` | none | which entry under `ConnectionStrings` the read-only connection uses, exactly as written; unset, the main string with `ApplicationIntent=ReadOnly`, which a listener with read-only routing sends to a secondary |
 | `Nightingale:ReadStreamsFromReadOnlyConnection` | `false` | serve bounded reads of plain streams from the read-only connection too; they are then eventually consistent, and an append made on a read that was behind is refused with a revision conflict |
 | `Nightingale:Deletion:AllowDelete` | `false` | accept `Delete`: a stream's events leave every read and it cannot be appended to again; the rows stay |
 | `Nightingale:Deletion:AllowTombstone` | `false` | accept `Tombstone`: a stream and its events are removed for good and the name is free again; irreversible, so a switch of its own |
+| `Nightingale:Store:Schema` | `dbo` | the schema the event store's tables live in |
 | `Nightingale:Store:Collation` | none, the server's default | the collation the database is created with; a binary one such as `Latin1_General_100_BIN2` makes stream names case-sensitive |
 | `Nightingale:Store:Partitioning` | `None` | `Tenant` partitions the events table by tenant, each with its own sequence, and the wildcard tenant is then refused; `ArchivedStream` partitions it by the archived flag, so deleted streams' events sit apart; one mode, because a table has one partition scheme |
 
-The two settings under `Nightingale:Store` are fixed when the store is
+The settings under `Nightingale:Store` are fixed when the store is
 initialized and checked on every later start: the server refuses to start
 against a store whose record disagrees with them. Changing one means a new
 database.

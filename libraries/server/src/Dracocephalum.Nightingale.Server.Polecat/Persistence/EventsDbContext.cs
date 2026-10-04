@@ -7,20 +7,37 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Persistence;
 /// <summary>
 /// A read-only mirror of two tables the store owns: its events, with the columns the gateway
 /// adds to them, and the row its high-water mark is kept in. The store creates and migrates
-/// both; this context only reads, so the gateway's reads by category, by event type and by
-/// position are LINQ a unit test can run on the in-memory provider, where they were SQL text
-/// before. The column types are the store's exactly, and the string ones matter: a parameter
-/// sent as Unicode to a column that is not makes the database convert the column and scan the
-/// index it should seek. A unit test holds every mapped column to the store's own definition.
-/// A query selects the columns it needs by name, never a whole row, because the ordinal columns
-/// exist only on a store initialized with ordinals.
+/// both; this context only reads, and refuses to save, so the gateway's reads by category, by
+/// event type and by position are LINQ a unit test can run on the in-memory provider. The column
+/// types are the store's exactly, and the string ones matter: a parameter sent as Unicode to a
+/// column that is not makes the database convert the column and scan the index it should seek.
+/// A unit test holds every mapped column to the store's own definition. A query selects the
+/// columns it needs by name, never a whole row, because the ordinal columns exist only on a
+/// store initialized with ordinals. This type reads over the main connection;
+/// <see cref="ReadOnlyEventsDbContext"/> is the same mirror over the read-only one.
 /// </summary>
-/// <param name="options">The options, which name the provider and the connection.</param>
-/// <param name="schema">The schema the store's tables live in.</param>
-internal sealed class EventsDbContext(DbContextOptions<EventsDbContext> options, string schema) : DbContext(options), ISchemaScoped
+internal class EventsDbContext : DbContext, ISchemaScoped
 {
     /// <summary>The name of the progression row that holds the high-water mark.</summary>
     public const string HighWaterMark = "HighWaterMark";
+
+    /// <summary>Initializes a new instance of the <see cref="EventsDbContext"/> class over the main connection.</summary>
+    /// <param name="options">The options, which name the provider and the connection.</param>
+    /// <param name="schema">The schema the store's tables live in.</param>
+    public EventsDbContext(DbContextOptions<EventsDbContext> options, EventStoreSchema schema)
+        : this((DbContextOptions)options, schema)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="EventsDbContext"/> class for a derived mirror.</summary>
+    /// <param name="options">The derived context's options.</param>
+    /// <param name="schema">The schema the store's tables live in.</param>
+    protected EventsDbContext(DbContextOptions options, EventStoreSchema schema)
+        : base(options)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        Schema = schema.Name;
+    }
 
     /// <summary>Gets the events.</summary>
     public DbSet<EventRow> Events => Set<EventRow>();
@@ -29,16 +46,24 @@ internal sealed class EventsDbContext(DbContextOptions<EventsDbContext> options,
     public DbSet<ProgressionRow> Progression => Set<ProgressionRow>();
 
     /// <inheritdoc/>
-    public string Schema => schema;
+    public string Schema { get; }
+
+    /// <inheritdoc/>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess) => throw ReadOnly();
+
+    /// <inheritdoc/>
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) => throw ReadOnly();
 
     /// <inheritdoc/>
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-        optionsBuilder.ReplaceService<IModelCacheKeyFactory, SchemaModelCacheKeyFactory>();
+        optionsBuilder
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+            .ReplaceService<IModelCacheKeyFactory, SchemaModelCacheKeyFactory>();
 
     /// <inheritdoc/>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.HasDefaultSchema(schema);
+        modelBuilder.HasDefaultSchema(Schema);
 
         modelBuilder.Entity<EventRow>(row =>
         {
@@ -69,4 +94,7 @@ internal sealed class EventsDbContext(DbContextOptions<EventsDbContext> options,
             row.Property(p => p.LastSeqId).HasColumnName("last_seq_id").HasColumnType("bigint");
         });
     }
+
+    private static InvalidOperationException ReadOnly() =>
+        new("The mirror of the store's events table only reads: the store appends events and the sequencer numbers them.");
 }

@@ -13,6 +13,14 @@ public abstract class NightingaleOptionsBase
     /// <summary>The configuration section the options are bound from.</summary>
     public const string SectionName = "Nightingale";
 
+    /// <summary>
+    /// Gets or sets the schema the gateway keeps its own tables in: the groups, their parked events
+    /// and outbox, the leases and the settings the store was initialized with. They are created
+    /// and changed by the gateway's own migrations, whose history is kept in the same schema. It
+    /// may be the schema the event store uses; the names do not collide.
+    /// </summary>
+    public string Schema { get; set; } = Persistence.NightingaleSchema.Default;
+
     /// <summary>Gets or sets what the server allows to be deleted.</summary>
     public DeletionSettings Deletion { get; set; } = new();
 

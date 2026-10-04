@@ -23,18 +23,18 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     {
         ArgumentNullException.ThrowIfNull(group);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        if (await context.Groups.AnyAsync(row => row.TenantId == tenantId && row.Stream == group.Stream && row.GroupName == group.Group, cancellationToken).ConfigureAwait(false))
+        if (await context.Groups.AnyAsync(row => row.TenantId == tenantId && row.Stream == group.Stream && row.Name == group.Group, cancellationToken).ConfigureAwait(false))
         {
             throw new GroupExistsException(group.Stream, group.Group);
         }
 
-        context.Groups.Add(new GroupRow
+        context.Groups.Add(new SubscriptionGroup
         {
             Id = group.Id,
             TenantId = tenantId,
             Stream = group.Stream,
-            GroupName = group.Group,
-            Settings = JsonSerializer.Serialize(StoredSettings.From(group.Settings)),
+            Name = group.Group,
+            Settings = JsonSerializer.Serialize(StoredSettings.From(group.Settings), NightingaleJson.Default),
             CheckpointPosition = group.Checkpoint,
             CreatedAt = timeProvider.GetUtcNow(),
         });
@@ -54,18 +54,18 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Groups.AsNoTracking()
-            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.GroupName == group, cancellationToken)
+            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.Name == group, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
             return null;
         }
 
-        var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings) ?? throw new InvalidOperationException("The group's settings are not readable.");
+        var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings, NightingaleJson.Default) ?? throw new InvalidOperationException("The group's settings are not readable.");
 
         // The names are the row's own: a case-insensitive database finds the row under another
         // spelling, and the group still goes by the names it was created with.
-        return new GroupDefinition(row.Stream, row.GroupName, settings.ToSettings(), row.CheckpointPosition) { Id = row.Id };
+        return new GroupDefinition(row.Stream, row.Name, settings.ToSettings(), row.CheckpointPosition) { Id = row.Id };
     }
 
     /// <inheritdoc/>
@@ -73,7 +73,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Groups
-            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.GroupName == group, cancellationToken)
+            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.Name == group, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
@@ -110,13 +110,13 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         ArgumentNullException.ThrowIfNull(message);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Parked
-            .SingleOrDefaultAsync(row => row.GroupId == message.GroupId && row.Position == message.Position, cancellationToken)
+            .SingleOrDefaultAsync(row => row.SubscriptionGroupId == message.GroupId && row.Position == message.Position, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
-            row = new ParkedRow
+            row = new SubscriptionParkedEvent
             {
-                GroupId = message.GroupId,
+                SubscriptionGroupId = message.GroupId,
                 Position = message.Position,
                 Revision = message.Revision,
                 Ordinal = message.Ordinal,
@@ -132,14 +132,27 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
 
         // Moved back: a message that was on the outbox is parked again, not in both places.
         var queued = await context.Outbox
-            .SingleOrDefaultAsync(row => row.GroupId == message.GroupId && row.Position == message.Position, cancellationToken)
+            .SingleOrDefaultAsync(row => row.SubscriptionGroupId == message.GroupId && row.Position == message.Position, cancellationToken)
             .ConfigureAwait(false);
         if (queued is not null)
         {
             context.Outbox.Remove(queued);
         }
 
-        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            // The group was deleted under its consumer, and its parked events with it: the foreign
+            // key refuses a row for a group that is gone, and there is nothing to park it for.
+            // Anything else the database refused is not that, and is the caller's to see.
+            if (await GroupExistsAsync(message.GroupId, cancellationToken).ConfigureAwait(false))
+            {
+                throw;
+            }
+        }
     }
 
     /// <inheritdoc/>
@@ -169,9 +182,9 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         var now = timeProvider.GetUtcNow();
         foreach (var row in toMove)
         {
-            context.Outbox.Add(new OutboxRow
+            context.Outbox.Add(new SubscriptionOutboxEntry
             {
-                GroupId = row.GroupId,
+                SubscriptionGroupId = row.SubscriptionGroupId,
                 Position = row.Position,
                 Revision = row.Revision,
                 Ordinal = row.Ordinal,
@@ -205,7 +218,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Outbox
-            .SingleOrDefaultAsync(row => row.GroupId == groupId && row.Position == position, cancellationToken)
+            .SingleOrDefaultAsync(row => row.SubscriptionGroupId == groupId && row.Position == position, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
@@ -231,7 +244,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
             var lease = await context.Leases.SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
             if (lease is null)
             {
-                context.Leases.Add(new LeaseRow { Name = name, Owner = owner, OwnerAddress = address, ExpiresAt = now + duration });
+                context.Leases.Add(new Lease { Name = name, Owner = owner, OwnerAddress = address, ExpiresAt = now + duration });
             }
             else if (lease.Owner != owner && lease.ExpiresAt > now)
             {
@@ -270,7 +283,7 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : Holder(lease);
     }
 
-    private static LeaseHolder Holder(LeaseRow lease) =>
+    private static LeaseHolder Holder(Lease lease) =>
         new(lease.Owner, lease.OwnerAddress is null ? null : new Uri(lease.OwnerAddress, UriKind.Absolute));
 
     /// <inheritdoc/>
@@ -294,11 +307,17 @@ public sealed class GroupStore(IDbContextFactory<NightingaleDbContext> contexts,
         }
     }
 
-    private static IQueryable<ParkedRow> ParkedOf(NightingaleDbContext context, Guid groupId) =>
-        context.Parked.Where(row => row.GroupId == groupId);
+    private async Task<bool> GroupExistsAsync(Guid groupId, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await context.Groups.AnyAsync(row => row.Id == groupId, cancellationToken).ConfigureAwait(false);
+    }
 
-    private static IQueryable<OutboxRow> OutboxOf(NightingaleDbContext context, Guid groupId) =>
-        context.Outbox.Where(row => row.GroupId == groupId);
+    private static IQueryable<SubscriptionParkedEvent> ParkedOf(NightingaleDbContext context, Guid groupId) =>
+        context.Parked.Where(row => row.SubscriptionGroupId == groupId);
+
+    private static IQueryable<SubscriptionOutboxEntry> OutboxOf(NightingaleDbContext context, Guid groupId) =>
+        context.Outbox.Where(row => row.SubscriptionGroupId == groupId);
 
     /// <summary>The settings as stored: primitives only, so the document outlives the domain type's shape.</summary>
     private sealed record StoredSettings(long Start, long MessageTimeoutMs, int MaxRetryCount, int CheckpointUpperBound, long CheckpointAfterMs, int CheckpointLowerBound, int BufferSize, int MaxSubscriberCount, int Numbering = 0)

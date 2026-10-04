@@ -49,7 +49,7 @@ public sealed class ServiceCollectionExtensionsTests
             bound => bound.CreateDatabase.ShouldBeFalse(),
             bound => bound.ApplySchemaChanges.ShouldBeTrue(),
             bound => bound.Store.Collation.ShouldBe("Latin1_General_100_BIN2"),
-            bound => bound.Store.Partitioning.ShouldBe(NightingaleOptions.StoreSettings.PartitioningMode.ArchivedStream),
+            bound => bound.Store.Partitioning.ShouldBe(PartitioningMode.ArchivedStream),
             bound => bound.Deletion.AllowDelete.ShouldBeFalse(),
             bound => bound.Deletion.AllowTombstone.ShouldBeTrue());
         provider.GetRequiredService<NightingaleOptionsBase>().ShouldBeSameAs(options);

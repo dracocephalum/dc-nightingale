@@ -6,7 +6,15 @@
       "version": "4.0.16",
       "commands": [
         "nuget-license"
-      ]
+      ],
+      "rollForward": false
+    },
+    "dotnet-ef": {
+      "version": "10.0.11",
+      "commands": [
+        "dotnet-ef"
+      ],
+      "rollForward": false
     }
   }
 }

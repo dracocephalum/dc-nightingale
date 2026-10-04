@@ -89,7 +89,7 @@ public sealed class VirtualStreamTests(SqlServerTestDatabase database)
             record => record.Type.ShouldBe(viaStream.Type),
             record => record.Created.ShouldBe(viaStream.Created),
             record => Encoding.UTF8.GetString(record.Data.Span).ShouldBe(body),
-            record => record.Metadata.ToJsonString(NightingaleJson.Options).ShouldBe(viaStream.Metadata.ToJsonString(NightingaleJson.Options)));
+            record => record.Metadata.ToJsonString(NightingaleJson.Default).ShouldBe(viaStream.Metadata.ToJsonString(NightingaleJson.Default)));
     }
 
     [Fact]

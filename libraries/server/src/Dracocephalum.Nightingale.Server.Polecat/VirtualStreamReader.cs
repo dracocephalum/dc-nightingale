@@ -20,10 +20,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// bounds and their paging are held; that the database seeks rather than scans is an integration
 /// test's to say.
 /// </summary>
-/// <param name="options">The mirror's options: which provider, which connection.</param>
-/// <param name="schemaName">The schema the events table lives in.</param>
+/// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
 /// <param name="tenantId">The tenant every read is scoped to.</param>
-internal sealed class VirtualStreamReader(DbContextOptions<EventsDbContext> options, string schemaName, string tenantId)
+internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string tenantId)
 {
     private static readonly Expression<Func<EventRow, Raw>> Plain =
         e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, null);
@@ -221,12 +220,12 @@ internal sealed class VirtualStreamReader(DbContextOptions<EventsDbContext> opti
             row.SeqId,
             row.Type,
             row.Timestamp,
-            JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Options),
+            JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Default),
             metadata,
             row.Ordinal);
     }
 
-    private EventsDbContext Context() => new(options, schemaName);
+    private EventsDbContext Context() => contexts();
 
     /// <summary>The live events of the tenant, of one virtual stream or of all.</summary>
     private IQueryable<EventRow> Live(EventsDbContext context, VirtualStreamName? stream)

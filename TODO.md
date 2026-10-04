@@ -90,6 +90,14 @@ undecided adds it here rather than mentioning it once in a conversation.
   that cancels a streaming read during a page and then reads again on the
   same host, and either a fix in how the reader cancels its command or an
   upstream issue on the SQL client.
+- **An initialization interrupted between its two halves leaves a database the
+  server refuses.** An empty database gets the event store's tables first and
+  the gateway's migrations after; a process that dies between the two leaves
+  tables and none of the gateway's migrations, which the next start reads as a
+  database that is not Nightingale's. Nothing is lost, the database held no
+  data, and dropping it is the way out. Close by: recognizing a database that
+  holds only the store's own tables, all empty, as one to carry on
+  initializing.
 - **The sequencer's takeover is not tested with two instances.** The lease
   logic is the group store's, tested there, and the batch transaction reads
   the progress row under an update lock so an overlapping sequencer continues
@@ -110,20 +118,22 @@ undecided adds it here rather than mentioning it once in a conversation.
   commit-time check, and it would be a fourth value of
   `Nightingale:Store:Partitioning`, exclusive with the others like them. Close by: deciding when sizing demands it; see
   `PENDING.md`.
-- **Schema migration is a startup switch, not a command.**
-  `Nightingale:ApplySchemaChanges` lets a host apply a pending schema change
-  at startup, which is the only way to move a store initialized by an older
-  server forward. An operator cannot preview the change, apply it out of band,
-  or apply it while the service is stopped. Close by: a `migrate` command in
-  the default host beside the `--export-schema` switch it already has, with a
-  dry run that prints the delta, after which the switch stays off in
-  production hosts.
 - **Protocol compatibility or API compatibility.** Speaking the reference event store's
   own protocol so its official client works unmodified means implementing server
   features, gossip, the trailer error model and its UUID byte order exactly.
   Default: our own proto in the same shape, with our own client. Close by:
   confirming the default before the proto is written; it changes message
   shapes.
+- **A stream name outside the database's code page loses its characters.** The
+  event store keeps stream names, event types and tenants in columns that are
+  not Unicode, so under SQL Server's default collation a character outside the
+  collation's code page is stored as a question mark: two stream names in
+  another script, of the same length, become one stream, silently. Measured on
+  the default collation; under a UTF-8 collation the same two names stay
+  apart. The gateway's own names do not have the problem, a group's name is
+  Unicode. Close by: deciding between a UTF-8 collation as the default the
+  server creates a database with, refusing at the API a name the store's
+  collation cannot hold, or both.
 - **Event identity and idempotent retries.** The reference event store de-duplicates by
   client-supplied event id within a stream, which makes an append safe to
   retry after a timeout. Default: honour client ids and enforce uniqueness
