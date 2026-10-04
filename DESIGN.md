@@ -250,12 +250,26 @@ leases, the sequencer's progress and the marker, are read and written
 through one EF Core context, `NightingaleDbContext`, in the server library.
 It is one model every backend shares with a provider swap, so the Marten
 backend brings Npgsql rather than a second group store, and it takes the
-plain reads and writes out of SQL strings. Three things stay raw in the
-backend because their shape is the point: the sequencer's batch, the tail's
-contiguous-prefix query, and the initializer's marker access, which runs
-before the schema has been brought up to date, when a column the model
-expects may not exist yet. The virtual-stream reader stays raw too: its SQL
-is what the filtered indexes were declared for.
+plain reads and writes out of SQL strings. The backend has a second, read-only context beside it, a mirror of two
+tables the store owns: its events, with the columns the gateway adds, and
+the row its high-water mark is kept in. The reads by category, by event
+type and by position are LINQ over that mirror, and so is the tail's look
+for the unbroken run of positions after the mark, whose gap rule is plain
+code. A query names the columns it needs, never a whole row, because the
+ordinal columns exist only on a store initialized with ordinals; and the
+mirror declares the store's column types exactly, since a name sent as
+Unicode to a column that is not makes the database convert the column and
+scan the index it should seek. One test holds every mapped column to the
+store's own definition, another asks the database for its count of seeks
+and scans on the index.
+
+What stays SQL text, because its shape is the point or there is no table
+to map: the sequencer's batch, which numbers thousands of events in one
+set-based statement under a lock where row-by-row writes would be an order
+of magnitude slower; the initializer's questions of the catalog and its
+creation of the database; and its read of the marker, which runs before
+the schema has been brought up to date, when a column the model expects
+may not exist yet.
 
 The context deviates on purpose from the toolkit's EF rules for a context
 that owns its tables. It owns nothing: the backend's schema feature creates

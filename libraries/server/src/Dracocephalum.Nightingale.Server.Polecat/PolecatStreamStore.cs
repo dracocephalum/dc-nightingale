@@ -1,6 +1,9 @@
 using System.Text.Json;
 
+using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Polecat.Persistence;
 using JasperFx.Events;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Polecat;
 using Polecat.Exceptions;
@@ -24,16 +27,17 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </para>
 /// </summary>
 /// <param name="store">The store.</param>
-/// <param name="connectionString">The connection string the store uses, for the virtual streams read straight from the table.</param>
+/// <param name="events">The options of the mirror of the store's events table over the main connection, for the virtual streams.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
-/// <param name="readOnlyConnectionString">The read-only connection string, or <see langword="null"/> when the host uses none.</param>
+/// <param name="readOnlyEvents">The same mirror over the read-only connection, or <see langword="null"/> when the host uses none.</param>
 /// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by this instance, or <see langword="null"/> when they stay on the main connection.</param>
+/// <param name="contexts">Makes the gateway's own context, for the sequencer's progress.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed class PolecatStreamStore(IDocumentStore store, string connectionString, bool ordinals, string? readOnlyConnectionString, IDocumentStore? readOnlyStore, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
+internal sealed class PolecatStreamStore(IDocumentStore store, DbContextOptions<EventsDbContext> events, bool ordinals, DbContextOptions<EventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
 {
-    private readonly VirtualStreamReader _virtual = new(connectionString, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
-    private readonly VirtualStreamReader? _replica = readOnlyConnectionString is null ? null : new(readOnlyConnectionString, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader _virtual = new(events, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents, store.Options.DatabaseSchemaName, JasperFx.StorageConstants.DefaultTenantId);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
 
     /// <inheritdoc/>
@@ -244,10 +248,16 @@ internal sealed class PolecatStreamStore(IDocumentStore store, string connection
     }
 
     /// <inheritdoc/>
-    public Task<long> NumberedThroughAsync(CancellationToken cancellationToken)
+    public async Task<long> NumberedThroughAsync(CancellationToken cancellationToken)
     {
         RequireOrdinals(StreamNames.All);
-        return _virtual.NumberedThroughAsync(cancellationToken);
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        // Named in full: the store's own LINQ has a method of the same name.
+        var progress = context.SequencingProgress.AsNoTracking()
+            .Where(row => row.Id == SequencingProgressRow.SingleRowId)
+            .Select(row => (long?)row.NumberedThrough);
+        return await EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(progress, cancellationToken).ConfigureAwait(false) ?? 0;
     }
 
     private void RequireOrdinals(string stream)

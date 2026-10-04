@@ -1,3 +1,5 @@
+using Dracocephalum.Nightingale.Server.Persistence;
+using Dracocephalum.Nightingale.Server.Polecat.Persistence;
 using JasperFx;
 using JasperFx.Events;
 using JasperFx.MultiTenancy;
@@ -82,21 +84,23 @@ public static class ServiceCollectionExtensions
         // connection, and only when the host asks for them: it reads and never migrates.
         services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(
             provider.GetRequiredService<IDocumentStore>(),
-            connectionString,
+            EventsOptions(connectionString),
             options.Store.AssignOrdinals,
-            readOnlyConnectionString,
+            readOnlyConnectionString is null ? null : EventsOptions(readOnlyConnectionString),
             readOnlyConnectionString is not null && options.ReadStreamsFromReadOnlyConnection
                 ? DocumentStore.For(store => Configure(store, readOnlyConnectionString, options))
                 : null,
+            provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
-        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), connectionString, provider.GetRequiredService<ILoggerFactory>()));
+        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), EventsOptions(connectionString), provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddNightingaleGroupStore(options.Store.Schema, JasperFx.StorageConstants.DefaultTenantId, context => context.UseSqlServer(connectionString));
         services.AddSingleton<IHostedService>(provider => new StoreInitializer(
             provider.GetRequiredService<IDocumentStore>(),
             connectionString,
             options,
+            provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetRequiredService<ILogger<StoreInitializer>>()));
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
@@ -117,6 +121,10 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>The options of the mirror of the store's events table over one connection.</summary>
+    private static DbContextOptions<EventsDbContext> EventsOptions(string connectionString) =>
+        new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(connectionString).Options;
 
     private static void Configure(StoreOptions store, string connectionString, NightingaleOptions options)
     {

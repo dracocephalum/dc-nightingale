@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The reader's queries run on the in-memory provider; SQL Server's part is the integration suite's. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
   </ItemGroup>
 
