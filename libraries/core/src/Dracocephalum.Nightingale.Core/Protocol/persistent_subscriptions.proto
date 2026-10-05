@@ -2,8 +2,8 @@
 // server keeps, delivering each event to a connected consumer until it is
 // acknowledged, retrying or parking what is not.
 //
-// The shape follows the reference protocol: unary Create, Delete and
-// ReplayParked, and one bidirectional Read whose request stream carries the
+// The shape follows the reference protocol: unary Create, Delete, GetInfo,
+// List and ReplayParked, and one bidirectional Read whose request stream carries the
 // options first and then acknowledgements, while the response stream carries
 // the confirmation and the events. A group runs in one server instance at a
 // time; see "Ownership" below. Numbers, names, bodies and errors are defined
@@ -20,6 +20,7 @@ package dracocephalum.nightingale.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 import "shared.proto";
 
 option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
@@ -33,6 +34,22 @@ service PersistentSubscriptions {
   // Deletes a group: its checkpoint and its parked messages go with it, and a
   // connected consumer's call ends. Errors: GROUP_NOT_FOUND.
   rpc Delete (DeleteGroupRequest) returns (DeleteGroupResponse);
+
+  // Describes one group: its settings, its checkpoint, what is parked and on
+  // its outbox, the last number of its stream, and where it runs. While a
+  // consumer is connected the answer comes from the instance that runs the
+  // group, which adds what only it knows; an instance asked for a group
+  // another runs refuses with that instance's address, as Read does. A group
+  // nobody runs is described by any instance. Errors: GROUP_NOT_FOUND,
+  // GROUP_OWNED_ELSEWHERE, INVALID_STREAM_NAME, INVALID_ARGUMENT.
+  rpc GetInfo (GetInfoRequest) returns (GetInfoResponse);
+
+  // Lists the groups, every one or those of one stream, each with what the
+  // store holds about it. Any instance answers, and none redirects: groups
+  // run in whichever instance their consumer reached, so no instance knows
+  // the live numbers of them all. GetInfo gives those for one group.
+  // Errors: INVALID_STREAM_NAME.
+  rpc List (ListRequest) returns (ListResponse);
 
   // Connects a consumer to a group. The first request carries the options;
   // every following request acknowledges or refuses delivered events. The
@@ -110,6 +127,71 @@ message DeleteGroupRequest {
 }
 
 message DeleteGroupResponse {}
+
+message GetInfoRequest {
+  string stream = 1;
+  string group = 2;
+}
+
+message GetInfoResponse {
+  GroupInfo info = 1;
+}
+
+message ListRequest {
+  // The stream whose groups are listed; empty lists every group.
+  string stream = 1;
+}
+
+message ListResponse {
+  // Ordered by stream, then by group.
+  repeated GroupInfo groups = 1;
+}
+
+// A group as the server describes it. Fields 1 to 9 are what the store
+// holds and are in every answer; last_known_position and live are only in
+// the answer of GetInfo.
+message GroupInfo {
+  // The names the group was created with.
+  string stream = 1;
+  string group = 2;
+
+  GroupSettings settings = 3;
+  google.protobuf.Timestamp created_at = 4;
+
+  // The last number every event up to which is done, in the group's
+  // numbering. Absent when the group has no checkpoint yet.
+  optional sint64 checkpoint = 5;
+
+  // How many messages are parked, and how many wait on the outbox to be
+  // delivered ahead of the stream.
+  int64 parked_count = 6;
+  int64 outbox_count = 7;
+
+  // Whether an instance runs the group now, which it does while a consumer
+  // is connected, and where that instance is reached; empty when none runs
+  // it or it advertises no address.
+  bool running = 8;
+  string owner_address = 9;
+
+  // The last number of the group's stream, in the group's numbering. Absent
+  // when the stream holds nothing, and in List.
+  optional sint64 last_known_position = 10;
+
+  // What only the instance running the group knows. Absent when the group
+  // is not running, and in List.
+  GroupLiveInfo live = 11;
+}
+
+message GroupLiveInfo {
+  // When the consumer connected.
+  google.protobuf.Timestamp connected_at = 1;
+  // Events delivered and neither acknowledged nor refused yet.
+  int32 in_flight_count = 2;
+  // Events queued to be delivered again.
+  int32 awaiting_retry_count = 3;
+  // How many delivered, unacknowledged events the consumer asked to hold.
+  int32 consumer_buffer_size = 4;
+}
 
 message PersistentReadRequest {
   oneof content {

@@ -160,6 +160,32 @@ public static class WireConversions
         return wire;
     }
 
+    /// <summary>Maps a group's description from its wire form.</summary>
+    /// <param name="info">The wire message.</param>
+    /// <returns>The description.</returns>
+    public static PersistentSubscriptionInfo ToPersistentSubscriptionInfo(this GroupInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        return new PersistentSubscriptionInfo(
+            info.Stream,
+            info.Group,
+            (info.Settings ?? new Protocol.V1.GroupSettings()).ToGroupSettings(),
+            info.CreatedAt?.ToDateTimeOffset() ?? default,
+            info.HasCheckpoint ? info.Checkpoint : null,
+            info.ParkedCount,
+            info.OutboxCount,
+            info.Running,
+            info.OwnerAddress.Length == 0 ? null : new Uri(info.OwnerAddress, UriKind.Absolute),
+            info.HasLastKnownPosition ? info.LastKnownPosition : null,
+            info.Live is null
+                ? null
+                : new PersistentSubscriptionLiveInfo(
+                    info.Live.ConnectedAt?.ToDateTimeOffset() ?? default,
+                    info.Live.InFlightCount,
+                    info.Live.AwaitingRetryCount,
+                    info.Live.ConsumerBufferSize));
+    }
+
     /// <summary>The wire form of a metadata object: its JSON text, or empty when there is nothing to say.</summary>
     /// <param name="metadata">The object, possibly null or empty.</param>
     /// <returns>The bytes.</returns>

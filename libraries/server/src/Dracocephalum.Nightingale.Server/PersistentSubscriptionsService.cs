@@ -6,7 +6,8 @@ namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
 /// The <c>PersistentSubscriptions</c> service over the group store and the stream store. Create,
-/// delete and replay go straight to the group store. A read takes the group's lease for this
+/// delete, list and replay go straight to the group store; a group's info does too, with what
+/// the running group adds when it runs here. A read takes the group's lease for this
 /// instance, refuses a second consumer, runs the group in memory for as long as the consumer
 /// stays, and turns the consumer's acknowledgements into the group's checkpoint.
 /// </summary>
@@ -87,6 +88,64 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         }
 
         return new DeleteGroupResponse();
+    }
+
+    /// <inheritdoc/>
+    public override async Task<GetInfoResponse> GetInfo(GetInfoRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var stream = ReadableStreamName(request.Stream);
+        var group = GroupName(request.Group);
+        var summary = await groups.DescribeAsync(stream, group, context.CancellationToken).ConfigureAwait(false)
+            ?? throw NightingaleErrors.GroupNotFound(stream, group);
+        var definition = summary.Definition;
+
+        // What a running group has outstanding is known only where it runs, so the question goes
+        // there: refused with the owner's address, and the client repeats it there. An owner that
+        // advertises no address cannot be gone to, and a group nobody runs has nothing more to
+        // say, so both are answered here with what the store holds.
+        var here = summary.Holder is { } holder && string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal);
+        if (!here && summary.Holder is { Address: not null } elsewhere)
+        {
+            throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, elsewhere);
+        }
+
+        var info = Info(summary);
+        if (await LastKnownAsync(definition, context.CancellationToken).ConfigureAwait(false) is { } last)
+        {
+            info.LastKnownPosition = last;
+        }
+
+        if (here && registry.Describe(definition.Id) is { } live)
+        {
+            info.Live = new GroupLiveInfo
+            {
+                ConnectedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.ConnectedAt),
+                InFlightCount = live.InFlightCount,
+                AwaitingRetryCount = live.AwaitingRetryCount,
+                ConsumerBufferSize = live.ConsumerBufferSize,
+            };
+        }
+
+        return new GetInfoResponse { Info = info };
+    }
+
+    /// <inheritdoc/>
+    public override async Task<ListResponse> List(ListRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var stream = request.Stream.Length == 0 ? null : ReadableStreamName(request.Stream);
+        var response = new ListResponse();
+        foreach (var summary in await groups.ListAsync(stream, context.CancellationToken).ConfigureAwait(false))
+        {
+            response.Groups.Add(Info(summary));
+        }
+
+        return response;
     }
 
     /// <inheritdoc/>
@@ -193,6 +252,59 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         }
     }
 
+    /// <summary>What the store holds about a group, in its wire form.</summary>
+    private static GroupInfo Info(SubscriptionGroupSummary summary)
+    {
+        var definition = summary.Definition;
+        var info = new GroupInfo
+        {
+            Stream = definition.Stream,
+            Group = definition.Group,
+            Settings = definition.Settings.ToWire(),
+            CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(summary.CreatedAt),
+            ParkedCount = summary.ParkedCount,
+            OutboxCount = summary.OutboxCount,
+            Running = summary.Holder is not null,
+            OwnerAddress = summary.Holder?.Address?.ToString() ?? string.Empty,
+        };
+        if (definition.Checkpoint >= 0)
+        {
+            info.Checkpoint = definition.Checkpoint;
+        }
+
+        return info;
+    }
+
+    /// <summary>
+    /// The last number of the group's stream, in the group's numbering: an ordinal under ordinal
+    /// numbering, a position for <c>$all</c> or a virtual stream, a revision for a plain stream.
+    /// </summary>
+    private async Task<long?> LastKnownAsync(SubscriptionGroupDefinition definition, CancellationToken cancellationToken)
+    {
+        if (StreamNames.TryParseVirtual(definition.Stream, out var virtualStream))
+        {
+            var head = definition.Settings.Numbering == Numbering.Ordinal
+                ? await store.OrdinalHeadAsync(virtualStream, cancellationToken).ConfigureAwait(false)
+                : await store.VirtualHeadAsync(virtualStream, tail.Head, cancellationToken).ConfigureAwait(false);
+            return head?.Last;
+        }
+
+        if (definition.Stream == StreamNames.All)
+        {
+            return tail.Head > 0 ? tail.Head : null;
+        }
+
+        try
+        {
+            return (await store.ReadAsync(definition.Stream, Direction.Backwards, null, 1, cancellationToken).ConfigureAwait(false))?.Head.Last;
+        }
+        catch (StreamDeletedException)
+        {
+            // A group outlives its stream; a deleted stream has no last number to report.
+            return null;
+        }
+    }
+
     private static string ReadableStreamName(string stream)
     {
         if (string.IsNullOrEmpty(stream))
@@ -247,7 +359,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     private async Task ServeAsync(SubscriptionGroupDefinition definition, int buffer, string lease, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
         await using var live = new SubscriptionGroupRuntime(store, tail, groups, timeProvider, definition, buffer);
-        registry.Attach(definition.Id, live.Wake);
+        registry.Attach(definition.Id, live.Wake, live.Describe);
         await responseStream.WriteAsync(
             new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = Guid.NewGuid().ToString("D"), Checkpoint = live.Checkpoint } },
             cancellationToken).ConfigureAwait(false);

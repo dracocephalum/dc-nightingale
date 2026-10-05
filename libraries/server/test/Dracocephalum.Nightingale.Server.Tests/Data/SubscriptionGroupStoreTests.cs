@@ -211,6 +211,91 @@ public sealed class SubscriptionGroupStoreTests
         lost!.Owner.ShouldBe("two");
     }
 
+    [Fact]
+    public async Task Delete_WhenTheConsumerTakesARowOffTheOutboxUnderIt_ShouldReadAgainAndStillDeleteTheGroup()
+    {
+        // Arrange: one message on the outbox when the delete reads it, delivered and taken off
+        // by the group's consumer before the delete writes.
+        var sut = Store();
+        var consumer = new SubscriptionGroupStore(_contexts, "tenant", _time);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(Billing, null, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        _contexts.BeforeSave = async () =>
+        {
+            _contexts.BeforeSave = null;
+            await consumer.DequeueAsync(Billing, 40, TestContext.Current.CancellationToken);
+        };
+
+        // Act
+        var deleted = await sut.DeleteAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+
+        // Assert
+        deleted.ShouldBeTrue();
+        (await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken)).ShouldBeNull();
+        (await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Describe_ShouldGiveTheGroupWithItsCountsAndWhoHoldsItsLeaseWhileTheLeaseLasts()
+    {
+        // Arrange: two parked, one of them replayed onto the outbox, and a lease that lasts thirty seconds.
+        var sut = Store();
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await sut.SaveCheckpointAsync(Billing, 41, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(Billing, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(Billing), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Act
+        var held = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+        _time.Advance(TimeSpan.FromSeconds(31));
+        var lapsed = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+        var missing = await sut.DescribeAsync("orders-1", "nobody", TestContext.Current.CancellationToken);
+
+        // Assert
+        var summary = held.ShouldNotBeNull();
+        summary.Definition.Id.ShouldBe(Billing);
+        summary.Definition.Checkpoint.ShouldBe(41);
+        summary.CreatedAt.ShouldBe(Now);
+        summary.ParkedCount.ShouldBe(1);
+        summary.OutboxCount.ShouldBe(1);
+        summary.Holder.ShouldBe(new LeaseHolder("one", new Uri("http://one:5000")));
+        lapsed.ShouldNotBeNull().Holder.ShouldBeNull();
+        missing.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task List_ShouldGiveEveryGroupOrThoseOfOneStreamInOrderEachWithItsOwnCountsAndHolder()
+    {
+        // Arrange: three groups over two streams; one has parked messages, another a lease.
+        var sut = Store();
+        var shipping = Guid.CreateVersion7();
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "shipping", GroupSettings.Default, -1) { Id = shipping }, TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(shipping), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync("ordinals", "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Act
+        var all = await sut.ListAsync(null, TestContext.Current.CancellationToken);
+        var ofOne = await sut.ListAsync("orders-1", TestContext.Current.CancellationToken);
+        var ofNone = await sut.ListAsync("orders-9", TestContext.Current.CancellationToken);
+
+        // Assert
+        all.Select(summary => summary.Definition.Stream + "/" + summary.Definition.Group).ShouldBe(["orders-1/billing", "orders-1/shipping", "orders-2/billing"]);
+        ofOne.Select(summary => summary.Definition.Group).ShouldBe(["billing", "shipping"]);
+        ofOne[0].ParkedCount.ShouldBe(2);
+        ofOne[0].Holder.ShouldBeNull();
+        ofOne[1].ParkedCount.ShouldBe(0);
+        ofOne[1].Holder.ShouldBe(new LeaseHolder("one", null));
+        all[2].OutboxCount.ShouldBe(0);
+        ofNone.ShouldBeEmpty();
+    }
+
     private SubscriptionGroupStore Store() => new(_contexts, "tenant", _time);
 
     /// <summary>

@@ -42,6 +42,8 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     private readonly Channel<bool> _wakes = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private readonly SemaphoreSlim _draining = new(1, 1);
     private readonly SemaphoreSlim _room;
+    private readonly int _consumerBuffer;
+    private readonly DateTimeOffset _connectedAt;
     private readonly CancellationTokenSource _stopping = new();
     private readonly Task _reader;
     private readonly Task _dispatcher;
@@ -69,6 +71,8 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         _checkpoint = definition.Checkpoint;
         _written = definition.Checkpoint;
         _lastWrite = time.GetUtcNow();
+        _connectedAt = _lastWrite;
+        _consumerBuffer = consumerBuffer;
         _byOrdinal = definition.Settings.Numbering == Numbering.Ordinal && StreamNames.TryParseVirtual(definition.Stream, out _virtual);
         _byPosition = StreamNames.IsReserved(definition.Stream) && !_byOrdinal;
 
@@ -105,6 +109,16 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
 
     /// <summary>Gets a task that faults when delivery fails, so the consumer's call can end with the cause.</summary>
     public Task Delivery { get; }
+
+    /// <summary>How the group stands right now: since when its consumer is connected and what it has outstanding.</summary>
+    /// <returns>The numbers, taken together under the group's lock.</returns>
+    public SubscriptionGroupLive Describe()
+    {
+        lock (_gate)
+        {
+            return new SubscriptionGroupLive(_connectedAt, _inFlight.Count, _retries.Count, _consumerBuffer);
+        }
+    }
 
     /// <summary>Wakes the group: it looks at its outbox and queues what is due, ahead of the stream. Coalesces.</summary>
     public void Wake() => _wakes.Writer.TryWrite(true);

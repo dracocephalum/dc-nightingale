@@ -12,7 +12,9 @@ events to a stream, create a group over it from its start with one retry
 before parking, consume as the group's one consumer, acknowledge two events,
 refuse the payment once and see it come back with its retry count, refuse it
 again and see it parked, leave, come back to a checkpoint that covers all
-three revisions, replay that one parked message by itself while connected and
+three revisions, ask the server about the group and see where it runs, its
+checkpoint against the stream's last revision and the one parked message,
+replay that one parked message by itself while connected and
 receive it at once, acknowledge it, and delete the group. Then it drops the
 database.
 The scenario's test runs exactly the same code and asserts the report it

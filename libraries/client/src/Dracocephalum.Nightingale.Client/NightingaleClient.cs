@@ -295,6 +295,53 @@ public sealed class NightingaleClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Describes a persistent-subscription group: its settings, its checkpoint, what is parked
+    /// and on its outbox, the last number of its stream, and where it runs. While a consumer is
+    /// connected, the instance that runs the group answers and adds what only it knows; when
+    /// that is another instance that says where, the client asks there instead, once.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The group's description.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    public async Task<PersistentSubscriptionInfo> GetPersistentSubscriptionInfoAsync(string stream, string group, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        var request = new GetInfoRequest { Stream = stream, Group = group };
+        try
+        {
+            return await InfoAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
+        {
+            return await InfoAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Lists the persistent-subscription groups, every one or those of one stream, each with
+    /// what the store holds about it. The numbers only a running group's instance knows are not
+    /// in a listing; <see cref="GetPersistentSubscriptionInfoAsync"/> gives them for one group.
+    /// </summary>
+    /// <param name="stream">The stream whose groups are listed, or <see langword="null"/> for every group.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The groups, ordered by stream and then by group.</returns>
+    public async Task<IReadOnlyList<PersistentSubscriptionInfo>> ListPersistentSubscriptionsAsync(string? stream = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _persistent.ListAsync(new ListRequest { Stream = stream ?? string.Empty }, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response.Groups.Select(info => info.ToPersistentSubscriptionInfo()).ToList();
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
+    /// <summary>
     /// Connects to a persistent-subscription group as its consumer and waits for the server's
     /// confirmation; the subscription then streams the events, each to be acknowledged or refused.
     /// When the group runs in another instance that says where, the client connects there
@@ -348,6 +395,19 @@ public sealed class NightingaleClient : IAsyncDisposable
         {
             await subscription.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static async Task<PersistentSubscriptionInfo> InfoAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, GetInfoRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await client.GetInfoAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response.Info.ToPersistentSubscriptionInfo();
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
         }
     }
 

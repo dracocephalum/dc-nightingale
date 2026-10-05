@@ -84,12 +84,29 @@ public sealed class RedirectTests : IAsyncLifetime
         var replayed = await ReplayWhenParkedAsync(new PersistentSubscriptions.PersistentSubscriptionsClient(ChannelTo(address)));
         var again = (await NextAsync(consumer)).Event;
 
+        // The group's info follows the same rule, and the listing does not: any instance lists
+        // the group and says where it runs.
+        var refusedInfo = await Should.ThrowAsync<RpcException>(async () =>
+            await onSecond.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken));
+        var info = (await onFirst.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+        var listed = (await onSecond.ListAsync(new ListRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken)).Groups;
+
         // Assert
         Detail(refusedRead).Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
         Detail(refusedRead).Metadata["address"].ShouldBe(firstAddress.ToString());
         address.ShouldBe(firstAddress);
         replayed.ShouldBe(1);
         again.Event.Id.ShouldBe(placed.Id);
+        Detail(refusedInfo).Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
+        Detail(refusedInfo).Metadata["address"].ShouldBe(firstAddress.ToString());
+        info.Running.ShouldBeTrue();
+        info.OwnerAddress.ShouldBe(firstAddress.ToString());
+        info.LastKnownPosition.ShouldBe(1);
+        info.Live.ShouldNotBeNull().ConsumerBufferSize.ShouldBe(5);
+        info.Live.InFlightCount.ShouldBe(1);
+        listed.ShouldHaveSingleItem().Running.ShouldBeTrue();
+        listed[0].OwnerAddress.ShouldBe(firstAddress.ToString());
+        listed[0].Live.ShouldBeNull();
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT OwnerAddress FROM nightingale.Lease WHERE [Name] LIKE 'group:%'")).ShouldBe(firstAddress.ToString());
         _ = first;
     }
