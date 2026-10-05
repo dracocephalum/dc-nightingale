@@ -379,6 +379,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         live.OldestInFlightAt.ToDateTimeOffset().ShouldBe(Created.AddMinutes(2));
         live.ConsumerAddress.ShouldBe("ipv4:10.0.0.7:51234");
         live.AsOf.ToDateTimeOffset().ShouldBe(Created.AddMinutes(3));
+        live.FromOwner.ShouldBeFalse();
     }
 
     [Fact]
@@ -409,6 +410,15 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
             .ReturnsLazily(call => Task.FromResult<StreamSlice?>(new StreamSlice(new StreamHead(0, 1), call.GetArgument<long?>(2) == 0 ? [Record("orders-1", 0, 10), Record("orders-1", 1, 11)] : [])));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Backwards, null, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 1, 11)]));
+
+        // The store's listing has the same group with numbers written a while ago, and another
+        // that an instance elsewhere runs.
+        var stale = new SubscriptionGroupLive(Created, 99, 9, 5, null, null, null, Created);
+        A.CallTo(() => _groups.ListAsync(null, A<CancellationToken>._)).Returns(new List<SubscriptionGroupSummary>
+        {
+            new(definition, Created, 0, 0, new LeaseHolder(me, new Uri("http://localhost")), stale),
+            new(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), Created, 0, 0, new LeaseHolder("other-instance", null), stale),
+        });
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
@@ -416,6 +426,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // Act
         var info = (await client.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+        var listed = (await client.ListAsync(new ListRequest(), cancellationToken: TestContext.Current.CancellationToken)).Groups;
         await call.RequestStream.CompleteAsync();
 
         // Assert
@@ -429,6 +440,13 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         live.HasCheckpoint.ShouldBeFalse();
         live.OldestInFlightAt.ShouldNotBeNull();
         live.AsOf.ShouldNotBeNull();
+        live.FromOwner.ShouldBeTrue();
+
+        // The listing asks the group this instance runs and takes the other from its row, saying which.
+        listed[0].Live.FromOwner.ShouldBeTrue();
+        listed[0].Live.InFlightCount.ShouldBe(2);
+        listed[1].Live.FromOwner.ShouldBeFalse();
+        listed[1].Live.InFlightCount.ShouldBe(99);
 
         // The group wrote how it stands when its consumer connected, and cleared it when the consumer left.
         A.CallTo(() => _groups.SaveLiveAsync(definition.Id, A<SubscriptionGroupLive>.That.Matches(written => written != null && written.ConsumerBufferSize == 5), A<CancellationToken>._)).MustHaveHappened();
@@ -473,6 +491,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         all[0].Live.OldestInFlightAt.ShouldBeNull();
         all[0].Live.ConsumerAddress.ShouldBeEmpty();
         all[0].Live.AsOf.ToDateTimeOffset().ShouldBe(Created.AddMinutes(3));
+        all[0].Live.FromOwner.ShouldBeFalse();
         all[1].Running.ShouldBeFalse();
         all[1].Live.ShouldBeNull();
         all[1].HasCheckpoint.ShouldBeFalse();

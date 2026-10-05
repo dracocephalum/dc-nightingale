@@ -122,7 +122,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         // send the client, what it last wrote to its row is the answer, already in the info.
         if (here && registry.Describe(definition.Id) is { } live)
         {
-            info.Live = Live(live);
+            info.Live = Live(live, fromOwner: true);
         }
 
         return new GetInfoResponse { Info = info };
@@ -138,7 +138,17 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         var response = new ListResponse();
         foreach (var summary in await groups.ListAsync(stream, context.CancellationToken).ConfigureAwait(false))
         {
-            response.Groups.Add(Info(summary));
+            // A group this instance runs is asked directly, which costs nothing and is as of
+            // now; the others are as their rows have them.
+            var info = Info(summary);
+            if (summary.Holder is { } holder
+                && string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal)
+                && registry.Describe(summary.Definition.Id) is { } live)
+            {
+                info.Live = Live(live, fromOwner: true);
+            }
+
+            response.Groups.Add(info);
         }
 
         return response;
@@ -265,7 +275,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             OutboxCount = summary.OutboxCount,
             Running = summary.Holder is not null,
             OwnerAddress = summary.Holder?.Address?.ToString() ?? string.Empty,
-            Live = summary.Live is null ? null : Live(summary.Live),
+            Live = summary.Live is null ? null : Live(summary.Live, fromOwner: false),
         };
         if (definition.Checkpoint >= 0)
         {
@@ -276,7 +286,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     }
 
     /// <summary>How a running group stands, in its wire form.</summary>
-    private static GroupLiveInfo Live(SubscriptionGroupLive live)
+    private static GroupLiveInfo Live(SubscriptionGroupLive live, bool fromOwner)
     {
         var info = new GroupLiveInfo
         {
@@ -286,6 +296,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             ConsumerBufferSize = live.ConsumerBufferSize,
             ConsumerAddress = live.ConsumerAddress ?? string.Empty,
             AsOf = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.AsOf),
+            FromOwner = fromOwner,
         };
         if (live.Checkpoint is { } checkpoint)
         {

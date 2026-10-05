@@ -42,6 +42,7 @@ public sealed class PersistentSubscriptionInfoTests
                 OldestInFlightAt = Timestamp.FromDateTimeOffset(Connected.AddMinutes(1)),
                 ConsumerAddress = "ipv4:10.0.0.7:51234",
                 AsOf = Timestamp.FromDateTimeOffset(Connected.AddMinutes(2)),
+                FromOwner = true,
             },
         });
         await using var sut = new NightingaleClient(invoker);
@@ -63,7 +64,7 @@ public sealed class PersistentSubscriptionInfoTests
         info.Running.ShouldBeTrue();
         info.OwnerAddress.ShouldBe(new Uri("http://node-1:5000/"));
         info.LastKnownPosition.ShouldBe(57);
-        info.Live.ShouldBe(new PersistentSubscriptionLiveInfo(Connected, 4, 1, 10, 43, Connected.AddMinutes(1), "ipv4:10.0.0.7:51234", Connected.AddMinutes(2)));
+        info.Live.ShouldBe(new PersistentSubscriptionLiveInfo(Connected, 4, 1, 10, 43, Connected.AddMinutes(1), "ipv4:10.0.0.7:51234", Connected.AddMinutes(2), true));
     }
 
     [Fact]
@@ -109,6 +110,7 @@ public sealed class PersistentSubscriptionInfoTests
         info.Live.Checkpoint.ShouldBeNull();
         info.Live.OldestInFlightAt.ShouldBeNull();
         info.Live.ConsumerAddress.ShouldBeNull();
+        info.Live.FromOwner.ShouldBeFalse();
     }
 
     [Fact]

@@ -123,7 +123,9 @@ no instance has them all.
   group runs and where, and the same live numbers as they were a few seconds
   ago. A running group writes how it stands to its row each time it renews
   its lease, every ten seconds at most, and each answer says when its
-  numbers were taken. The same row answers for one group when its owner
+  numbers were taken. The groups the answering instance runs itself are
+  asked directly and are as of now; every group's numbers say which they
+  are, the running group's own or the stored ones. The same row answers for one group when its owner
   advertises no address to send the client to.
 - **The stored numbers are for reading.** Nothing decides by them: who runs
   a group is its lease's to say, and its progress its checkpoint's. They

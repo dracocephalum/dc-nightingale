@@ -49,8 +49,10 @@ service PersistentSubscriptions {
   // run in whichever instance their consumer reached, so no instance has
   // them all in memory. A running group writes how it stands to the store
   // each time it renews its lease, and the listing carries that: the live
-  // numbers as they were at as_of, a few seconds old. GetInfo gives them as
-  // they are now, for one group. Errors: INVALID_STREAM_NAME.
+  // numbers as they were at as_of, a few seconds old. The groups the
+  // answering instance runs itself are the exception: their numbers are as
+  // of now, and from_owner says which is which. GetInfo gives them as they
+  // are now, for one group. Errors: INVALID_STREAM_NAME.
   rpc List (ListRequest) returns (ListResponse);
 
   // Connects a consumer to a group. The first request carries the options;
@@ -205,6 +207,10 @@ message GroupLiveInfo {
   string consumer_address = 7;
   // When these numbers were taken.
   google.protobuf.Timestamp as_of = 8;
+  // Where these numbers came from: true when the instance that answered
+  // runs the group and read them from the running group, so they are as of
+  // now; false when they are what the group last wrote to the store.
+  bool from_owner = 9;
 }
 
 message PersistentReadRequest {
