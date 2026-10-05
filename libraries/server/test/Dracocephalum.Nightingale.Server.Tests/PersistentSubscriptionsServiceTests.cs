@@ -352,7 +352,13 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange: there is nowhere to send the client, so what the store holds is the answer.
         A.CallTo(() => _groups.DescribeAsync("$all", "audit", A<CancellationToken>._))
-            .Returns(new SubscriptionGroupSummary(new SubscriptionGroupDefinition("$all", "audit", GroupSettings.Default, 12), Created, 0, 0, new LeaseHolder("other-instance", null)));
+            .Returns(new SubscriptionGroupSummary(
+                new SubscriptionGroupDefinition("$all", "audit", GroupSettings.Default, 12),
+                Created,
+                0,
+                0,
+                new LeaseHolder("other-instance", null),
+                new SubscriptionGroupLive(Created.AddMinutes(1), 3, 1, 10, 14, Created.AddMinutes(2), "ipv4:10.0.0.7:51234", Created.AddMinutes(3))));
         _tail.Advance(15);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
@@ -363,7 +369,16 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         info.Running.ShouldBeTrue();
         info.OwnerAddress.ShouldBeEmpty();
         info.LastKnownPosition.ShouldBe(15);
-        info.Live.ShouldBeNull();
+
+        // What the running group last wrote to its row, with when it wrote it.
+        var live = info.Live.ShouldNotBeNull();
+        live.InFlightCount.ShouldBe(3);
+        live.AwaitingRetryCount.ShouldBe(1);
+        live.ConsumerBufferSize.ShouldBe(10);
+        live.Checkpoint.ShouldBe(14);
+        live.OldestInFlightAt.ToDateTimeOffset().ShouldBe(Created.AddMinutes(2));
+        live.ConsumerAddress.ShouldBe("ipv4:10.0.0.7:51234");
+        live.AsOf.ToDateTimeOffset().ShouldBe(Created.AddMinutes(3));
     }
 
     [Fact]
@@ -411,15 +426,28 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         live.AwaitingRetryCount.ShouldBe(0);
         live.ConsumerBufferSize.ShouldBe(5);
         live.ConnectedAt.ShouldNotBeNull();
+        live.HasCheckpoint.ShouldBeFalse();
+        live.OldestInFlightAt.ShouldNotBeNull();
+        live.AsOf.ShouldNotBeNull();
+
+        // The group wrote how it stands when its consumer connected, and cleared it when the consumer left.
+        A.CallTo(() => _groups.SaveLiveAsync(definition.Id, A<SubscriptionGroupLive>.That.Matches(written => written != null && written.ConsumerBufferSize == 5), A<CancellationToken>._)).MustHaveHappened();
+        await Until(() => A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<CancellationToken>._)).MustHaveHappened());
     }
 
     [Fact]
-    public async Task List_ShouldGiveWhatTheStoreHoldsForEachGroupAndNothingOnlyARunningGroupKnows()
+    public async Task List_ShouldGiveWhatTheStoreHoldsForEachGroupWithWhatARunningGroupLastWrote()
     {
         // Arrange
         A.CallTo(() => _groups.ListAsync(null, A<CancellationToken>._)).Returns(new List<SubscriptionGroupSummary>
         {
-            new(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, 9), Created, 3, 0, new LeaseHolder("other-instance", new Uri("http://other-instance:5000"))),
+            new(
+                new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, 9),
+                Created,
+                3,
+                0,
+                new LeaseHolder("other-instance", new Uri("http://other-instance:5000")),
+                new SubscriptionGroupLive(Created.AddMinutes(1), 2, 0, 10, 11, null, null, Created.AddMinutes(3))),
             new(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), Created, 0, 0, null),
         });
         A.CallTo(() => _groups.ListAsync("orders-2", A<CancellationToken>._)).Returns(new List<SubscriptionGroupSummary>
@@ -440,8 +468,13 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         all[0].Checkpoint.ShouldBe(9);
         all[0].ParkedCount.ShouldBe(3);
         all[0].HasLastKnownPosition.ShouldBeFalse();
-        all[0].Live.ShouldBeNull();
+        all[0].Live.ShouldNotBeNull().InFlightCount.ShouldBe(2);
+        all[0].Live.Checkpoint.ShouldBe(11);
+        all[0].Live.OldestInFlightAt.ShouldBeNull();
+        all[0].Live.ConsumerAddress.ShouldBeEmpty();
+        all[0].Live.AsOf.ToDateTimeOffset().ShouldBe(Created.AddMinutes(3));
         all[1].Running.ShouldBeFalse();
+        all[1].Live.ShouldBeNull();
         all[1].HasCheckpoint.ShouldBeFalse();
         ofOne.ShouldHaveSingleItem().Stream.ShouldBe("orders-2");
         badName.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");

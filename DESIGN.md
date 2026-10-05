@@ -299,6 +299,13 @@ and compared in the database, and changing one is a column update. The
 store's properties are the other case, one object with a few facts, and are
 a row each.
 
+A group's row has three kinds of column: its settings, its state, the
+checkpoint and when it was created, and a snapshot of how it stands while
+it runs, the columns named `Live`, written with each renewal of its lease
+and cleared when its consumer leaves. The snapshot is what lets any
+instance list every group with its live numbers. It is read only under a
+held lease and nothing decides by it.
+
 The tables the gateway keeps, subscription groups, their parked events and
 outbox, leases, the sequencer's progress and the store's properties, are one EF
 Core context, `NightingaleDbContext`, in the server library. The context owns

@@ -19,6 +19,9 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     /// <summary>How many times a delete is tried while the group's rows change under it.</summary>
     private const int DeleteAttempts = 5;
 
+    /// <summary>The longest consumer address the row holds; a longer one is cut, being for reading only.</summary>
+    private const int MaxConsumerAddressLength = 200;
+
     /// <inheritdoc/>
     public async Task CreateAsync(SubscriptionGroupDefinition group, CancellationToken cancellationToken)
     {
@@ -83,6 +86,37 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     }
 
     /// <inheritdoc/>
+    public async Task SaveLiveAsync(Guid groupId, SubscriptionGroupLive? live, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await context.SubscriptionGroups
+            .SingleOrDefaultAsync(row => row.Id == groupId, cancellationToken)
+            .ConfigureAwait(false);
+        if (row is null)
+        {
+            // The group was deleted under its consumer; there is nothing to write this on.
+            return;
+        }
+
+        row.LiveSnapshotAt = live?.AsOf;
+        row.LiveConnectedAt = live?.ConnectedAt;
+        row.LiveConsumerAddress = live?.ConsumerAddress is { Length: > MaxConsumerAddressLength } address ? address[..MaxConsumerAddressLength] : live?.ConsumerAddress;
+        row.LiveConsumerBufferSize = live?.ConsumerBufferSize;
+        row.LiveInFlightCount = live?.InFlightCount;
+        row.LiveAwaitingRetryCount = live?.AwaitingRetryCount;
+        row.LiveCheckpointPosition = live?.Checkpoint;
+        row.LiveOldestInFlightAt = live?.OldestInFlightAt;
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Deleted between the read and the write; the same as not being there.
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<SubscriptionGroupSummary?> DescribeAsync(string stream, string group, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -97,12 +131,14 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         var lease = SubscriptionGroupRegistry.LeaseName(row.Id);
         var now = timeProvider.GetUtcNow();
         var held = await context.Leases.AsNoTracking().SingleOrDefaultAsync(held => held.Name == lease, cancellationToken).ConfigureAwait(false);
+        var holder = held is null || held.ExpiresAt <= now ? null : Holder(held);
         return new SubscriptionGroupSummary(
             Definition(row),
             row.CreatedAt,
             await ParkedOf(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
             await OutboxOf(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
-            held is null || held.ExpiresAt <= now ? null : Holder(held));
+            holder,
+            Live(row, holder));
     }
 
     /// <inheritdoc/>
@@ -146,12 +182,11 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             .ToDictionary(held => held.Name, Holder, StringComparer.Ordinal);
 
         return rows
-            .Select(row => new SubscriptionGroupSummary(
-                Definition(row),
-                row.CreatedAt,
-                parked.GetValueOrDefault(row.Id),
-                outbox.GetValueOrDefault(row.Id),
-                leases.GetValueOrDefault(SubscriptionGroupRegistry.LeaseName(row.Id))))
+            .Select(row =>
+            {
+                var holder = leases.GetValueOrDefault(SubscriptionGroupRegistry.LeaseName(row.Id));
+                return new SubscriptionGroupSummary(Definition(row), row.CreatedAt, parked.GetValueOrDefault(row.Id), outbox.GetValueOrDefault(row.Id), holder, Live(row, holder));
+            })
             .ToList();
     }
 
@@ -403,6 +438,23 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         // spelling, and the group still goes by the names it was created with.
         return new SubscriptionGroupDefinition(row.Stream, row.Name, settings, row.CheckpointPosition) { Id = row.Id };
     }
+
+    /// <summary>
+    /// The row's snapshot, while the group's lease is held. Without a holder the columns are
+    /// what an instance that stopped without clearing them left behind, and say nothing.
+    /// </summary>
+    private static SubscriptionGroupLive? Live(SubscriptionGroup row, LeaseHolder? holder) =>
+        holder is null || row.LiveSnapshotAt is not { } asOf
+            ? null
+            : new SubscriptionGroupLive(
+                row.LiveConnectedAt ?? asOf,
+                row.LiveInFlightCount ?? 0,
+                row.LiveAwaitingRetryCount ?? 0,
+                row.LiveConsumerBufferSize ?? 0,
+                row.LiveCheckpointPosition,
+                row.LiveOldestInFlightAt,
+                row.LiveConsumerAddress,
+                asOf);
 
     private static LeaseHolder Holder(Lease lease) =>
         new(lease.Owner, lease.OwnerAddress is null ? null : new Uri(lease.OwnerAddress, UriKind.Absolute));

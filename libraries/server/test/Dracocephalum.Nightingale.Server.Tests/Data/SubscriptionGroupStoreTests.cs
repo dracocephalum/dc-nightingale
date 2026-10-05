@@ -267,6 +267,34 @@ public sealed class SubscriptionGroupStoreTests
     }
 
     [Fact]
+    public async Task SaveLive_ShouldBeReadBackWhileTheLeaseIsHeldAndSayNothingOnceItLapsesOrIsCleared()
+    {
+        // Arrange: a running group writes how it stands, under a lease that lasts thirty seconds.
+        var sut = Store();
+        var live = new SubscriptionGroupLive(Now.AddMinutes(-5), 4, 1, 10, 41, Now.AddSeconds(-20), "ipv4:10.0.0.7:51234", Now);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Act
+        await sut.SaveLiveAsync(Billing, live, TestContext.Current.CancellationToken);
+        var described = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+        var listed = await sut.ListAsync("orders-1", TestContext.Current.CancellationToken);
+        _time.Advance(TimeSpan.FromSeconds(31));
+        var lapsed = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.SaveLiveAsync(Billing, null, TestContext.Current.CancellationToken);
+        var cleared = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+        await sut.SaveLiveAsync(Guid.NewGuid(), live, TestContext.Current.CancellationToken);
+
+        // Assert: without a holder the columns are leftovers; cleared, there is nothing to read.
+        described.ShouldNotBeNull().Live.ShouldBe(live);
+        listed.ShouldHaveSingleItem().Live.ShouldBe(live);
+        lapsed.ShouldNotBeNull().Live.ShouldBeNull();
+        cleared.ShouldNotBeNull().Holder.ShouldNotBeNull();
+        cleared.Live.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task List_ShouldGiveEveryGroupOrThoseOfOneStreamInOrderEachWithItsOwnCountsAndHolder()
     {
         // Arrange: three groups over two streams; one has parked messages, another a lease.

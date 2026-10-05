@@ -34,6 +34,17 @@ public interface ISubscriptionGroupStore
     /// <returns>True when a group was deleted.</returns>
     Task<bool> DeleteAsync(string stream, string group, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Writes how a running group stands to its row, or clears it. What is written is to be
+    /// read, by a listing and by whoever is asked about a group it does not run, and nothing
+    /// decides by it: who runs a group is the lease's to say, and its progress the checkpoint's.
+    /// </summary>
+    /// <param name="groupId">The group's id.</param>
+    /// <param name="live">How the group stands, or <see langword="null"/> when its consumer has left.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the row is written; a group deleted meanwhile is left alone.</returns>
+    Task SaveLiveAsync(Guid groupId, SubscriptionGroupLive? live, CancellationToken cancellationToken);
+
     /// <summary>Reads a group with what the store knows around it: its counts and who holds its lease.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="group">The group name.</param>

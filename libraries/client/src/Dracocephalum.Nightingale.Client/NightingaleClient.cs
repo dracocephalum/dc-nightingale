@@ -322,8 +322,9 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     /// <summary>
     /// Lists the persistent-subscription groups, every one or those of one stream, each with
-    /// what the store holds about it. The numbers only a running group's instance knows are not
-    /// in a listing; <see cref="GetPersistentSubscriptionInfoAsync"/> gives them for one group.
+    /// what the store holds about it. A running group's numbers are in the listing as the group
+    /// last wrote them, a few seconds old; <see cref="GetPersistentSubscriptionInfoAsync"/> gives
+    /// them as they are now, for one group.
     /// </summary>
     /// <param name="stream">The stream whose groups are listed, or <see langword="null"/> for every group.</param>
     /// <param name="cancellationToken">The cancellation token.</param>

@@ -106,7 +106,11 @@ public sealed class RedirectTests : IAsyncLifetime
         info.Live.InFlightCount.ShouldBe(1);
         listed.ShouldHaveSingleItem().Running.ShouldBeTrue();
         listed[0].OwnerAddress.ShouldBe(firstAddress.ToString());
-        listed[0].Live.ShouldBeNull();
+
+        // The listing has the group's numbers as the group last wrote them to its row.
+        listed[0].Live.ShouldNotBeNull().ConsumerBufferSize.ShouldBe(5);
+        listed[0].Live.ConsumerAddress.ShouldNotBeEmpty();
+        info.Live.ConsumerAddress.ShouldBe(listed[0].Live.ConsumerAddress);
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT OwnerAddress FROM nightingale.Lease WHERE [Name] LIKE 'group:%'")).ShouldBe(firstAddress.ToString());
         _ = first;
     }

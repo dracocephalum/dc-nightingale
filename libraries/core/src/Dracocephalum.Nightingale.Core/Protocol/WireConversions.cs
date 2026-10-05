@@ -183,7 +183,11 @@ public static class WireConversions
                     info.Live.ConnectedAt?.ToDateTimeOffset() ?? default,
                     info.Live.InFlightCount,
                     info.Live.AwaitingRetryCount,
-                    info.Live.ConsumerBufferSize));
+                    info.Live.ConsumerBufferSize,
+                    info.Live.HasCheckpoint ? info.Live.Checkpoint : null,
+                    info.Live.OldestInFlightAt?.ToDateTimeOffset(),
+                    info.Live.ConsumerAddress.Length == 0 ? null : info.Live.ConsumerAddress,
+                    info.Live.AsOf?.ToDateTimeOffset() ?? default));
     }
 
     /// <summary>The wire form of a metadata object: its JSON text, or empty when there is nothing to say.</summary>

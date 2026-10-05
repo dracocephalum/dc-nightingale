@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 {
     [DbContext(typeof(NightingaleDbContext))]
-    [Migration("20261005011021_Initial")]
+    [Migration("20261005013611_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -126,6 +126,31 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("LiveAwaitingRetryCount")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("LiveCheckpointPosition")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("LiveConnectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("LiveConsumerAddress")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("LiveConsumerBufferSize")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LiveInFlightCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("LiveOldestInFlightAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("LiveSnapshotAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int>("MaxRetryCount")

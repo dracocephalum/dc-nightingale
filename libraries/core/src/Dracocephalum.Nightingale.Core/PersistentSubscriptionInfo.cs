@@ -2,9 +2,9 @@ namespace Dracocephalum.Nightingale;
 
 /// <summary>
 /// A persistent-subscription group as the server describes it: what it was created with, how far
-/// it has come, what is set aside, and where it runs. Everything but <see cref="Live"/> and
-/// <see cref="LastKnownPosition"/> is what the store holds, so a listing has it for every group;
-/// those two are only in the answer about one group.
+/// it has come, what is set aside, where it runs and how it stands there. A listing has all of
+/// it for every group but <see cref="LastKnownPosition"/>, which is only in the answer about one
+/// group; <see cref="Live"/> in a listing is a few seconds old.
 /// </summary>
 /// <remarks>
 /// The name is the contract's, kept on purpose: the reference client says "persistent subscription" and
@@ -20,7 +20,7 @@ namespace Dracocephalum.Nightingale;
 /// <param name="Running">Whether an instance runs the group now, which it does while a consumer is connected.</param>
 /// <param name="OwnerAddress">Where the instance that runs the group is reached; <see langword="null"/> when none runs it or it advertises no address.</param>
 /// <param name="LastKnownPosition">The last number of the group's stream, in the group's numbering; <see langword="null"/> in a listing, and when the stream holds nothing.</param>
-/// <param name="Live">What only the instance running the group knows; <see langword="null"/> in a listing, and when the group is not running.</param>
+/// <param name="Live">How the running group stands; <see langword="null"/> when the group is not running.</param>
 public sealed record PersistentSubscriptionInfo(
     string Stream,
     string Group,

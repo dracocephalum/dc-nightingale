@@ -116,7 +116,26 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     {
         lock (_gate)
         {
-            return new SubscriptionGroupLive(_connectedAt, _inFlight.Count, _retries.Count, _consumerBuffer);
+            // An event's deadline is when it was sent plus the message timeout, and one not sent
+            // yet has none; the oldest delivery is the earliest deadline, less that timeout.
+            DateTimeOffset? oldest = null;
+            foreach (var flight in _inFlight.Values)
+            {
+                if (flight.Deadline != default && (oldest is null || flight.Deadline < oldest))
+                {
+                    oldest = flight.Deadline;
+                }
+            }
+
+            return new SubscriptionGroupLive(
+                _connectedAt,
+                _inFlight.Count,
+                _retries.Count,
+                _consumerBuffer,
+                _checkpoint >= 0 ? _checkpoint : null,
+                oldest - _definition.Settings.MessageTimeout,
+                null,
+                _time.GetUtcNow());
         }
     }
 

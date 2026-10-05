@@ -110,16 +110,25 @@ counts, in-flight and parked counts.
 under a lease of its own, so different groups run in different instances and
 no instance has them all.
 
-- **Info about one group** is answered by the instance that runs it, which
-  adds what only it knows: when the consumer connected, how many events are
-  in flight, how many await a retry, and the consumer's buffer size. An
-  instance asked for a group another runs refuses with that instance's
-  address and the client asks there, once, as it does for a read. A group
-  nobody runs, and one whose owner advertises no address, is described by
-  whichever instance was asked, from the store alone.
-- **A listing** is answered by any instance from the store alone: settings,
-  checkpoint, parked and outbox counts, whether the group runs and where.
-  It carries no live numbers and never redirects.
+- **Info about one group** is answered by the instance that runs it, with
+  how the group stands at that moment: when the consumer connected and from
+  where, how many events are in flight, since when the oldest of them, how
+  many await a retry, the consumer's buffer size, and the checkpoint as the
+  running group has it. An instance asked for a group another runs refuses
+  with that instance's address and the client asks there, once, as it does
+  for a read. A group nobody runs is described by whichever instance was
+  asked, from the store.
+- **A listing** is answered by any instance from the store, and never
+  redirects: settings, checkpoint, parked and outbox counts, whether the
+  group runs and where, and the same live numbers as they were a few seconds
+  ago. A running group writes how it stands to its row each time it renews
+  its lease, every ten seconds at most, and each answer says when its
+  numbers were taken. The same row answers for one group when its owner
+  advertises no address to send the client to.
+- **The stored numbers are for reading.** Nothing decides by them: who runs
+  a group is its lease's to say, and its progress its checkpoint's. They
+  count only while the lease is held, so an instance that stopped without
+  clearing them leaves nothing that is believed.
 - **What is reported differs.** There is no status string: a group either
   runs, which it does while a consumer is connected, or does not. There are
   no rates, totals or per-connection statistics, and one consumer where the
@@ -137,8 +146,11 @@ no instance has them all.
 
 **Why:** a lease per group lets groups spread over instances instead of
 loading one; the price is that the live numbers of all groups are in no one
-place. A listing that gathered them would have the answering instance ask
-every owner, which is the relay in `PENDING.md`.
+memory. Writing them to the store with the lease renewal puts them in one
+place at the cost of a few seconds' age, which the reference's periodic
+statistics have too. The alternative, the answering instance asking every
+owner, needs instances to call each other, which nothing else here does;
+it is the relay in `PENDING.md`.
 
 ## A connection string lists instances, not gossip seeds
 
