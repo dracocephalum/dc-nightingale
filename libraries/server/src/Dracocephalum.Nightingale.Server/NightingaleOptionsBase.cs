@@ -13,6 +13,9 @@ public abstract class NightingaleOptionsBase
     /// <summary>The configuration section the options are bound from.</summary>
     public const string SectionName = "Nightingale";
 
+    /// <summary>The most events one append may carry unless the host says otherwise.</summary>
+    public const int DefaultMaxEventsPerAppend = 150;
+
     /// <summary>
     /// Gets or sets the schema the gateway keeps its own tables in: the groups, their parked events
     /// and outbox, the leases and the settings the store was initialized with. They are created
@@ -20,6 +23,15 @@ public abstract class NightingaleOptionsBase
     /// may be the schema the event store uses; the names do not collide.
     /// </summary>
     public string Schema { get; set; } = Data.NightingaleSchema.Default;
+
+    /// <summary>
+    /// Gets or sets the most events one append may carry. An append with more is refused before
+    /// anything is written, and its caller sends several. An append is received in full and
+    /// written in one transaction, which holds back live delivery until it commits, so its size
+    /// is bounded; and a backend can take only so many events in one write, which is the most
+    /// this may be set to.
+    /// </summary>
+    public int MaxEventsPerAppend { get; set; } = DefaultMaxEventsPerAppend;
 
     /// <summary>Gets or sets what the server allows to be deleted.</summary>
     public DeletionSettings Deletion { get; set; } = new();

@@ -49,18 +49,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   so the outcome is still a deleted stream, but the check passed on a
   revision that was no longer current. Close by: a conditional archive
   statement that carries the expected revision, if the store grows one.
-- **The default-host integration test fails once in a few full runs.** The
-  second `ProgramTests` case, which hosts the default program beside the
-  fixture's host on the same database, has failed about one run in three of
-  the full suite with "The CancellationTokenSource has been disposed", and
-  never when its class runs alone, eight times over. Once it was the first case instead,
-  with the exception thrown from the store daemon's own `StopAllAsync` as the
-  tailer stopped it. The tailer's shutdown
-  was reordered to drain its loop before stopping the store's daemon, which
-  cured the one reproducible case; what remains looks like a background task
-  of a stopped daemon throwing after disposal while several hosts stop at
-  once. Close by: capturing the stack from a failing full run and either
-  fixing the shutdown or filing it upstream.
 - **Live delivery waits out a polling interval.** The tailer runs the store's
   high-water agent, which polls on the store's cadence, so an event reaches a
   live subscriber up to a quarter of a second after its append. The store's
@@ -81,15 +69,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   interval, only during the sequencer's lag, which is about one tail interval.
   Close by: the sequencer publishing its progress in-process, and one poller
   per process for the other instances, once the subscription count demands it.
-- **A bounded read abandoned mid-page has stalled the next read.** While the
-  ordinals sample polled a virtual stream by disposing each read right after
-  its head, the following read sometimes got no answer for a minute, with no
-  blocking visible in SQL Server, and never once the sample consumed each read
-  to its end. Disposing the call cancels the server's page query mid-flight;
-  the suspect is the pooled connection that query ran on. Close by: a test
-  that cancels a streaming read during a page and then reads again on the
-  same host, and either a fix in how the reader cancels its command or an
-  upstream issue on the SQL client.
 - **An initialization interrupted between its two halves leaves a database the
   server refuses.** An empty database gets the event store's tables first and
   the gateway's migrations after; a process that dies between the two leaves
@@ -98,13 +77,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   data, and dropping it is the way out. Close by: recognizing a database that
   holds only the store's own tables, all empty, as one to carry on
   initializing.
-- **The sequencer's takeover is not tested with two instances.** The lease
-  logic is the group store's, tested there, and the batch transaction reads
-  the progress row under an update lock so an overlapping sequencer continues
-  from what the other committed; no test runs two hosts against one store to
-  see it happen. Close by: a test on the two-instance fixture the redirect
-  test already has, stopping the sequencing instance and watching the other
-  take over after the lease lapses.
 - **Subscriptions under tenant partitioning follow the wrong mark.** The
   tailer follows the store's single high-water mark; with a sequence per
   tenant the store keeps a mark per tenant, and the tail would need one too.
@@ -143,6 +115,9 @@ undecided adds it here rather than mentioning it once in a conversation.
   add-index call for the events table, or a first-class category column; note
   that the event-store table ensurer bypasses the tenancy database; guard the
   high-water mark's update so a lagging detector cannot lower it (several
-  gateway instances each run one). Close by: issues filed, links recorded here.
+  gateway instances each run one); write an append in as many commands as
+  it needs inside its one transaction, since one command stops at the
+  database's 2100 parameters, 190 events. Close by: issues filed, links
+  recorded here.
 - **No authentication until the first beta.** See `PENDING.md`. Close by:
   username and password per call, before beta.

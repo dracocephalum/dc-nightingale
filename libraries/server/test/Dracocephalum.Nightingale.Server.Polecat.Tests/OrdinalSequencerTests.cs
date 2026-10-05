@@ -43,7 +43,7 @@ public sealed class OrdinalSequencerTests
         var beforeTheInterval = askedTwice.Task.IsCompleted;
         while (!askedTwice.Task.IsCompleted)
         {
-            time.Advance(OrdinalSequencer.RenewInterval);
+            time.Advance(sut.RenewInterval);
             await Task.Delay(10, TestContext.Current.CancellationToken);
         }
 
@@ -52,5 +52,6 @@ public sealed class OrdinalSequencerTests
         // Assert: the loop is still running after the failure; it did not end with it.
         beforeTheInterval.ShouldBeFalse();
         asked.ShouldBeGreaterThanOrEqualTo(2);
+        sut.RenewInterval.ShouldBe(OrdinalSequencer.LeaseDuration / 3);
     }
 }

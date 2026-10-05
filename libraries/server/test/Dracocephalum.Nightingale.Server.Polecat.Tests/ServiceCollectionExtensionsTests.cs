@@ -74,6 +74,40 @@ public sealed class ServiceCollectionExtensionsTests
         exception.Message.ShouldContain("Sideways");
     }
 
+    [Theory]
+    [InlineData("0", "must be at least 1")]
+    [InlineData("191", "at most 190 events in one append")]
+    public void AddNightingalePolecat_WhenAnAppendMayCarryNoEventsOrMoreThanTheStoreTakes_ShouldRefuseAtRegistration(string configured, string expected)
+    {
+        // Arrange
+        var configuration = Configuration(
+            ("ConnectionStrings:Nightingale", ConnectionString),
+            ("Nightingale:MaxEventsPerAppend", configured));
+        var services = new ServiceCollection();
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => services.AddNightingalePolecat(configuration));
+
+        // Assert
+        exception.Message.ShouldContain("Nightingale:MaxEventsPerAppend");
+        exception.Message.ShouldContain(expected);
+    }
+
+    [Fact]
+    public void AddNightingalePolecat_ByDefault_ShouldAllowFewerEventsInOneAppendThanTheStoreTakes()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddNightingalePolecat(Configuration(("ConnectionStrings:Nightingale", ConnectionString), ("Nightingale:MaxEventsPerAppend", "190")));
+        using var provider = services.BuildServiceProvider();
+
+        // Assert: the default leaves room below the store's ceiling, and the ceiling itself is accepted.
+        NightingaleOptionsBase.DefaultMaxEventsPerAppend.ShouldBeLessThan(PolecatStreamStore.MaxEventsPerAppend);
+        provider.GetRequiredService<NightingaleOptions>().MaxEventsPerAppend.ShouldBe(190);
+    }
+
     private static IConfiguration Configuration(params (string Key, string? Value)[] values) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(values.Select(pair => new KeyValuePair<string, string?>(pair.Key, pair.Value)))

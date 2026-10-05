@@ -136,6 +136,25 @@ reached to open the same call to the owner and relay both directions, one
 hop, with a header that stops a second hop. It sits on the same lease-carried
 address and adds nothing to the store; built only if such a client appears.
 
+## Larger appends, at the host's choice
+
+An append carries at most so many events (`VARIANCES.md`), and the default
+stays that. Two things a host could be allowed to turn on, both only if the
+store offers the means, since the gateway never writes the store's event
+tables itself to get round it:
+
+- **Paging on the server.** The append is still received whole, then written
+  in as many commands as it needs inside its one transaction, so one atomic
+  append can carry more than one command holds. It needs the store to write
+  an append that way; that is an upstream request in `TODO.md`. Memory still
+  grows with the append, and the transaction with it, so a limit in bytes
+  would come with it.
+- **Streaming.** Written as it arrives, so memory stays flat. The transaction
+  is then open for as long as the client takes, and the head, live delivery
+  and numbering wait behind it; only for a host that can vouch for the link
+  between client and server, and with an answer for a client that stops
+  half-way, which has to be given up on promptly for everyone else's sake.
+
 ## Parked messages as rows, and the outbox beside them
 
 The reference parks a message, after its retries are spent, into a stream per

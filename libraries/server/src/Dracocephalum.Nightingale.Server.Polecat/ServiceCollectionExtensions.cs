@@ -73,6 +73,11 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options, string? readOnlyConnectionString)
     {
         options.Store.Validate();
+        if (options.MaxEventsPerAppend > PolecatStreamStore.MaxEventsPerAppend)
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.MaxEventsPerAppend)} is {options.MaxEventsPerAppend}; this backend takes at most {PolecatStreamStore.MaxEventsPerAppend} events in one append.");
+        }
+
         services.AddNightingaleOptions(options);
         services.AddPolecat((StoreOptions store) =>
         {
@@ -129,7 +134,8 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
                 options.Schema,
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
-                provider.GetRequiredService<ILogger<OrdinalSequencer>>()));
+                provider.GetRequiredService<ILogger<OrdinalSequencer>>(),
+                options.SequencerLeaseDuration));
         }
 
         return services;

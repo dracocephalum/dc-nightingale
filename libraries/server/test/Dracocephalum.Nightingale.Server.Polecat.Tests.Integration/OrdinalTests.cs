@@ -122,16 +122,102 @@ public sealed class OrdinalTests : IAsyncLifetime
         refused.Message.ShouldContain("initialized with ordinals");
     }
 
+    [Fact]
+    public async Task Sequencer_WhenTheInstanceThatNumbersStops_ShouldBeTakenOverByAnotherThatGoesOnFromItsNumbers()
+    {
+        // Arrange: two instances over one store. The lease lasts under a second where a
+        // server's lasts thirty, and the renewal a third of that as always, so the one that
+        // does not hold it asks again within the time this test is willing to pay for.
+        static void Ordinals(NightingaleOptions options)
+        {
+            options.Store.AssignOrdinals = true;
+            options.SequencerLeaseDuration = TimeSpan.FromMilliseconds(900);
+        }
+
+        var name = TestDatabases.NewName();
+        try
+        {
+            using var first = await TestDatabases.StartProvisionedHostAsync(name, Ordinals);
+            using var second = await TestDatabases.StartHostAsync(name, TestDatabases.FastBoot(Ordinals));
+            var before = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed"), Event("order_paid")], TestContext.Current.CancellationToken);
+            await NumberedAsync(first.Store(), before.Position);
+
+            // Act: the first instance stops, by itself numbering or not; whatever is appended
+            // from then on is the second's to number.
+            await first.StopAsync(TestContext.Current.CancellationToken);
+            var after = await second.Store().AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+            await NumberedAsync(second.Store(), after.Position);
+            var byCategory = await second.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+            var byType = await second.Store().ReadByOrdinalAsync(Placed, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+
+            // Assert: one sequence across both, dense, nothing numbered twice.
+            byCategory.Select(record => record.Ordinal).ShouldBe([0L, 1L, 2L]);
+            byCategory.Select(record => record.Stream).ShouldBe(["orders-1", "orders-1", "orders-2"]);
+            byType.Select(record => record.Ordinal).ShouldBe([0L, 1L]);
+            await second.StopAsync(TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await TestDatabases.DropAsync(name);
+        }
+    }
+
+    [Fact]
+    public async Task Sequencer_WhenTheInstanceThatHeldTheLeaseIsGone_ShouldTakeOverOnceTheLeaseLapses()
+    {
+        // Arrange: an instance that numbered and died without letting go leaves its lease
+        // behind, here for a second and a half. The instance that starts asks, is refused, and
+        // asks again every third of its own lease, three tenths of a second.
+        static void Ordinals(NightingaleOptions options)
+        {
+            options.Store.AssignOrdinals = true;
+            options.SequencerLeaseDuration = TimeSpan.FromMilliseconds(900);
+        }
+
+        var name = TestDatabases.NewName();
+        try
+        {
+            await TestDatabases.ProvisionAsync(name, Ordinals);
+            var services = new ServiceCollection();
+            services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(name), TestDatabases.FastBoot(Ordinals));
+            await using (var provider = services.BuildServiceProvider())
+            {
+                var held = await provider.GetRequiredService<ISubscriptionGroupStore>()
+                    .AcquireLeaseAsync(OrdinalSequencer.LeaseName, "an-instance-that-died", null, TimeSpan.FromMilliseconds(1500), TestContext.Current.CancellationToken);
+                held.ShouldBeNull();
+            }
+
+            using var host = await TestDatabases.StartHostAsync(name, TestDatabases.FastBoot(Ordinals));
+
+            // Act
+            var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+            var whileHeld = await host.Store().NumberedThroughAsync(TestContext.Current.CancellationToken);
+            await NumberedAsync(host.Store(), appended.Position);
+            var byCategory = await host.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+
+            // Assert: nothing is numbered under another's lease, and everything after it lapses.
+            whileHeld.ShouldBeLessThan(appended.Position);
+            byCategory.Select(record => record.Ordinal).ShouldBe([0L]);
+            await host.StopAsync(TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await TestDatabases.DropAsync(name);
+        }
+    }
+
     private IStreamStore Store => _host!.Store();
 
     private static EventData Event(string type) => new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>Waits for the sequencer to pass a position, which it does on the tail's cadence.</summary>
-    private async Task NumberedAsync(long position)
+    private Task NumberedAsync(long position) => NumberedAsync(Store, position);
+
+    private static async Task NumberedAsync(IStreamStore store, long position)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        while (await Store.NumberedThroughAsync(timeout.Token) < position)
+        while (await store.NumberedThroughAsync(timeout.Token) < position)
         {
             await Task.Delay(100, timeout.Token);
         }

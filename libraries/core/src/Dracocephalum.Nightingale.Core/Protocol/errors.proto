@@ -34,8 +34,9 @@ enum ErrorReason {
   // metadata: stream.
   ERROR_REASON_FILTER_NOT_ALLOWED = 5;
 
-  // INVALID_ARGUMENT. The append exceeds the server's size limit. metadata:
-  // limit (bytes).
+  // INVALID_ARGUMENT. The append carries more events than the server takes
+  // in one append; nothing was written. The caller sends them in several
+  // appends. metadata: stream, limit (the most events one append may carry).
   ERROR_REASON_APPEND_SIZE_EXCEEDED = 6;
 
   // INVALID_ARGUMENT. Anything else wrong with a request; the status message

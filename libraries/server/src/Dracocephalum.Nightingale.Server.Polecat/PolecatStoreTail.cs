@@ -28,12 +28,15 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
 
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _stopping = new();
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly ILogger<PolecatStoreTail> _logger = loggerFactory.CreateLogger<PolecatStoreTail>();
     private TaskCompletionSource _advanced = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IProjectionDaemon? _daemon;
     private Task? _loop;
     private long _head;
     private InvalidOperationException? _failure;
+    private bool _stopped;
+    private bool _disposed;
 
     /// <inheritdoc/>
     public long Head => Volatile.Read(ref _head);
@@ -100,25 +103,34 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
     /// <inheritdoc/>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Our loop is drained first, so nothing of ours waits on the tracker while the daemon stops.
-        await _stopping.CancelAsync().ConfigureAwait(false);
-        if (_loop is not null)
+        // A host can be stopped by two parties at once, whoever asked for the stop and the
+        // program's own wait for shutdown, and disposed by one while the other still stops it.
+        // Stopping and disposing therefore take turns, each does its work once, and disposing
+        // stops first: the daemon is never stopped twice, nor after it was disposed.
+        await _lifecycle.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
-            await _loop.ConfigureAwait(false);
-            _loop = null;
+            await StopOnceAsync().ConfigureAwait(false);
         }
-
-        if (_daemon is not null)
+        finally
         {
-            await _daemon.StopAllAsync().ConfigureAwait(false);
+            _lifecycle.Release();
         }
     }
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
-        if (_daemon is not null)
+        await _lifecycle.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            await StopOnceAsync().ConfigureAwait(false);
+            _disposed = true;
             switch (_daemon)
             {
                 case IAsyncDisposable asyncDisposable:
@@ -132,9 +144,35 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
             }
 
             _daemon = null;
+            _stopping.Dispose();
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private async Task StopOnceAsync()
+    {
+        if (_stopped)
+        {
+            return;
         }
 
-        _stopping.Dispose();
+        _stopped = true;
+
+        // Our loop is drained first, so nothing of ours waits on the tracker while the daemon stops.
+        await _stopping.CancelAsync().ConfigureAwait(false);
+        if (_loop is not null)
+        {
+            await _loop.ConfigureAwait(false);
+            _loop = null;
+        }
+
+        if (_daemon is not null)
+        {
+            await _daemon.StopAllAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>

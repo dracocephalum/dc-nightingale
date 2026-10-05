@@ -39,10 +39,20 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
 {
     /// <summary>SQL Server's error for a value longer than its column, naming the column.</summary>
+    /// <summary>
+    /// The most events the store takes in one append: it writes an append as one command with
+    /// eleven parameters an event and a few besides, and SQL Server takes 2100 in a command.
+    /// Measured, and held by a test, which fails when a version of the store changes it.
+    /// </summary>
+    public const int MaxEventsPerAppend = 190;
+
     private const int TruncationWithColumn = 2628;
 
     /// <summary>The same error as servers that do not name the column raise it.</summary>
     private const int Truncation = 8152;
+
+    /// <summary>SQL Server's error for a command with more parameters than it takes, 2100.</summary>
+    private const int TooManyParameters = 8003;
 
     private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
     private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
@@ -109,6 +119,14 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
         catch (InvalidStreamException)
         {
             throw new StreamDeletedException(stream);
+        }
+        catch (SqlException exception) when (exception.Number == TooManyParameters)
+        {
+            // The store writes an append as one command, a number of parameters per event, and
+            // the database takes 2100 in one. The server's limit keeps appends under that; this
+            // is for a store version that spends more parameters per event than the limit
+            // allowed for, so that it is still an answer and never an unhandled failure.
+            throw new AppendSizeExceededException(stream, 0, exception);
         }
         catch (SqlException exception) when (exception.Number is TruncationWithColumn or Truncation)
         {

@@ -90,6 +90,26 @@ public sealed class PolecatStoreTailTests
     }
 
     [Fact]
+    public async Task StopAndDispose_InAnyOrderAndMoreThanOnce_ShouldEachDoTheirWorkOnce()
+    {
+        // Arrange: a host is stopped by whoever asked and by its own wait for shutdown, and
+        // disposed by one of them while the other may still be stopping it.
+        var sut = new PolecatStoreTail(null!, null!, NullLoggerFactory.Instance);
+
+        // Act
+        var together = Task.WhenAll(
+            sut.StopAsync(TestContext.Current.CancellationToken),
+            sut.DisposeAsync().AsTask(),
+            sut.StopAsync(TestContext.Current.CancellationToken));
+        await together;
+        await sut.DisposeAsync();
+        await sut.StopAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        together.IsCompletedSuccessfully.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task WaitForAdvance_WhenTheHeadIsAlreadyBeyond_ShouldAnswerEvenAfterTheTailFailed()
     {
         // Arrange: the head reached 5 before the tail stopped following.

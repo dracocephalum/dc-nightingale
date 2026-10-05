@@ -60,6 +60,14 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     internal TimeSpan TailQuietWait { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
+    /// Gets or sets how long the sequencer's lease lasts without renewal, after which another
+    /// instance takes over the numbering. The holder renews, and a bystander asks again, at a
+    /// third of it. Not bound from configuration, like <see cref="TailQuietWait"/>: it is here
+    /// so that a test of one instance taking over from another does not wait out half a minute.
+    /// </summary>
+    internal TimeSpan SequencerLeaseDuration { get; set; } = OrdinalSequencer.LeaseDuration;
+
+    /// <summary>
     /// Gets or sets a value indicating whether the server opens a second, read-only connection and
     /// serves from it the reads a readable secondary can answer exactly: pages of <c>$all</c> and of
     /// the virtual streams, by position, at or below the high-water mark as that connection sees

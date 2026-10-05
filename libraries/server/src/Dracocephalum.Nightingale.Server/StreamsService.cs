@@ -136,6 +136,13 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 throw NightingaleErrors.InvalidArgument("After the options, every message of an append carries one event.");
             }
 
+            // Refused at the first event too many, before the rest is received or anything is
+            // written: an append is held in full until it is stored.
+            if (events.Count == options.MaxEventsPerAppend)
+            {
+                throw NightingaleErrors.AppendSizeExceeded(stream, options.MaxEventsPerAppend);
+            }
+
             var proposed = requestStream.Current.Event;
             if (string.IsNullOrEmpty(proposed.EventType))
             {
@@ -173,6 +180,12 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         catch (StreamDeletedException deleted)
         {
             throw NightingaleErrors.StreamDeleted(deleted.Stream);
+        }
+        catch (AppendSizeExceededException)
+        {
+            // The store refused what the limit let through: the limit is set above what this
+            // version of the store takes. The caller is told the same thing either way.
+            throw NightingaleErrors.AppendSizeExceeded(stream, options.MaxEventsPerAppend);
         }
         catch (ValueTooLongException tooLong) when (tooLong.What == ValueTooLongException.StreamName)
         {

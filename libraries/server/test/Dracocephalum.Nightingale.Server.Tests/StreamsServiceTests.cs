@@ -103,6 +103,46 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Append_WithAsManyEventsAsOneAppendMay_ShouldBeStoredAndWithOneMoreRefusedBeforeTheStore()
+    {
+        // Arrange: the host allows three events in one append.
+        _serverOptions.MaxEventsPerAppend = 3;
+        A.CallTo(() => _store.AppendAsync("orders-1", StreamState.NoStream, A<IReadOnlyList<EventData>>.That.Matches(events => events.Count == 3), A<CancellationToken>._))
+            .Returns(new AppendResult(2, 40));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var stored = await AppendOf(client, "orders-1", 3);
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendOf(client, "orders-2", 4));
+
+        // Assert: nothing of the fourth event's append reaches the store, and the caller is told the limit.
+        stored.Revision.ShouldBe(2);
+        refused.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        var info = refused.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("APPEND_SIZE_EXCEEDED");
+        info.Metadata["stream"].ShouldBe("orders-2");
+        info.Metadata["limit"].ShouldBe("3");
+        A.CallTo(() => _store.AppendAsync("orders-2", A<StreamState>._, A<IReadOnlyList<EventData>>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Append_WhenTheStoreTakesFewerEventsThanTheLimitAllowed_ShouldStillAnswerWithTheSizeError()
+    {
+        // Arrange: a store version that takes less in one write than the limit was set for.
+        A.CallTo(() => _store.AppendAsync("orders-1", StreamState.NoStream, A<IReadOnlyList<EventData>>._, A<CancellationToken>._))
+            .Throws(new AppendSizeExceededException("orders-1", 0));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendOf(client, "orders-1", 2));
+
+        // Assert
+        var info = refused.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("APPEND_SIZE_EXCEEDED");
+        info.Metadata["limit"].ShouldBe(NightingaleOptionsBase.DefaultMaxEventsPerAppend.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public async Task Append_WhenRevisionConflicts_ShouldFailWithTheReasonAndBothRevisions()
     {
         // Arrange
@@ -729,6 +769,31 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
     private sealed class TestOptions : NightingaleOptionsBase
     {
+    }
+
+    private static async Task<AppendResponse> AppendOf(Streams.StreamsClient client, string stream, int count)
+    {
+        using var call = client.Append(cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = stream, ExpectedRevision = -1 } }, TestContext.Current.CancellationToken);
+        try
+        {
+            for (var i = 0; i < count; i++)
+            {
+                await call.RequestStream.WriteAsync(new AppendRequest { Event = Proposed(Guid.NewGuid(), "order_placed", "{}") }, TestContext.Current.CancellationToken);
+            }
+
+            await call.RequestStream.CompleteAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The server ended the call at the first event too many; the answer says why.
+        }
+        catch (RpcException)
+        {
+            // The same, seen from the write.
+        }
+
+        return await call.ResponseAsync;
     }
 
     private static EventRecord Numbered(string stream, long revision, long position, long ordinal) =>

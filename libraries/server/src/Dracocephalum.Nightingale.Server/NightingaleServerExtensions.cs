@@ -40,6 +40,11 @@ public static class NightingaleServerExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
         options.Cluster.Validate();
+        if (options.MaxEventsPerAppend < 1)
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.MaxEventsPerAppend)} must be at least 1. It was {options.MaxEventsPerAppend}.");
+        }
+
         if (!IsIdentifier(options.Schema))
         {
             throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.Schema)} must be a plain identifier: a letter or an underscore, then letters, digits or underscores, at most 128 characters. It was '{options.Schema}'.");
