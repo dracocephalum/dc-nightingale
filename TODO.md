@@ -80,16 +80,18 @@ undecided adds it here rather than mentioning it once in a conversation.
   interval, only during the sequencer's lag, which is about one tail interval.
   Close by: the sequencer publishing its progress in-process, and one poller
   per process for the other instances, once the subscription count demands it.
-- **A sample's test can hang without end.** The ordinals sample's test once
+- **A sample's test can hang without end.** The ordinals scenario's test once
   ran for more than fifteen minutes without finishing, in a run that had the
   integration suite just before it, and was stopped from outside; it then
-  passed four times in a row in under thirty seconds each. The machine's SQL
-  Server was short of memory at the time, which has stalled queries before,
-  but the cause was not established. What is certain is that nothing in a
+  passed four times in a row in under thirty seconds each. The cause was not
+  established. A shortage of memory in the machine's SQL Server was suspected
+  then; a later look found the server with memory to spare, and the slow
+  starts it had been blamed for turned out to be query compilation, so that
+  suspicion has nothing behind it. What is certain is that nothing in a
   sample gives up: its calls carry no deadline and its test no time limit, so
   a stall anywhere is an endless run instead of a failure that says where.
-  Close by: a time limit on each sample's test, and a deadline on the calls
-  a sample makes, so the next stall names the step it happened in.
+  Close by: a time limit on each scenario's test, and a deadline on the calls
+  a scenario makes, so the next stall names the step it happened in.
 - **A bounded read abandoned mid-page has stalled the next read.** While the
   ordinals sample polled a virtual stream by disposing each read right after
   its head, the following read sometimes got no answer for a minute, with no
