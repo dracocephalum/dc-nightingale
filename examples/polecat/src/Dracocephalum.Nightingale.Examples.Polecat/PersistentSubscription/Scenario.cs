@@ -21,6 +21,7 @@ public static class Scenario
     /// <param name="CheckpointOnReturn">The checkpoint the second consumer was confirmed with.</param>
     /// <param name="Info">What the server said about the group while the second consumer waited, one message parked.</param>
     /// <param name="Listed">How many groups the stream's listing held.</param>
+    /// <param name="Parked">The group's parked messages at that moment.</param>
     public sealed record Report(
         IReadOnlyList<string> Delivered,
         int RetryCountOnRedelivery,
@@ -28,7 +29,8 @@ public static class Scenario
         string ReplayedType,
         long CheckpointOnReturn,
         PersistentSubscriptionInfo Info,
-        int Listed);
+        int Listed,
+        IReadOnlyList<ParkedMessageInfo> Parked);
 
     /// <summary>Runs the scenario.</summary>
     /// <param name="masterConnectionString">A connection string to the server's master database.</param>
@@ -93,6 +95,7 @@ public static class Scenario
         int replayed;
         PersistentSubscriptionInfo info;
         int listed;
+        IReadOnlyList<ParkedMessageInfo> parked;
         await using (var subscription = await ReconnectAsync(client, stream, group, cancellationToken).ConfigureAwait(false))
         {
             checkpointOnReturn = (await subscription.Confirmed.ConfigureAwait(false)).Checkpoint;
@@ -100,7 +103,8 @@ public static class Scenario
 
             info = await InfoOnceParkedAsync(client, stream, group, cancellationToken).ConfigureAwait(false);
             listed = (await client.ListPersistentSubscriptionsAsync(stream, cancellationToken).ConfigureAwait(false)).Count;
-            await output.WriteLineAsync($"8. Asked about the group: running at {info.OwnerAddress}, checkpoint {info.Checkpoint} of {info.LastKnownPosition}, {info.ParkedCount} parked, {info.OutboxCount} on the outbox, {info.Live?.InFlightCount} in flight; the stream's listing holds {listed} group.").ConfigureAwait(false);
+            parked = await client.ListParkedMessagesAsync(stream, group, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await output.WriteLineAsync($"8. Asked about the group: running at {info.OwnerAddress}, checkpoint {info.Checkpoint} of {info.LastKnownPosition}, {info.ParkedCount} parked, {info.OutboxCount} on the outbox, {info.Live?.InFlightCount} in flight; the stream's listing holds {listed} group. The parked message is revision {parked[0].Number}, redelivered {parked[0].RetryCount} time before it was parked: {parked[0].Reason}.").ConfigureAwait(false);
 
             replayed = await ReplayOnceParkedAsync(client, stream, group, position: 1, cancellationToken).ConfigureAwait(false);
             var messages = subscription.GetAsyncEnumerator(cancellationToken);
@@ -118,7 +122,7 @@ public static class Scenario
         await client.DeletePersistentSubscriptionAsync(stream, group, cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync("10. Deleted the group; dropping the database.").ConfigureAwait(false);
 
-        return new Report(delivered, retryOnRedelivery, replayed, replayedType, checkpointOnReturn, info, listed);
+        return new Report(delivered, retryOnRedelivery, replayed, replayedType, checkpointOnReturn, info, listed, parked);
     }
 
     private static EventData Event(string type) =>

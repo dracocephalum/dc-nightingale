@@ -41,7 +41,7 @@ undecided adds it here rather than mentioning it once in a conversation.
   group, and the virtual streams by ordinal on a store initialized with
   `Nightingale:Store:AssignOrdinals`; the samples under `examples/` are the
   end-to-end runs. Not yet: filters and checkpoints on `$all` (they answer
-  unimplemented), updating a group, listing its parked messages, competing consumers,
+  unimplemented), updating a group's settings, competing consumers,
   and the ordinal backfill, all in `PENDING.md`. Close by: group management
   next.
 - **A delete's expected-revision check is not atomic with the archive.** The

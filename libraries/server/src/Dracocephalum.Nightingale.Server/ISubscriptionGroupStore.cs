@@ -86,6 +86,42 @@ public interface ISubscriptionGroupStore
     /// <returns>How many messages are on the outbox as a result.</returns>
     Task<int> ReplayAsync(Guid groupId, long? number, SubscriptionParkedNumber by, DateTimeOffset dueAt, CancellationToken cancellationToken);
 
+    /// <summary>Moves every parked message below a number to the outbox, as <see cref="ReplayAsync"/> moves all or one.</summary>
+    /// <param name="groupId">The group's id.</param>
+    /// <param name="before">The number the moved messages are below.</param>
+    /// <param name="by">Which of a message's numbers <paramref name="before"/> is: the one the group speaks.</param>
+    /// <param name="dueAt">When the moved messages become deliverable.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many messages below the number are on the outbox as a result.</returns>
+    Task<int> ReplayBeforeAsync(Guid groupId, long before, SubscriptionParkedNumber by, DateTimeOffset dueAt, CancellationToken cancellationToken);
+
+    /// <summary>Removes parked messages for good: all of the group's, the one with a number, or every one below a number.</summary>
+    /// <param name="groupId">The group's id.</param>
+    /// <param name="number">The message's number, or <see langword="null"/>.</param>
+    /// <param name="before">The number the removed messages are below, or <see langword="null"/>; with neither, all are removed.</param>
+    /// <param name="by">Which of a message's numbers the two are: the one the group speaks.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many messages were removed.</returns>
+    Task<int> SkipAsync(Guid groupId, long? number, long? before, SubscriptionParkedNumber by, CancellationToken cancellationToken);
+
+    /// <summary>Lists a group's parked messages in the order of the number the group speaks, a page at a time.</summary>
+    /// <param name="groupId">The group's id.</param>
+    /// <param name="by">Which of a message's numbers orders the page and <paramref name="after"/> is.</param>
+    /// <param name="after">Only messages above this number, or <see langword="null"/> from the first.</param>
+    /// <param name="limit">The most messages to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The page.</returns>
+    Task<IReadOnlyList<SubscriptionParkedMessage>> ListParkedAsync(Guid groupId, SubscriptionParkedNumber by, long? after, int limit, CancellationToken cancellationToken);
+
+    /// <summary>Lists the messages on a group's outbox the same way.</summary>
+    /// <param name="groupId">The group's id.</param>
+    /// <param name="by">Which of a message's numbers orders the page and <paramref name="after"/> is.</param>
+    /// <param name="after">Only messages above this number, or <see langword="null"/> from the first.</param>
+    /// <param name="limit">The most messages to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The page.</returns>
+    Task<IReadOnlyList<SubscriptionOutboxMessage>> ListOutboxAsync(Guid groupId, SubscriptionParkedNumber by, long? after, int limit, CancellationToken cancellationToken);
+
     /// <summary>The outbox messages due by a moment, in the order they became due.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <param name="now">The moment.</param>

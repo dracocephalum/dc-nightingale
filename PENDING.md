@@ -144,14 +144,14 @@ has no random-access removal. Ours are rows, one per group and event, with
 the reason, the attempt count and when it was parked, and a replay moves a
 row to the group's outbox, the shape of a service bus's dead-letter queue:
 what is on the outbox is delivered ahead of the stream, a delivery that
-fails again moves the row back. Shipped: parking, replay of all and of one,
-delivery at once to a consumer connected to the serving instance. Pending:
-listing parked and outbox rows and skipping one by deleting it; replay of
-all before a number; and deferred delivery, a retry
+fails again moves the row back. Shipped: parking, replay of all, of one and
+of all before a number, delivery at once to a consumer connected to the
+serving instance, listing parked and outbox rows, and skipping parked ones.
+Pending: deferred delivery, a retry
 with a delay or a nack that says later, which is an outbox row with a due
 time in the future and a timer in the group's loop, the outbox already
-having the column. Shipped since: group info with the parked and outbox
-counts, and the listing of groups.
+having the column. Group info carries the parked and outbox
+counts.
 
 ## More reads from the read-only connection
 

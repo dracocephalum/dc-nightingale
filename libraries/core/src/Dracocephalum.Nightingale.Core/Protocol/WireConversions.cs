@@ -191,6 +191,24 @@ public static class WireConversions
                     info.Live.FromOwner));
     }
 
+    /// <summary>Maps a parked message from its wire form.</summary>
+    /// <param name="message">The wire message.</param>
+    /// <returns>The parked message.</returns>
+    public static ParkedMessageInfo ToParkedMessageInfo(this ParkedMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        return new ParkedMessageInfo(message.Number, Guid.Parse(message.EventId), message.Reason, message.RetryCount, message.ParkedAt?.ToDateTimeOffset() ?? default, message.Position, message.Revision);
+    }
+
+    /// <summary>Maps an outbox message from its wire form.</summary>
+    /// <param name="message">The wire message.</param>
+    /// <returns>The outbox message.</returns>
+    public static OutboxMessageInfo ToOutboxMessageInfo(this OutboxMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        return new OutboxMessageInfo(message.Number, Guid.Parse(message.EventId), message.Reason, message.RetryCount, message.DueAt?.ToDateTimeOffset() ?? default, message.Position, message.Revision);
+    }
+
     /// <summary>The wire form of a metadata object: its JSON text, or empty when there is nothing to say.</summary>
     /// <param name="metadata">The object, possibly null or empty.</param>
     /// <returns>The bytes.</returns>

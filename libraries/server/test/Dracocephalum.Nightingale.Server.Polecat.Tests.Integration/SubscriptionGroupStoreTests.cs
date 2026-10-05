@@ -100,6 +100,58 @@ public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)
     }
 
     [Fact]
+    public async Task ListSkipAndReplayBefore_ShouldGoByTheNumberTheGroupSpeaksAPageAtATime()
+    {
+        // Arrange: four parked messages whose revisions run the other way from their positions,
+        // so the order shows which number was used.
+        var sut = Store();
+        var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, GroupSettings.Default, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 100, 4, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 200, 3, null, Guid.NewGuid(), "b", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 300, 2, null, Guid.NewGuid(), "c", 3, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(id, 400, 1, null, Guid.NewGuid(), "d", 4, Now), TestContext.Current.CancellationToken);
+
+        // Act
+        var byPosition = await sut.ListParkedAsync(id, SubscriptionParkedNumber.Position, null, 10, TestContext.Current.CancellationToken);
+        var firstPage = await sut.ListParkedAsync(id, SubscriptionParkedNumber.Revision, null, 3, TestContext.Current.CancellationToken);
+        var secondPage = await sut.ListParkedAsync(id, SubscriptionParkedNumber.Revision, 3, 3, TestContext.Current.CancellationToken);
+        var replayed = await sut.ReplayBeforeAsync(id, 3, SubscriptionParkedNumber.Revision, Now, TestContext.Current.CancellationToken);
+        var replayedAgain = await sut.ReplayBeforeAsync(id, 3, SubscriptionParkedNumber.Revision, Now, TestContext.Current.CancellationToken);
+        var outbox = await sut.ListOutboxAsync(id, SubscriptionParkedNumber.Revision, null, 10, TestContext.Current.CancellationToken);
+        var outboxAfterOne = await sut.ListOutboxAsync(id, SubscriptionParkedNumber.Revision, 1, 10, TestContext.Current.CancellationToken);
+        var skippedOne = await sut.SkipAsync(id, 4, null, SubscriptionParkedNumber.Revision, TestContext.Current.CancellationToken);
+        var skippedMissing = await sut.SkipAsync(id, 4, null, SubscriptionParkedNumber.Revision, TestContext.Current.CancellationToken);
+        var skippedBefore = await sut.SkipAsync(id, null, 3, SubscriptionParkedNumber.Revision, TestContext.Current.CancellationToken);
+        var left = await sut.ListParkedAsync(id, SubscriptionParkedNumber.Revision, null, 10, TestContext.Current.CancellationToken);
+        var skippedAll = await sut.SkipAsync(id, null, null, SubscriptionParkedNumber.Revision, TestContext.Current.CancellationToken);
+        var none = await sut.ListParkedAsync(id, SubscriptionParkedNumber.Revision, null, 10, TestContext.Current.CancellationToken);
+
+        // Assert: skipping takes parked messages only; what a replay put on the outbox stays there.
+        byPosition.Select(message => message.Position).ShouldBe([100, 200, 300, 400]);
+        firstPage.Select(message => message.Revision).ShouldBe([1, 2, 3]);
+        firstPage[0].ShouldSatisfyAllConditions(
+            message => message.Position.ShouldBe(400),
+            message => message.Reason.ShouldBe("d"),
+            message => message.Attempts.ShouldBe(4),
+            message => message.ParkedAt.ShouldBe(Now));
+        secondPage.Select(message => message.Revision).ShouldBe([4]);
+        replayed.ShouldBe(2);
+        replayedAgain.ShouldBe(2, "already on the outbox, counted and left there");
+        outbox.Select(message => message.Revision).ShouldBe([1, 2]);
+        outboxAfterOne.Select(message => message.Revision).ShouldBe([2]);
+        skippedOne.ShouldBe(1);
+        skippedMissing.ShouldBe(0);
+        skippedBefore.ShouldBe(0, "the two below three are on the outbox, not parked");
+        left.Select(message => message.Revision).ShouldBe([3]);
+        skippedAll.ShouldBe(1);
+        none.ShouldBeEmpty();
+        (await sut.ListOutboxAsync(id, SubscriptionParkedNumber.Revision, null, 10, TestContext.Current.CancellationToken)).Count.ShouldBe(2);
+        await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Replay_ShouldMoveParkedMessagesToTheOutboxAndParkingShouldMoveThemBack()
     {
         // Arrange

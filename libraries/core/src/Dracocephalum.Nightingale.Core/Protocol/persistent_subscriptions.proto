@@ -3,7 +3,8 @@
 // acknowledged, retrying or parking what is not.
 //
 // The shape follows the reference protocol: unary Create, Delete, GetInfo,
-// List and ReplayParked, and one bidirectional Read whose request stream carries the
+// List and ReplayParked, with ListParked, ListOutbox and SkipParked beside
+// them, and one bidirectional Read whose request stream carries the
 // options first and then acknowledgements, while the response stream carries
 // the confirmation and the events. A group runs in one server instance at a
 // time; see "Ownership" below. Numbers, names, bodies and errors are defined
@@ -65,13 +66,33 @@ service PersistentSubscriptions {
   rpc Read (stream PersistentReadRequest) returns (stream PersistentReadResponse);
 
   // Moves parked messages to the group's outbox, from which they are
-  // delivered again ahead of the stream: all of them, or one by its number.
+  // delivered again ahead of the stream: all of them, one by its number, or
+  // every one below a number.
   // A consumer connected to the instance that serves the call receives them
   // at once; otherwise they are delivered at the next connection. Idempotent:
   // a message already on the outbox is counted and left there. A message
   // that fails again goes back to parked. Errors: GROUP_NOT_FOUND,
   // PARKED_MESSAGE_NOT_FOUND.
   rpc ReplayParked (ReplayParkedRequest) returns (ReplayParkedResponse);
+
+  // Lists a group's parked messages in the order of their numbers, a page at
+  // a time: which event each is, why it was parked and at which retry
+  // count. Any instance answers; the rows are the store's. Errors:
+  // GROUP_NOT_FOUND, INVALID_STREAM_NAME, INVALID_ARGUMENT.
+  rpc ListParked (ListMessagesRequest) returns (ListParkedResponse);
+
+  // Lists the messages on a group's outbox, the same way: parked messages a
+  // replay put back, not delivered yet. Errors: GROUP_NOT_FOUND,
+  // INVALID_STREAM_NAME, INVALID_ARGUMENT.
+  rpc ListOutbox (ListMessagesRequest) returns (ListOutboxResponse);
+
+  // Removes parked messages for good, so the group never delivers them: all
+  // of them, one by its number, or every one below a number. The events
+  // stay in their streams; only the group's record of them goes. A message
+  // on the outbox is not parked and is not touched. Any instance answers.
+  // Errors: GROUP_NOT_FOUND, PARKED_MESSAGE_NOT_FOUND, INVALID_STREAM_NAME,
+  // INVALID_ARGUMENT.
+  rpc SkipParked (SkipParkedRequest) returns (SkipParkedResponse);
 }
 
 message CreateRequest {
@@ -286,10 +307,78 @@ message ReplayParkedRequest {
     google.protobuf.Empty all = 3;
     // The parked message with this position, in the group's numbering.
     sint64 position = 4;
+    // Every parked message below this number, in the group's numbering.
+    sint64 before = 5;
   }
 }
 
 message ReplayParkedResponse {
   // How many messages were put back.
   int32 replayed = 1;
+}
+
+message ListMessagesRequest {
+  string stream = 1;
+  string group = 2;
+  // Only messages above this number, in the group's numbering: the last
+  // number of the page before. Absent for the first page.
+  optional sint64 after = 3;
+  // The most messages to return: 100 when not set, 1000 at most.
+  int32 limit = 4;
+}
+
+message ParkedMessage {
+  // The event's number in the group's numbering, the one ReplayParked and
+  // SkipParked take: a revision for a group over a stream, a position over
+  // $all or a virtual stream, an ordinal for a group created under ORDINAL.
+  sint64 number = 1;
+  string event_id = 2;
+  // Why it was parked: the consumer's reason, or that its retries were spent.
+  string reason = 3;
+  // Its retry count when it was parked: how many times it had been
+  // delivered again. A replay delivers it with this count.
+  int32 retry_count = 4;
+  google.protobuf.Timestamp parked_at = 5;
+  // The event's global position and its revision within its own stream,
+  // whichever the group counts by.
+  sint64 position = 6;
+  sint64 revision = 7;
+}
+
+message ListParkedResponse {
+  repeated ParkedMessage messages = 1;
+}
+
+message OutboxMessage {
+  sint64 number = 1;
+  string event_id = 2;
+  string reason = 3;
+  // The retry count it is delivered with.
+  int32 retry_count = 4;
+  // When it becomes deliverable.
+  google.protobuf.Timestamp due_at = 5;
+  sint64 position = 6;
+  sint64 revision = 7;
+}
+
+message ListOutboxResponse {
+  repeated OutboxMessage messages = 1;
+}
+
+message SkipParkedRequest {
+  string stream = 1;
+  string group = 2;
+  oneof which {
+    // Every parked message.
+    google.protobuf.Empty all = 3;
+    // The parked message with this position, in the group's numbering.
+    sint64 position = 4;
+    // Every parked message below this number, in the group's numbering.
+    sint64 before = 5;
+  }
+}
+
+message SkipParkedResponse {
+  // How many messages were removed.
+  int32 skipped = 1;
 }

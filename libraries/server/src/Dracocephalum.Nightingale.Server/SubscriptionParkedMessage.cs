@@ -13,6 +13,6 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="Ordinal">The event's ordinal within the group's virtual stream, when the group is numbered by ordinal.</param>
 /// <param name="EventId">The event's id.</param>
 /// <param name="Reason">Why it was parked: the consumer's reason, or the retry limit.</param>
-/// <param name="Attempts">How many deliveries it had.</param>
+/// <param name="Attempts">Its retry count when it was parked: how many times it had been delivered again.</param>
 /// <param name="ParkedAt">When it was parked.</param>
 public sealed record SubscriptionParkedMessage(Guid GroupId, long Position, long Revision, long? Ordinal, Guid EventId, string Reason, int Attempts, DateTimeOffset ParkedAt);

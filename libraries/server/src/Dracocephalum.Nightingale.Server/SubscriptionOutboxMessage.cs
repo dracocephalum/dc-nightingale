@@ -11,6 +11,6 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="Ordinal">The event's ordinal within the group's virtual stream, when the group is numbered by ordinal.</param>
 /// <param name="EventId">The event's id.</param>
 /// <param name="Reason">Why it was parked, kept so a second failure keeps the history.</param>
-/// <param name="Attempts">How many deliveries it had before it was parked.</param>
+/// <param name="Attempts">Its retry count when it was parked, which it is delivered with again.</param>
 /// <param name="DueAt">When it becomes deliverable; now, for a replay.</param>
 public sealed record SubscriptionOutboxMessage(Guid GroupId, long Position, long Revision, long? Ordinal, Guid EventId, string Reason, int Attempts, DateTimeOffset DueAt);
