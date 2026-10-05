@@ -48,20 +48,27 @@ internal static class EventSource
     }
 
     /// <summary>
-    /// What an ordinal reader does once it has read every numbered row: if the sequencer has passed
-    /// the head the reader last observed, wait for the tail to move beyond it; otherwise look again
-    /// after the poll interval, because the rows the reader is waiting for are committed and only
-    /// not numbered yet.
+    /// What an ordinal reader does once it has read every numbered row: if the sequencer had
+    /// passed the head the reader last observed, wait for the tail to move beyond it; otherwise
+    /// look again after the poll interval, because the rows the reader is waiting for are
+    /// committed and only not numbered yet.
     /// </summary>
-    /// <param name="store">The store.</param>
+    /// <remarks>
+    /// How far the sequencer had come is asked before the read, never after it. Asked after, the
+    /// answer can be "through the head" for a row the sequencer numbered between the read and
+    /// the question: the read missed it, the reader then waits for the tail to move, and on a
+    /// store nothing more is appended to it waits for good with the row never delivered.
+    /// </remarks>
     /// <param name="tail">The tail.</param>
+    /// <param name="numberedBeforeRead">How far the sequencer had numbered when the reader began the read it has just finished.</param>
     /// <param name="observed">The head the reader last took from the tail.</param>
     /// <param name="timeProvider">The clock.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The head to observe next: a new one after an advance, the same one after a poll.</returns>
-    public static async Task<long> AwaitNumberingAsync(IStreamStore store, IStoreTail tail, long observed, TimeProvider timeProvider, CancellationToken cancellationToken)
+    public static async Task<long> AwaitNumberingAsync(IStoreTail tail, long numberedBeforeRead, long observed, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
-        if (await store.NumberedThroughAsync(cancellationToken).ConfigureAwait(false) >= observed)
+        ArgumentNullException.ThrowIfNull(tail);
+        if (numberedBeforeRead >= observed)
         {
             return await tail.WaitForAdvanceAsync(observed, cancellationToken).ConfigureAwait(false);
         }
@@ -121,6 +128,7 @@ internal static class EventSource
         var observed = tail.Head;
         while (true)
         {
+            var numbered = await store.NumberedThroughAsync(cancellationToken).ConfigureAwait(false);
             while (true)
             {
                 var page = await store.ReadByOrdinalAsync(virtualStream, Direction.Forwards, next, pageSize, cancellationToken).ConfigureAwait(false);
@@ -136,7 +144,7 @@ internal static class EventSource
                 }
             }
 
-            observed = await AwaitNumberingAsync(store, tail, observed, timeProvider, cancellationToken).ConfigureAwait(false);
+            observed = await AwaitNumberingAsync(tail, numbered, observed, timeProvider, cancellationToken).ConfigureAwait(false);
         }
     }
 }

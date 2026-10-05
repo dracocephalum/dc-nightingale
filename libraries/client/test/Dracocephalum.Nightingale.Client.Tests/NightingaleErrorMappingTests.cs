@@ -55,6 +55,22 @@ public sealed class NightingaleErrorMappingTests
     }
 
     [Fact]
+    public void ToException_WhenTheAppendCarriesTooManyEvents_ShouldSayHowManyOneMay()
+    {
+        // Arrange
+        var failure = Failure(StatusCode.InvalidArgument, "APPEND_SIZE_EXCEEDED", ("stream", "orders-1"), ("limit", "150"));
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert: still an argument error, as it was before it had a type of its own.
+        var exceeded = mapped.ShouldBeOfType<AppendSizeExceededException>();
+        exceeded.Stream.ShouldBe("orders-1");
+        exceeded.Limit.ShouldBe(150);
+        exceeded.ShouldBeAssignableTo<ArgumentException>();
+    }
+
+    [Fact]
     public void ToException_WhenOrdinalsAreNotEnabled_ShouldNameTheStream()
     {
         // Arrange

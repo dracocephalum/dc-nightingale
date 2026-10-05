@@ -107,6 +107,13 @@ public static class NightingaleErrors
     public static RpcException ConsumerLimitReached(string stream, string group, int limit) =>
         Build(StatusCode.ResourceExhausted, ErrorReason.ConsumerLimitReached, $"Group '{group}' on stream '{stream}' already has {limit} consumer(s).", ("stream", stream), ("group", group), ("limit", limit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
+    /// <summary>The append carries more events than one append may.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="limit">The most events one append may carry.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException AppendSizeExceeded(string stream, int limit) =>
+        Build(StatusCode.InvalidArgument, ErrorReason.AppendSizeExceeded, $"An append to stream '{stream}' may carry at most {limit} events; send more in several appends.", ("stream", stream), ("limit", limit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
     /// <summary>The group's settings were changed under its consumer, whose call ends so it connects again.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="group">The group.</param>

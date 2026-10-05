@@ -362,6 +362,30 @@ a stream's metadata change what a read returns and who may read it.
 **Nightingale:** stream metadata can be stored and read back but none of it is
 enforced yet. See `PENDING.md` for the intended read-time enforcement.
 
+## An append is limited by its number of events
+
+**Reference:** an append is limited in bytes: the whole append by a maximum
+append size the server is configured with, a megabyte unless told otherwise,
+and newer versions also limit a single record. There is no limit on how many
+events one append carries, and no way to commit several appends together to
+get past the size: the answer to an append too large is to split it.
+
+**Nightingale:** an append is limited in events: 150 in one append unless the
+host sets `Nightingale:MaxEventsPerAppend`, and never more than the backend
+takes in one write, 190 on SQL Server. One event too many is refused with
+`APPEND_SIZE_EXCEEDED` before anything is written, the limit in the answer,
+and the client raises `AppendSizeExceededException`. Splitting is the
+caller's to do, as it is with the reference: several appends, each under the
+limit, each committing by itself. Bytes are not limited beyond what one
+message of the transport may hold.
+
+**Why:** the store writes an append as one command with a fixed number of
+parameters an event, and the database takes 2100 parameters in a command, so
+the true ceiling is a count and not a size. A limit in bytes would promise
+what a few hundred small events then break. The limit is also wanted for its
+own sake: an append is held in memory whole and written in one transaction,
+and live delivery waits behind that transaction until it commits.
+
 ## Event bodies are JSON
 
 **Reference:** `application/json` or `application/octet-stream`.

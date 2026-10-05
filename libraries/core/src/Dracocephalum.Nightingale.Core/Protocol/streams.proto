@@ -25,7 +25,9 @@ service Streams {
 
   // Appends events to one stream atomically: all of them, or none, under one
   // expected revision. The first request carries the options, every following
-  // request one event. Errors: REVISION_CONFLICT, STREAM_DELETED,
+  // request one event. One append carries at most as many events as the
+  // server allows, 150 unless its host says otherwise; a caller with more
+  // sends several appends. Errors: REVISION_CONFLICT, STREAM_DELETED,
   // INVALID_STREAM_NAME, APPEND_SIZE_EXCEEDED, INVALID_ARGUMENT. A retry
   // with an explicit expected revision is safe; see "Event ids" in
   // shared.proto.

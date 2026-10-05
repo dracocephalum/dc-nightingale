@@ -103,6 +103,46 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Append_WithAsManyEventsAsOneAppendMay_ShouldBeStoredAndWithOneMoreRefusedBeforeTheStore()
+    {
+        // Arrange: the host allows three events in one append.
+        _serverOptions.MaxEventsPerAppend = 3;
+        A.CallTo(() => _store.AppendAsync("orders-1", StreamState.NoStream, A<IReadOnlyList<EventData>>.That.Matches(events => events.Count == 3), A<CancellationToken>._))
+            .Returns(new AppendResult(2, 40));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var stored = await AppendOf(client, "orders-1", 3);
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendOf(client, "orders-2", 4));
+
+        // Assert: nothing of the fourth event's append reaches the store, and the caller is told the limit.
+        stored.Revision.ShouldBe(2);
+        refused.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        var info = refused.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("APPEND_SIZE_EXCEEDED");
+        info.Metadata["stream"].ShouldBe("orders-2");
+        info.Metadata["limit"].ShouldBe("3");
+        A.CallTo(() => _store.AppendAsync("orders-2", A<StreamState>._, A<IReadOnlyList<EventData>>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Append_WhenTheStoreTakesFewerEventsThanTheLimitAllowed_ShouldStillAnswerWithTheSizeError()
+    {
+        // Arrange: a store version that takes less in one write than the limit was set for.
+        A.CallTo(() => _store.AppendAsync("orders-1", StreamState.NoStream, A<IReadOnlyList<EventData>>._, A<CancellationToken>._))
+            .Throws(new AppendSizeExceededException("orders-1", 0));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendOf(client, "orders-1", 2));
+
+        // Assert
+        var info = refused.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("APPEND_SIZE_EXCEEDED");
+        info.Metadata["limit"].ShouldBe(NightingaleOptionsBase.DefaultMaxEventsPerAppend.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public async Task Append_WhenRevisionConflicts_ShouldFailWithTheReasonAndBothRevisions()
     {
         // Arrange
@@ -679,6 +719,35 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Read_WhenAnEventIsNumberedBetweenTheSubscriptionsReadAndItsWait_ShouldStillDeliverIt()
+    {
+        // Arrange: subscribed from the end at ordinal 7, the head at 20 and staying there, since
+        // nothing more is appended. The event at 20 is committed and not numbered when the
+        // subscription reads, and numbered a moment later: asked before that read the sequencer
+        // says "through 19", asked after it "through 20".
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        var reads = 0;
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 7));
+        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsLazily(_ => Task.FromResult(Volatile.Read(ref reads) == 0 ? 19L : 20L));
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 8, StreamsService.PageSize, A<CancellationToken>._))
+            .ReturnsLazily(_ => Task.FromResult<IReadOnlyList<EventRecord>>(Interlocked.Increment(ref reads) == 1 ? [] : [Numbered("orders-3", 0, 20, 8)]));
+        var client = new Streams.StreamsClient(_channel);
+        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        giveUp.CancelAfter(TimeSpan.FromSeconds(20));
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocol.V1.Numbering.Ordinal }, cancellationToken: giveUp.Token);
+
+        // Act: the confirmation, the caught-up note, then the event.
+        var messages = await Next(call, 3);
+
+        // Assert: found on the next look, not waited for behind an append that never comes.
+        messages.Count.ShouldBe(3);
+        messages[^1].Event.Ordinal.ShouldBe(8);
+        messages[^1].Event.Position.ShouldBe(20);
+    }
+
+    [Fact]
     public async Task Read_WhenSubscribingByOrdinalFromEnd_ShouldStartAfterTheLastOrdinal()
     {
         // Arrange
@@ -700,6 +769,31 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
     private sealed class TestOptions : NightingaleOptionsBase
     {
+    }
+
+    private static async Task<AppendResponse> AppendOf(Streams.StreamsClient client, string stream, int count)
+    {
+        using var call = client.Append(cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = stream, ExpectedRevision = -1 } }, TestContext.Current.CancellationToken);
+        try
+        {
+            for (var i = 0; i < count; i++)
+            {
+                await call.RequestStream.WriteAsync(new AppendRequest { Event = Proposed(Guid.NewGuid(), "order_placed", "{}") }, TestContext.Current.CancellationToken);
+            }
+
+            await call.RequestStream.CompleteAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The server ended the call at the first event too many; the answer says why.
+        }
+        catch (RpcException)
+        {
+            // The same, seen from the write.
+        }
+
+        return await call.ResponseAsync;
     }
 
     private static EventRecord Numbered(string stream, long revision, long position, long ordinal) =>

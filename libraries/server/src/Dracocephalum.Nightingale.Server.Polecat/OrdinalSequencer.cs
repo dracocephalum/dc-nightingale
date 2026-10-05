@@ -26,6 +26,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="progressSchemaName">The schema the gateway's own tables live in, the progress row among them.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
+/// <param name="leaseDuration">How long the lease lasts without renewal; <see cref="LeaseDuration"/> when not given. The renewal follows from it.</param>
 internal sealed partial class OrdinalSequencer(
     ISubscriptionGroupStore leases,
     IStoreTail tail,
@@ -34,7 +35,8 @@ internal sealed partial class OrdinalSequencer(
     string schemaName,
     string progressSchemaName,
     TimeProvider timeProvider,
-    ILogger<OrdinalSequencer> logger) : IHostedService, IDisposable
+    ILogger<OrdinalSequencer> logger,
+    TimeSpan? leaseDuration = null) : IHostedService, IDisposable
 {
     /// <summary>The lease every instance competes for.</summary>
     public const string LeaseName = "ordinals";
@@ -42,14 +44,20 @@ internal sealed partial class OrdinalSequencer(
     /// <summary>How many positions one batch numbers at most.</summary>
     public const int BatchSize = 5_000;
 
-    /// <summary>How long a lease lasts without renewal, after which another instance takes over.</summary>
+    /// <summary>How long a lease lasts without renewal, after which another instance takes over, unless the instance was given another.</summary>
     public static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
 
-    /// <summary>How often the holder renews, and how often a bystander asks again.</summary>
-    public static readonly TimeSpan RenewInterval = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _leaseDuration = leaseDuration ?? LeaseDuration;
 
     private readonly CancellationTokenSource _stopping = new();
     private Task? _loop;
+
+    /// <summary>
+    /// Gets how often the holder renews, and how often a bystander asks again: a third of the
+    /// lease, so that two renewals can fail before the lease is lost. Derived, never set, so a
+    /// lease made shorter keeps the same room.
+    /// </summary>
+    public TimeSpan RenewInterval => _leaseDuration / 3;
 
     /// <inheritdoc/>
     public Task StartAsync(CancellationToken cancellationToken)
@@ -173,7 +181,7 @@ internal sealed partial class OrdinalSequencer(
             {
                 try
                 {
-                    var holder = await leases.AcquireLeaseAsync(LeaseName, owner, null, LeaseDuration, stopping).ConfigureAwait(false);
+                    var holder = await leases.AcquireLeaseAsync(LeaseName, owner, null, _leaseDuration, stopping).ConfigureAwait(false);
                     if (holder is not null)
                     {
                         holding = false;
@@ -211,8 +219,11 @@ internal sealed partial class OrdinalSequencer(
                 {
                     return;
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException)
+                catch (Exception exception)
                 {
+                    // A cancellation nobody asked for is a failure like any other: logged and
+                    // tried again. Left to pass, it would end this loop with nobody the wiser,
+                    // and nothing would be numbered from then on.
                     LogFailed(exception);
                     holding = false;
                     try
@@ -258,7 +269,7 @@ internal sealed partial class OrdinalSequencer(
 
             if (timeProvider.GetElapsedTime(renewed) >= RenewInterval)
             {
-                if (await leases.AcquireLeaseAsync(LeaseName, owner, null, LeaseDuration, stopping).ConfigureAwait(false) is not null)
+                if (await leases.AcquireLeaseAsync(LeaseName, owner, null, _leaseDuration, stopping).ConfigureAwait(false) is not null)
                 {
                     return -1;
                 }

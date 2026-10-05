@@ -40,10 +40,11 @@ public static class NightingaleErrorMapping
             ErrorReason.GroupNotFound => new GroupNotFoundException(stream, Text(info, "group")),
             ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, Text(info, "group"), Text(info, "owner"), Address(info)),
             ErrorReason.ConsumerLimitReached => new ConsumerLimitReachedException(stream, Text(info, "group")),
+            ErrorReason.AppendSizeExceeded => new AppendSizeExceededException(stream, (int)Number(info, "limit", 0)),
             ErrorReason.GroupUpdated => new GroupUpdatedException(stream, Text(info, "group")),
             ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, Text(info, "group")),
             ErrorReason.OrdinalsNotEnabled => new OrdinalsNotEnabledException(stream),
-            ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument or ErrorReason.AppendSizeExceeded =>
+            ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument =>
                 new ArgumentException(exception.Status.Detail),
             _ => exception,
         };

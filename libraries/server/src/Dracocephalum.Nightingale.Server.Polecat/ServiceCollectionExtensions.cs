@@ -73,6 +73,11 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options, string? readOnlyConnectionString)
     {
         options.Store.Validate();
+        if (options.MaxEventsPerAppend > PolecatStreamStore.MaxEventsPerAppend)
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.MaxEventsPerAppend)} is {options.MaxEventsPerAppend}; this backend takes at most {PolecatStreamStore.MaxEventsPerAppend} events in one append.");
+        }
+
         services.AddNightingaleOptions(options);
         services.AddPolecat((StoreOptions store) =>
         {
@@ -99,7 +104,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
-        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>()));
+        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddNightingaleSubscriptionGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
         services.AddSingleton<IStoreDatabase>(new StoreDatabase(connectionString));
@@ -129,7 +134,8 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
                 options.Schema,
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
-                provider.GetRequiredService<ILogger<OrdinalSequencer>>()));
+                provider.GetRequiredService<ILogger<OrdinalSequencer>>(),
+                options.SequencerLeaseDuration));
         }
 
         return services;

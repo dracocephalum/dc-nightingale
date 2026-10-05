@@ -43,6 +43,26 @@ public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
     private static readonly byte[] PaidBody = Encoding.UTF8.GetBytes("{\"orderId\":1}");
 
     [Fact]
+    public async Task Append_ShouldTakeAsManyEventsAsTheBackendSaysItDoesAndRefuseOneMoreAsTooMany()
+    {
+        // Arrange: the store writes an append as one command, and the database takes 2100
+        // parameters in one. How many events that is depends on the store's version; the
+        // backend's number is measured, and this is what holds it to the truth.
+        var sut = database.Store;
+        var fits = NewStream();
+        var tooMany = NewStream();
+
+        // Act
+        var stored = await sut.AppendAsync(fits, StreamState.NoStream, Many(PolecatStreamStore.MaxEventsPerAppend), TestContext.Current.CancellationToken);
+        var refused = await Should.ThrowAsync<AppendSizeExceededException>(() => sut.AppendAsync(tooMany, StreamState.NoStream, Many(PolecatStreamStore.MaxEventsPerAppend + 1), TestContext.Current.CancellationToken));
+
+        // Assert: all or none; the refused append left no stream behind.
+        stored.Revision.ShouldBe(PolecatStreamStore.MaxEventsPerAppend - 1);
+        refused.Stream.ShouldBe(tooMany);
+        (await sut.ReadAsync(tooMany, Direction.Forwards, null, 1, TestContext.Current.CancellationToken)).ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Append_WhenStreamIsNew_ShouldReturnLastRevisionAndAGlobalPosition()
     {
         // Arrange
@@ -255,6 +275,8 @@ public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
         // Act & Assert
         await Should.NotThrowAsync(() => databases[0].AssertDatabaseMatchesConfigurationAsync(TestContext.Current.CancellationToken));
     }
+
+    private static List<EventData> Many(int count) => Enumerable.Range(0, count).Select(_ => Paid("order_paid")).ToList();
 
     private static string NewStream() => "orders-" + Guid.NewGuid().ToString("N");
 
