@@ -20,17 +20,19 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="store">The store.</param>
 /// <param name="events">Makes the mirror of the store's events table, over the main connection.</param>
 /// <param name="loggerFactory">Where the daemon's logger comes from.</param>
-internal sealed class PolecatStoreTail(IDocumentStore store, IDbContextFactory<EventsDbContext> events, ILoggerFactory loggerFactory) : IStoreTail, IHostedService, IAsyncDisposable
+internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextFactory<EventsDbContext> events, ILoggerFactory loggerFactory) : IStoreTail, IHostedService, IAsyncDisposable
 {
     /// <summary>How many rows past the mark one refresh looks at.</summary>
     private const int RefreshWindow = 10_000;
 
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _stopping = new();
+    private readonly ILogger<PolecatStoreTail> _logger = loggerFactory.CreateLogger<PolecatStoreTail>();
     private TaskCompletionSource _advanced = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IProjectionDaemon? _daemon;
     private Task? _loop;
     private long _head;
+    private InvalidOperationException? _failure;
 
     /// <inheritdoc/>
     public long Head => Volatile.Read(ref _head);
@@ -46,6 +48,13 @@ internal sealed class PolecatStoreTail(IDocumentStore store, IDbContextFactory<E
                 if (_head > beyond)
                 {
                     return _head;
+                }
+
+                // A tail that has stopped following never advances again. Whoever waits on it
+                // is told so, now and from here on, rather than left waiting for good.
+                if (_failure is not null)
+                {
+                    throw _failure;
                 }
 
                 advanced = _advanced.Task;
@@ -81,7 +90,10 @@ internal sealed class PolecatStoreTail(IDocumentStore store, IDbContextFactory<E
         await daemon.StartAllAsync().ConfigureAwait(false);
         _daemon = daemon;
         Publish(daemon.Tracker.HighWaterMark);
-        _loop = RunAsync(daemon, _stopping.Token);
+        _loop = FollowAsync(
+            (beyond, stopping) => daemon.Tracker.WaitForHighWaterMark(beyond + 1, null).WaitAsync(stopping),
+            () => daemon.Tracker.HighWaterMark,
+            _stopping.Token);
     }
 
     /// <inheritdoc/>
@@ -124,27 +136,45 @@ internal sealed class PolecatStoreTail(IDocumentStore store, IDbContextFactory<E
         _stopping.Dispose();
     }
 
-    private async Task RunAsync(IProjectionDaemon daemon, CancellationToken stopping)
+    /// <summary>
+    /// Follows the mark until told to stop. The wait completes when the agent's mark passes the
+    /// number, without touching the store: the agent's poll is the only query. A wait that runs
+    /// out on a quiet store is begun again. Ending for any
+    /// other reason than being stopped is a failure, said out loud and handed to everyone who
+    /// waits on the head: the head would never move again, and a subscription that went on
+    /// waiting for it would look alive and deliver nothing.
+    /// </summary>
+    /// <param name="waitBeyond">Completes when the mark is beyond a position.</param>
+    /// <param name="mark">Reads the mark.</param>
+    /// <param name="stopping">Cancelled when the tail is stopped.</param>
+    /// <returns>A task that completes when the tail has stopped following.</returns>
+    internal async Task FollowAsync(Func<long, CancellationToken, Task> waitBeyond, Func<long> mark, CancellationToken stopping)
     {
-        while (!stopping.IsCancellationRequested)
+        try
         {
-            try
+            while (!stopping.IsCancellationRequested)
             {
-                // The tracker's wait completes when the agent's mark reaches the number, without
-                // touching the store: the agent's poll is the only query.
-                await daemon.Tracker.WaitForHighWaterMark(Head + 1, null).WaitAsync(stopping).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            catch (ObjectDisposedException)
-            {
-                // The stop raced the wait; there is nothing left to follow.
-                return;
-            }
+                try
+                {
+                    await waitBeyond(Head, stopping).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    // The tracker's wait gives up after a time of its own, a minute, when the
+                    // mark has not moved: a store nobody appended to. That is no failure and no
+                    // reason to stop following; the mark is read and the wait begun again.
+                }
 
-            Publish(daemon.Tracker.HighWaterMark);
+                Publish(mark());
+            }
+        }
+        catch (Exception) when (stopping.IsCancellationRequested)
+        {
+            // Stopped: whatever the wait threw as the daemon went down under it is the stop.
+        }
+        catch (Exception exception)
+        {
+            Fail(exception);
         }
     }
 
@@ -168,4 +198,23 @@ internal sealed class PolecatStoreTail(IDocumentStore store, IDbContextFactory<E
 
         advanced?.TrySetResult();
     }
+
+    private void Fail(Exception exception)
+    {
+        LogStoppedFollowing(exception);
+        var failure = new InvalidOperationException("The server has stopped following the store's head, so nothing appended from now on is delivered live or numbered. The cause is in the inner exception and in the server's log; the server needs a restart.", exception);
+        TaskCompletionSource advanced;
+        lock (_gate)
+        {
+            _failure = failure;
+            advanced = _advanced;
+        }
+
+        // Observed here, so that a tail nobody happened to be waiting on leaves no unobserved fault.
+        advanced.TrySetException(failure);
+        _ = advanced.Task.Exception;
+    }
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "The tail has stopped following the store's head without being stopped. Live delivery and ordinal numbering have ended; every call waiting on them fails with this cause. The server needs a restart.")]
+    private partial void LogStoppedFollowing(Exception exception);
 }

@@ -662,6 +662,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         while (true)
         {
             var behind = false;
+            var numbered = await store.NumberedThroughAsync(cancellationToken).ConfigureAwait(false);
             while (true)
             {
                 var page = await store.ReadByOrdinalAsync(stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
@@ -702,9 +703,10 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 delivered = false;
             }
 
-            // Everything up to the observed head is numbered and was just read, so the next thing
-            // to wait for is an advance; otherwise the sequencer is behind, and the next look is soon.
-            observed = await EventSource.AwaitNumberingAsync(store, tail, observed, timeProvider, cancellationToken).ConfigureAwait(false);
+            // If everything up to the observed head was numbered before the read began, the read
+            // saw it all and the next thing to wait for is an advance; otherwise the sequencer
+            // is behind, and the next look is soon.
+            observed = await EventSource.AwaitNumberingAsync(tail, numbered, observed, timeProvider, cancellationToken).ConfigureAwait(false);
         }
     }
 

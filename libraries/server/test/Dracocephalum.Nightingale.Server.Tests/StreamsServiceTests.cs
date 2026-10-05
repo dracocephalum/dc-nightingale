@@ -679,6 +679,35 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Read_WhenAnEventIsNumberedBetweenTheSubscriptionsReadAndItsWait_ShouldStillDeliverIt()
+    {
+        // Arrange: subscribed from the end at ordinal 7, the head at 20 and staying there, since
+        // nothing more is appended. The event at 20 is committed and not numbered when the
+        // subscription reads, and numbered a moment later: asked before that read the sequencer
+        // says "through 19", asked after it "through 20".
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        _tail.Advance(20);
+        var reads = 0;
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 7));
+        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsLazily(_ => Task.FromResult(Volatile.Read(ref reads) == 0 ? 19L : 20L));
+        A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 8, StreamsService.PageSize, A<CancellationToken>._))
+            .ReturnsLazily(_ => Task.FromResult<IReadOnlyList<EventRecord>>(Interlocked.Increment(ref reads) == 1 ? [] : [Numbered("orders-3", 0, 20, 8)]));
+        var client = new Streams.StreamsClient(_channel);
+        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        giveUp.CancelAfter(TimeSpan.FromSeconds(20));
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocol.V1.Numbering.Ordinal }, cancellationToken: giveUp.Token);
+
+        // Act: the confirmation, the caught-up note, then the event.
+        var messages = await Next(call, 3);
+
+        // Assert: found on the next look, not waited for behind an append that never comes.
+        messages.Count.ShouldBe(3);
+        messages[^1].Event.Ordinal.ShouldBe(8);
+        messages[^1].Event.Position.ShouldBe(20);
+    }
+
+    [Fact]
     public async Task Read_WhenSubscribingByOrdinalFromEnd_ShouldStartAfterTheLastOrdinal()
     {
         // Arrange

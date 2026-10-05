@@ -81,20 +81,15 @@ undecided adds it here rather than mentioning it once in a conversation.
   interval, only during the sequencer's lag, which is about one tail interval.
   Close by: the sequencer publishing its progress in-process, and one poller
   per process for the other instances, once the subscription count demands it.
-- **A sample's test can hang without end.** The ordinals scenario's test once
-  ran for more than fifteen minutes without finishing, in a run that had the
-  integration suite just before it, and was stopped from outside; it then
-  passed four times in a row in under thirty seconds each. It happened a
-  second time, the same scenario, in a run of the samples alone that was
-  stopped at its eight-minute limit; the run after it passed. The cause was not
-  established. A shortage of memory in the machine's SQL Server was suspected
-  then; a later look found the server with memory to spare, and the slow
-  starts it had been blamed for turned out to be query compilation, so that
-  suspicion has nothing behind it. What is certain is that nothing in a
-  sample gives up: its calls carry no deadline and its test no time limit, so
-  a stall anywhere is an endless run instead of a failure that says where.
-  Close by: a time limit on each scenario's test, and a deadline on the calls
-  a scenario makes, so the next stall names the step it happened in.
+- **No test leaves a server idle for a minute.** The tail stopped following
+  the store, for good and without a word, the first time a minute passed
+  with nothing appended: the store's tracker gives up its wait after that
+  long and the tail's loop took the timeout for its end. It is fixed and
+  tested with the tracker stood in for, and a tail that stops for any other
+  reason now fails whoever waits on it with the cause. What is not tested is
+  the real thing: a server against a real store, left quiet for over a
+  minute, then appended to and subscribed to. Close by: that test, at the
+  price of a minute and more in the integration suite.
 - **A bounded read abandoned mid-page has stalled the next read.** While the
   ordinals sample polled a virtual stream by disposing each read right after
   its head, the following read sometimes got no answer for a minute, with no

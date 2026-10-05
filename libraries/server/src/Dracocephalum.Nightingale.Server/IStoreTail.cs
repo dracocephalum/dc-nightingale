@@ -30,5 +30,6 @@ public interface IStoreTail
     /// <param name="beyond">The position the caller has already seen.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The head, greater than <paramref name="beyond"/>.</returns>
+    /// <exception cref="InvalidOperationException">The tail has stopped following the store, so the head will not advance; the cause is the inner exception.</exception>
     ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken);
 }

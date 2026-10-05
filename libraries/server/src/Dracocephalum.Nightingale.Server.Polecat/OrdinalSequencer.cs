@@ -211,8 +211,11 @@ internal sealed partial class OrdinalSequencer(
                 {
                     return;
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException)
+                catch (Exception exception)
                 {
+                    // A cancellation nobody asked for is a failure like any other: logged and
+                    // tried again. Left to pass, it would end this loop with nobody the wiser,
+                    // and nothing would be numbered from then on.
                     LogFailed(exception);
                     holding = false;
                     try
