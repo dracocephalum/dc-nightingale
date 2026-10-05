@@ -58,7 +58,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         var applied = (await context.Database.GetAppliedMigrationsAsync(cancellationToken).ConfigureAwait(false)).ToList();
         var initialized = applied.Count > 0;
         IReadOnlyList<string> conflicts = initialized
-            ? (await context.ReadSettingsAsync<StoreSettings>(cancellationToken).ConfigureAwait(false)).DifferencesFrom(options.Store)
+            ? (await context.ReadStoreSettingsAsync<StoreSettings>(cancellationToken).ConfigureAwait(false)).DifferencesFrom(options.Store)
             : [];
 
         // The store's tables are compared under the configured settings, which shape them; under
@@ -70,7 +70,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         var compare = initialized && conflicts.Count == 0 && unknown.Count == 0;
         var trusted = compare && trustStoreHash
             && string.Equals(
-                await context.ReadSettingAsync(StoreSchemaHashRow, cancellationToken).ConfigureAwait(false),
+                await context.ReadStorePropertyAsync(StoreSchemaHashRow, cancellationToken).ConfigureAwait(false),
                 await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false),
                 StringComparison.Ordinal);
         return new SchemaReport(
@@ -126,24 +126,24 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
-        await context.WriteSettingAsync(StoreLibraryRow, StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
-        await context.WriteSettingAsync(StoreSchemaHashRow, await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+        await context.WriteStorePropertyAsync(StoreLibraryRow, StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
+        await context.WriteStorePropertyAsync(StoreSchemaHashRow, await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
     public async Task WriteInitializationAsync(IStoreSettings settings, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        await context.WriteSettingsAsync(settings, cancellationToken).ConfigureAwait(false);
-        await context.WriteSettingAsync(CreatedAtRow, createdAt.ToString("O", CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
-        await context.WriteSettingAsync(CreatedByRow, createdBy, cancellationToken).ConfigureAwait(false);
+        await context.WriteStoreSettingsAsync(settings, cancellationToken).ConfigureAwait(false);
+        await context.WriteStorePropertyAsync(CreatedAtRow, createdAt.ToString("O", CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
+        await context.WriteStorePropertyAsync(CreatedByRow, createdBy, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
     public async Task<string> ReadCreatedByAsync(CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        return await context.ReadSettingAsync(CreatedByRow, cancellationToken).ConfigureAwait(false) ?? "unknown";
+        return await context.ReadStorePropertyAsync(CreatedByRow, cancellationToken).ConfigureAwait(false) ?? "unknown";
     }
 
     /// <summary>The change the event store's tables need, or <see langword="null"/> when they match.</summary>

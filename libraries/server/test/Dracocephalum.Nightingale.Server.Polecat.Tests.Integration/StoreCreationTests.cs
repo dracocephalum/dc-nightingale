@@ -83,7 +83,7 @@ public sealed class StoreCreationTests : IAsyncLifetime
         """;
 
     /// <summary>What the store says it was made from; when and by whom are the two rows that differ by design.</summary>
-    private const string Rows = "SELECT CONCAT([Name], ' = ', [Value]) FROM nightingale.Setting WHERE [Name] NOT IN ('CreatedAt', 'CreatedBy') ORDER BY [Name]";
+    private const string Rows = "SELECT CONCAT([Name], ' = ', [Value]) FROM nightingale.StoreProperty WHERE [Name] NOT IN ('CreatedAt', 'CreatedBy') ORDER BY [Name]";
 
     private readonly string _fromScript = TestDatabases.NewName();
     private readonly string _fromComparison = TestDatabases.NewName();

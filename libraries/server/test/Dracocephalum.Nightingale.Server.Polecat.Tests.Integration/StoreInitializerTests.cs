@@ -43,9 +43,9 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Assert: one row per setting, recording what shaped the store and the database's actual
         // collation, and the gateway's migrations recorded in its own schema.
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting")).ShouldBe(SettingRowCount);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldNotBeNullOrWhiteSpace();
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("None");
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Collation'")).ShouldNotBeNullOrWhiteSpace();
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Partitioning'")).ShouldBe("None");
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.__EFMigrationsHistory")).ShouldBeGreaterThan(0);
         await second.StopAsync(TestContext.Current.CancellationToken);
     }
@@ -133,7 +133,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         }
 
         // A hash that is not this server's, as after an upgrade of the store library: compared, and refused.
-        await TestDatabases.ExecuteAsync(_name, "UPDATE nightingale.Setting SET [Value] = 'another' WHERE [Name] = 'StoreSchemaHash'");
+        await TestDatabases.ExecuteAsync(_name, "UPDATE nightingale.StoreProperty SET [Value] = 'another' WHERE [Name] = 'StoreSchemaHash'");
         var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot()));
 
         // Assert
@@ -174,10 +174,10 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Assert
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'events' AND name = 'pc_events'")).ShouldBe(1);
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'gateway' AND name IN ('Setting', 'SubscriptionGroup', 'SubscriptionParkedEvent', 'SubscriptionOutboxEntry', 'Lease', 'SequencerProgress', '__EFMigrationsHistory')")).ShouldBe(7);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'gateway' AND name IN ('StoreProperty', 'SubscriptionGroup', 'SubscriptionParkedEvent', 'SubscriptionOutboxEntry', 'Lease', 'SequencerProgress', '__EFMigrationsHistory')")).ShouldBe(7);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE SCHEMA_NAME(schema_id) IN ('dbo', 'nightingale')")).ShouldBe(0);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM gateway.SubscriptionGroup")).ShouldBe(1);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM gateway.Setting WHERE [Name] = 'Store:Schema'")).ShouldBe("events");
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM gateway.StoreProperty WHERE [Name] = 'Schema'")).ShouldBe("events");
         notOurs.Message.ShouldContain("not initialized by Nightingale");
         otherStoreSchema.Message.ShouldContain("Schema is dbo but the store was initialized in events");
     }
@@ -247,7 +247,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         before.IsCurrent.ShouldBeFalse();
         before.PendingMigrations.ShouldNotBeEmpty();
         after.IsCurrent.ShouldBeTrue();
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting")).ShouldBe(SettingRowCount);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
     }
 
     [Fact]
@@ -267,7 +267,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         lower.Revision.ShouldBe(0);
         otherScript.Revision.ShouldBe(0);
         read.ShouldNotBeNull().Events.ShouldHaveSingleItem().Stream.ShouldBe("账单-1");
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldBe(NightingaleOptions.StoreOptions.DefaultCollation);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Collation'")).ShouldBe(NightingaleOptions.StoreOptions.DefaultCollation);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM dbo.pc_streams")).ShouldBe(4);
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
@@ -287,7 +287,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Assert: one stream, and the record says which collation the database has.
         lower.Revision.ShouldBe(1);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldBe(collation);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Collation'")).ShouldBe(collation);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM dbo.pc_streams")).ShouldBe(1);
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
@@ -335,8 +335,8 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         var withoutTheChoice = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot(options => options.Store.Collation = collation)));
 
         // Assert: the choice is the host's, made each time, and not a property of the store.
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Collation'")).ShouldBe(collation);
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Setting WHERE [Name] LIKE '%IgnoreCollation%'")).ShouldBe(0);
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Collation'")).ShouldBe(collation);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty WHERE [Name] LIKE '%IgnoreCollation%'")).ShouldBe(0);
         withoutTheChoice.Message.ShouldContain("which is not a UTF-8 collation");
     }
 
@@ -383,7 +383,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         // Assert
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.Count.ShouldBe(2);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("Tenant");
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Partitioning'")).ShouldBe("Tenant");
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
 
@@ -401,7 +401,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         // Assert
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.ShouldHaveSingleItem().Revision.ShouldBe(1);
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.Setting WHERE [Name] = 'Store:Partitioning'")).ShouldBe("ArchivedStream");
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Partitioning'")).ShouldBe("ArchivedStream");
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
 

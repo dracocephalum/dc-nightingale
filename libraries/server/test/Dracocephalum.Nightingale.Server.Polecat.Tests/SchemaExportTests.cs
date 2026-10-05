@@ -60,7 +60,7 @@ public sealed class SchemaExportTests
                 text => text.ShouldContain("category"),
                 text => text.ShouldContain("ix_pc_events_category_seq"),
                 text => text.ShouldContain("ix_pc_events_type_seq"),
-                text => text.ShouldContain("CREATE TABLE [nightingale].[Setting]"),
+                text => text.ShouldContain("CREATE TABLE [nightingale].[StoreProperty]"),
                 text => text.ShouldContain("CREATE TABLE [nightingale].[SubscriptionGroup]"),
                 text => text.ShouldContain("__EFMigrationsHistory"),
                 text => text.ShouldContain("PARTITION"),
