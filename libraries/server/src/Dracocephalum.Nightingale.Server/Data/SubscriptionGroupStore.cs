@@ -86,6 +86,40 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     }
 
     /// <inheritdoc/>
+    public async Task<bool> UpdateSettingsAsync(Guid groupId, GroupSettings settings, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await context.SubscriptionGroups
+            .SingleOrDefaultAsync(row => row.Id == groupId, cancellationToken)
+            .ConfigureAwait(false);
+        if (row is null)
+        {
+            return false;
+        }
+
+        row.StartPosition = settings.Start.IsEnd ? null : settings.Start.Value;
+        row.MessageTimeoutMs = (long)settings.MessageTimeout.TotalMilliseconds;
+        row.MaxRetryCount = settings.MaxRetryCount;
+        row.CheckpointUpperBound = settings.CheckpointUpperBound;
+        row.CheckpointAfterMs = (long)settings.CheckpointAfter.TotalMilliseconds;
+        row.CheckpointLowerBound = settings.CheckpointLowerBound;
+        row.BufferSize = settings.BufferSize;
+        row.MaxSubscriberCount = settings.MaxSubscriberCount;
+        row.Numbering = settings.Numbering;
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Deleted between the read and the write; the same as not being there.
+            return false;
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task SaveLiveAsync(Guid groupId, SubscriptionGroupLive? live, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);

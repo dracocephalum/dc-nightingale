@@ -41,9 +41,8 @@ undecided adds it here rather than mentioning it once in a conversation.
   group, and the virtual streams by ordinal on a store initialized with
   `Nightingale:Store:AssignOrdinals`; the samples under `examples/` are the
   end-to-end runs. Not yet: filters and checkpoints on `$all` (they answer
-  unimplemented), updating a group's settings, competing consumers,
-  and the ordinal backfill, all in `PENDING.md`. Close by: group management
-  next.
+  unimplemented), competing consumers,
+  and the ordinal backfill, all in `PENDING.md`. Close by: see `PENDING.md`.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,
@@ -85,7 +84,9 @@ undecided adds it here rather than mentioning it once in a conversation.
 - **A sample's test can hang without end.** The ordinals scenario's test once
   ran for more than fifteen minutes without finishing, in a run that had the
   integration suite just before it, and was stopped from outside; it then
-  passed four times in a row in under thirty seconds each. The cause was not
+  passed four times in a row in under thirty seconds each. It happened a
+  second time, the same scenario, in a run of the samples alone that was
+  stopped at its eight-minute limit; the run after it passed. The cause was not
   established. A shortage of memory in the machine's SQL Server was suspected
   then; a later look found the server with memory to spare, and the slow
   starts it had been blamed for turned out to be query compilation, so that

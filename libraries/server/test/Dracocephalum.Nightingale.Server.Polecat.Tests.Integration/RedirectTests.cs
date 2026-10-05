@@ -92,6 +92,23 @@ public sealed class RedirectTests : IAsyncLifetime
         var listed = (await onSecond.ListAsync(new ListRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken)).Groups;
         var listedByOwner = (await onFirst.ListAsync(new ListRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken)).Groups;
 
+        var leaseAddress = await TestDatabases.ScalarAsync<string>(_name, "SELECT OwnerAddress FROM nightingale.Lease WHERE [Name] LIKE 'group:%'");
+
+        // A change of settings follows the replay's rule: asked of the other instance it is
+        // refused with the owner's address; made at the owner it ends the consumer's call, and
+        // the group is then nobody's, with its new setting, for any instance to describe.
+        var refusedUpdate = await Should.ThrowAsync<RpcException>(async () =>
+            await onSecond.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken));
+        var updated = await onFirst.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
+        var ended = await Should.ThrowAsync<RpcException>(async () =>
+        {
+            while (await consumer.ResponseStream.MoveNext(TestContext.Current.CancellationToken))
+            {
+                // Whatever was still on its way to the consumer comes before the end of the call.
+            }
+        });
+        var afterUpdate = await InfoOnceReleasedAsync(onSecond);
+
         // Assert
         Detail(refusedRead).Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
         Detail(refusedRead).Metadata["address"].ShouldBe(firstAddress.ToString());
@@ -118,7 +135,14 @@ public sealed class RedirectTests : IAsyncLifetime
         listed[0].Live.FromOwner.ShouldBeFalse();
         info.Live.FromOwner.ShouldBeTrue();
         listedByOwner.ShouldHaveSingleItem().Live.ShouldNotBeNull().FromOwner.ShouldBeTrue();
-        (await TestDatabases.ScalarAsync<string>(_name, "SELECT OwnerAddress FROM nightingale.Lease WHERE [Name] LIKE 'group:%'")).ShouldBe(firstAddress.ToString());
+        leaseAddress.ShouldBe(firstAddress.ToString());
+        Detail(refusedUpdate).Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
+        Detail(refusedUpdate).Metadata["address"].ShouldBe(firstAddress.ToString());
+        updated.Settings.MaxRetryCount.ShouldBe(7);
+        Detail(ended).Reason.ShouldBe("GROUP_UPDATED");
+        afterUpdate.Running.ShouldBeFalse();
+        afterUpdate.Settings.MaxRetryCount.ShouldBe(7);
+        afterUpdate.Live.ShouldBeNull();
         _ = first;
     }
 
@@ -144,6 +168,28 @@ public sealed class RedirectTests : IAsyncLifetime
 
         await call.RequestStream.CompleteAsync();
         await call.ResponseAsync;
+    }
+
+    /// <summary>Describes the group once its consumer's instance has let go of it, which it does a moment after the call ends.</summary>
+    private static async Task<GroupInfo> InfoOnceReleasedAsync(PersistentSubscriptions.PersistentSubscriptionsClient anyInstance)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var info = (await anyInstance.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+                if (!info.Running || attempt >= 100)
+                {
+                    return info;
+                }
+            }
+            catch (RpcException) when (attempt < 100)
+            {
+                // Still held: refused with the owner's address.
+            }
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
     }
 
     /// <summary>Replays the parked message once the park, asked for one-way, has landed.</summary>

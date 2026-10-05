@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
 /// The <c>PersistentSubscriptions</c> service over the group store and the stream store. Create,
-/// delete, list and replay go straight to the group store; a group's info does too, with what
+/// update, delete, list and replay go straight to the group store; a group's info does too, with what
 /// the running group adds when it runs here. A read takes the group's lease for this
 /// instance, refuses a second consumer, runs the group in memory for as long as the consumer
 /// stays, and turns the consumer's acknowledgements into the group's checkpoint.
@@ -78,6 +78,74 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         }
 
         return new CreateResponse();
+    }
+
+    /// <inheritdoc/>
+    public override async Task<UpdateResponse> Update(UpdateRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+
+        // A running group has its settings in memory and a consumer delivered to under them, so
+        // the change is made where it runs: refused with the owner's address, and the client
+        // repeats it there, where the consumer's call can be ended.
+        var holder = await groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
+        if (holder is not null && !string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal))
+        {
+            throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, holder);
+        }
+
+        // Where a group starts and how it counts say what its checkpoint means; they are not
+        // changed under one. A field the caller left unset keeps its value.
+        var current = definition.Settings;
+        var asked = request.Settings ?? new Protocol.V1.GroupSettings();
+        var start = asked.StartCase switch
+        {
+            Protocol.V1.GroupSettings.StartOneofCase.FromStart => StreamPosition.Start,
+            Protocol.V1.GroupSettings.StartOneofCase.FromEnd => StreamPosition.End,
+            Protocol.V1.GroupSettings.StartOneofCase.FromPosition => StreamPosition.From(asked.FromPosition),
+            _ => current.Start,
+        };
+        if (start != current.Start)
+        {
+            throw NightingaleErrors.InvalidArgument("Where a group starts is fixed when it is created; delete the group and create it again to start elsewhere.");
+        }
+
+        if (asked.Numbering != Protocol.V1.Numbering.Unspecified && asked.Numbering.ToNumbering() != current.Numbering)
+        {
+            throw NightingaleErrors.InvalidArgument("A group's numbering is fixed when it is created; a consumer that wants the other numbering creates another group.");
+        }
+
+        var settings = current with
+        {
+            MessageTimeout = asked.MessageTimeout?.ToTimeSpan() ?? current.MessageTimeout,
+            MaxRetryCount = asked.MaxRetryCount > 0 ? asked.MaxRetryCount : current.MaxRetryCount,
+            CheckpointUpperBound = asked.CheckpointUpperBound > 0 ? asked.CheckpointUpperBound : current.CheckpointUpperBound,
+            CheckpointAfter = asked.CheckpointAfter?.ToTimeSpan() ?? current.CheckpointAfter,
+            CheckpointLowerBound = asked.CheckpointLowerBound > 0 ? asked.CheckpointLowerBound : current.CheckpointLowerBound,
+            BufferSize = asked.BufferSize > 0 ? asked.BufferSize : current.BufferSize,
+            MaxSubscriberCount = asked.MaxSubscriberCount > 0 ? asked.MaxSubscriberCount : current.MaxSubscriberCount,
+        };
+        try
+        {
+            settings.Validate();
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            throw NightingaleErrors.InvalidArgument($"Group settings: {exception.ParamName} is out of range.");
+        }
+
+        if (!await groups.UpdateSettingsAsync(definition.Id, settings, context.CancellationToken).ConfigureAwait(false))
+        {
+            throw NightingaleErrors.GroupNotFound(definition.Stream, definition.Group);
+        }
+
+        // The consumer connected here was delivered to under the old settings; its call ends
+        // and it connects again under the new ones.
+        registry.Stop(definition.Id);
+        return new UpdateResponse { Settings = settings.ToWire() };
     }
 
     /// <inheritdoc/>
@@ -505,7 +573,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         await using var live = new SubscriptionGroupRuntime(store, tail, groups, timeProvider, definition, buffer);
         SubscriptionGroupLive Describe() => live.Describe() with { ConsumerAddress = peer };
-        registry.Attach(definition.Id, live.Wake, Describe);
+        var updated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        registry.Attach(definition.Id, live.Wake, Describe, () => updated.TrySetResult());
 
         // Written once now, so a listing shows the consumer as soon as it is connected, and
         // again with every renewal of the lease.
@@ -520,7 +589,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         var receiving = ReceiveAsync(live, requestStream, token);
         var keeping = KeepAsync(live, definition.Id, Describe, lease, definition.Settings.MessageTimeout, token);
 
-        var first = await Task.WhenAny(sending, receiving, keeping, live.Delivery).ConfigureAwait(false);
+        var first = await Task.WhenAny(sending, receiving, keeping, live.Delivery, updated.Task).ConfigureAwait(false);
         await ending.CancelAsync().ConfigureAwait(false);
         try
         {
@@ -529,6 +598,11 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         catch (OperationCanceledException)
         {
             // Ending the call cancels the others; the first task's outcome is what matters.
+        }
+
+        if (first == updated.Task)
+        {
+            throw NightingaleErrors.GroupUpdated(definition.Stream, definition.Group);
         }
 
         if (first != live.Delivery || first.IsFaulted)
