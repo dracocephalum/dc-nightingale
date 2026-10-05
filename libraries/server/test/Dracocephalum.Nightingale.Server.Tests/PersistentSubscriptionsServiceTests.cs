@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Nodes;
 
+using Dracocephalum.Nightingale.Protocol;
 using Dracocephalum.Nightingale.Protocol.V1;
 using FakeItEasy;
 using Google.Rpc;
@@ -264,6 +265,109 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         before.Skipped.ShouldBe(0);
         missing.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("PARKED_MESSAGE_NOT_FOUND");
         A.CallTo(() => _groups.LeaseHolderAsync(A<string>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Update_ShouldChangeWhatIsNamedKeepTheRestAndAnswerWithAllOfIt()
+    {
+        // Arrange: a group from the start of a category, by ordinal, with a retry limit of its own.
+        var settings = GroupSettings.Default with { Start = StreamPosition.Start, Numbering = Numbering.Ordinal, MaxRetryCount = 3, BufferSize = 40 };
+        var definition = new SubscriptionGroupDefinition("$ce-orders", "billing", settings, 9);
+        GroupSettings? written = null;
+        A.CallTo(() => _groups.GetAsync("$ce-orders", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.UpdateSettingsAsync(definition.Id, A<GroupSettings>._, A<CancellationToken>._))
+            .Invokes(call => written = call.GetArgument<GroupSettings>(1))
+            .Returns(true);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act: only the message timeout and the retry limit are named.
+        var response = await client.UpdateAsync(
+            new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { MessageTimeout = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(TimeSpan.FromSeconds(5)), MaxRetryCount = 7 } },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        var expected = settings with { MessageTimeout = TimeSpan.FromSeconds(5), MaxRetryCount = 7 };
+        written.ShouldBe(expected);
+        response.Settings.ToGroupSettings().ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task Update_WhenItNamesAnotherStartOrNumbering_ShouldRefuseAndChangeNothing()
+    {
+        // Arrange
+        var definition = new SubscriptionGroupDefinition("$ce-orders", "billing", GroupSettings.Default with { Start = StreamPosition.Start }, -1);
+        A.CallTo(() => _groups.GetAsync("$ce-orders", "billing", A<CancellationToken>._)).Returns(definition);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act: the same start named again is no change; another one is, and so is another numbering.
+        A.CallTo(() => _groups.UpdateSettingsAsync(definition.Id, A<GroupSettings>._, A<CancellationToken>._)).Returns(true);
+        await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromStart = new(), Numbering = Protocol.V1.Numbering.Global } }, cancellationToken: TestContext.Current.CancellationToken);
+        Fake.ClearRecordedCalls(_groups);
+        var otherStart = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromPosition = 40 } }, cancellationToken: TestContext.Current.CancellationToken));
+        var otherNumbering = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        otherStart.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        otherStart.Status.Detail.ShouldContain("fixed when it is created");
+        otherNumbering.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        A.CallTo(() => _groups.UpdateSettingsAsync(A<Guid>._, A<GroupSettings>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Update_WhenAnotherInstanceRunsTheGroupOrTheGroupIsGone_ShouldRefuse()
+    {
+        // Arrange
+        var running = new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1);
+        var gone = new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1);
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(running);
+        A.CallTo(() => _groups.GetAsync("orders-2", "billing", A<CancellationToken>._)).Returns(gone);
+        A.CallTo(() => _groups.GetAsync("orders-3", "billing", A<CancellationToken>._)).Returns((SubscriptionGroupDefinition?)null);
+        A.CallTo(() => _groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(running.Id), A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
+        A.CallTo(() => _groups.UpdateSettingsAsync(gone.Id, A<GroupSettings>._, A<CancellationToken>._)).Returns(false);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+        var change = new Protocol.V1.GroupSettings { MaxRetryCount = 7 };
+
+        // Act
+        var elsewhere = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = change }, cancellationToken: TestContext.Current.CancellationToken));
+        var deletedMeanwhile = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "orders-2", Group = "billing", Settings = change }, cancellationToken: TestContext.Current.CancellationToken));
+        var missing = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "orders-3", Group = "billing", Settings = change }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        var info = elsewhere.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
+        info.Metadata["address"].ShouldBe("http://other-instance:5000/");
+        A.CallTo(() => _groups.UpdateSettingsAsync(running.Id, A<GroupSettings>._, A<CancellationToken>._)).MustNotHaveHappened();
+        deletedMeanwhile.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("GROUP_NOT_FOUND");
+        missing.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("GROUP_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task Update_WhenAConsumerIsConnectedHere_ShouldEndItsCallSoItReconnectsUnderTheNewSettings()
+    {
+        // Arrange: a consumer connected to this instance, two events delivered.
+        var settings = GroupSettings.Default with { Start = StreamPosition.Start };
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", settings, -1);
+        var me = _app!.Services.GetRequiredService<SubscriptionGroupRegistry>().InstanceId;
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), A<CancellationToken>._)).Returns(new LeaseHolder(me, new Uri("http://localhost")));
+        A.CallTo(() => _groups.UpdateSettingsAsync(definition.Id, A<GroupSettings>._, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, A<long?>._, A<int>._, A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<StreamSlice?>(new StreamSlice(new StreamHead(0, 1), call.GetArgument<long?>(2) == 0 ? [Record("orders-1", 0, 10), Record("orders-1", 1, 11)] : [])));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+        using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
+        await Next(call, 3);
+
+        // Act
+        var response = await client.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
+        var ended = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+
+        // Assert: the change is made, and the consumer is told why its call ended.
+        response.Settings.MaxRetryCount.ShouldBe(7);
+        ended.StatusCode.ShouldBe(StatusCode.Aborted);
+        var info = ended.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("GROUP_UPDATED");
+        info.Metadata["group"].ShouldBe("billing");
     }
 
     [Fact]

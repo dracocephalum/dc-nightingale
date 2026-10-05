@@ -107,6 +107,13 @@ public static class NightingaleErrors
     public static RpcException ConsumerLimitReached(string stream, string group, int limit) =>
         Build(StatusCode.ResourceExhausted, ErrorReason.ConsumerLimitReached, $"Group '{group}' on stream '{stream}' already has {limit} consumer(s).", ("stream", stream), ("group", group), ("limit", limit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
+    /// <summary>The group's settings were changed under its consumer, whose call ends so it connects again.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="group">The group.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException GroupUpdated(string stream, string group) =>
+        Build(StatusCode.Aborted, ErrorReason.GroupUpdated, $"Group '{group}' on stream '{stream}' was updated; connect again to consume under its new settings.", ("stream", stream), ("group", group));
+
     /// <summary>No parked message at that position.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="group">The group.</param>

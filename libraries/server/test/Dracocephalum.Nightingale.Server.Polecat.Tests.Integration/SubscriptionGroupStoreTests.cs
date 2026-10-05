@@ -152,6 +152,31 @@ public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)
     }
 
     [Fact]
+    public async Task UpdateSettings_ShouldReplaceTheGroupsSettingsAndLeaveItsCheckpointAndSayWhenThereIsNoGroup()
+    {
+        // Arrange
+        var sut = Store();
+        var (stream, group) = Names();
+        var id = Guid.CreateVersion7();
+        var created = GroupSettings.Default with { Start = StreamPosition.From(3), Numbering = Numbering.Ordinal };
+        var changed = created with { MessageTimeout = TimeSpan.FromSeconds(7), MaxRetryCount = 4, CheckpointUpperBound = 50, CheckpointAfter = TimeSpan.FromSeconds(1), CheckpointLowerBound = 5, BufferSize = 20, MaxSubscriberCount = 1 };
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, created, -1) { Id = id }, TestContext.Current.CancellationToken);
+        await sut.SaveCheckpointAsync(id, 41, TestContext.Current.CancellationToken);
+
+        // Act
+        var updated = await sut.UpdateSettingsAsync(id, changed, TestContext.Current.CancellationToken);
+        var missing = await sut.UpdateSettingsAsync(Guid.NewGuid(), changed, TestContext.Current.CancellationToken);
+        var read = await sut.GetAsync(stream, group, TestContext.Current.CancellationToken);
+
+        // Assert
+        updated.ShouldBeTrue();
+        missing.ShouldBeFalse();
+        read.ShouldNotBeNull().Settings.ShouldBe(changed);
+        read.Checkpoint.ShouldBe(41);
+        await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Replay_ShouldMoveParkedMessagesToTheOutboxAndParkingShouldMoveThemBack()
     {
         // Arrange

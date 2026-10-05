@@ -107,6 +107,35 @@ The client's names are `ListParkedMessagesAsync`, `ListOutboxMessagesAsync`,
 
 **Why:** rows have keys; a log does not. Nothing is lost by the difference.
 
+## Updating a group changes its tunables, not where it stands
+
+**Reference:** an update replaces a group's settings, its start position
+among them, and drops its connections so they reconnect under the new ones.
+Changing the start resets the group.
+
+**Nightingale:** an update changes the timeouts, the retry limit, the
+checkpoint bounds, the buffer size and the consumer limit, and ends the
+connected consumer's call with `GROUP_UPDATED`, which the client raises as
+`GroupUpdatedException`; the consumer connects again and what it had not
+acknowledged is delivered again. Three things differ.
+
+- **The start and the numbering are not changed.** They say what the
+  group's checkpoint means. Naming another value for either is refused, and
+  a consumer that wants one deletes the group and creates it again. The
+  client's `UpdatePersistentSubscriptionAsync` takes a settings object as
+  the reference's does and sends neither of the two.
+- **On the wire, a field left unset keeps its value**, so a caller changes
+  one setting without restating the others. The answer carries all of them
+  as they then stand.
+- **The change is made by the instance that runs the group**, which is the
+  one that can end its consumer's call: another refuses with that
+  instance's address and the client repeats the call there, as for a
+  replay. A group nobody runs is changed by whichever instance was asked.
+
+**Why:** moving a group's position in place has to say what becomes of its
+parked messages, its outbox and what is in flight; that is parked in
+`PENDING.md` rather than done by a side door of the update.
+
 ## A persistent subscription serves one consumer
 
 **Reference:** a group dispatches to several consumers at once, round-robin

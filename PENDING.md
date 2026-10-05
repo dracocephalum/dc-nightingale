@@ -110,14 +110,14 @@ Persistent subscriptions ship with dispatch to a single consumer and a
 subscriber limit of one. Round-robin and pinned strategies add one dispatcher
 per group fanning out to several connections; the in-flight tracker already
 accepts acknowledgements in any order. Group info then lists each consumer
-rather than one. Updating a group's settings in place is in this group too:
-the tunables, ending a connected consumer's call so it reconnects under them.
+rather than one, and an update ends each consumer's call.
 
 ## Moving a group's position
 
 The reference lets an update change where a group starts, which resets it.
-Here a group's start and its numbering are fixed when it is created, and a
-consumer that wants another position deletes the group and creates it again.
+Here a group's start and its numbering are fixed when it is created, an
+update changes its other settings only, and a consumer that wants another
+position deletes the group and creates it again.
 Moving a group in place, back to replay a stretch or forward to skip one, is
 wanted and parked: it has to say what becomes of the parked messages and the
 outbox on either side of the new position, of events in flight, and of a

@@ -34,6 +34,13 @@ public interface ISubscriptionGroupStore
     /// <returns>True when a group was deleted.</returns>
     Task<bool> DeleteAsync(string stream, string group, CancellationToken cancellationToken);
 
+    /// <summary>Replaces a group's settings; its start and its numbering are the caller's to have left as they were.</summary>
+    /// <param name="groupId">The group's id.</param>
+    /// <param name="settings">The settings, all of them.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>True when the group was there to update.</returns>
+    Task<bool> UpdateSettingsAsync(Guid groupId, GroupSettings settings, CancellationToken cancellationToken);
+
     /// <summary>
     /// Writes how a running group stands to its row, or clears it. What is written is to be
     /// read, by a listing and by whoever is asked about a group it does not run, and nothing

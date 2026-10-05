@@ -8,7 +8,8 @@ namespace Dracocephalum.Nightingale.Server;
 /// consumer leaves, so the limit of one consumer per group holds within the instance; the lease
 /// holds it across instances. Once the group runs, it attaches a wake-up, so a replay asked for
 /// while its consumer is connected reaches the consumer at once instead of at its next
-/// connection, and a way to ask how it stands, for whoever asks this instance about the group.
+/// connection, a way to ask how it stands, for whoever asks this instance about the group, and
+/// a way to end its consumer's call, for a change of settings the consumer has to reconnect under.
 /// </summary>
 public sealed class SubscriptionGroupRegistry
 {
@@ -31,13 +32,14 @@ public sealed class SubscriptionGroupRegistry
     /// <param name="groupId">The group's id.</param>
     /// <param name="wake">What to call so the group looks at its outbox.</param>
     /// <param name="describe">What to call to ask the group how it stands; none when it cannot say.</param>
-    public void Attach(Guid groupId, Action wake, Func<SubscriptionGroupLive>? describe = null)
+    /// <param name="stop">What to call to end the consumer's call because the group was updated; none when it cannot be.</param>
+    public void Attach(Guid groupId, Action wake, Func<SubscriptionGroupLive>? describe = null, Action? stop = null)
     {
         ArgumentNullException.ThrowIfNull(wake);
         var name = LeaseName(groupId);
         if (_live.ContainsKey(name))
         {
-            _live[name] = new Running(wake, describe);
+            _live[name] = new Running(wake, describe, stop);
         }
     }
 
@@ -61,9 +63,23 @@ public sealed class SubscriptionGroupRegistry
     public SubscriptionGroupLive? Describe(Guid groupId) =>
         _live.TryGetValue(LeaseName(groupId), out var running) ? running?.Describe?.Invoke() : null;
 
+    /// <summary>Ends the call of the consumer of a group running here, because the group was updated.</summary>
+    /// <param name="groupId">The group's id.</param>
+    /// <returns>True when a running group was told; false when none runs here.</returns>
+    public bool Stop(Guid groupId)
+    {
+        if (!_live.TryGetValue(LeaseName(groupId), out var running) || running?.Stop is null)
+        {
+            return false;
+        }
+
+        running.Stop();
+        return true;
+    }
+
     /// <summary>Releases a group a consumer held here.</summary>
     /// <param name="groupId">The group's id.</param>
     public void Release(Guid groupId) => _live.TryRemove(LeaseName(groupId), out _);
 
-    private sealed record Running(Action Wake, Func<SubscriptionGroupLive>? Describe);
+    private sealed record Running(Action Wake, Func<SubscriptionGroupLive>? Describe, Action? Stop);
 }

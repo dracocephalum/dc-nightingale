@@ -295,6 +295,40 @@ public sealed class NightingaleClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Changes a persistent-subscription group's settings in place: its timeouts, its retry
+    /// limit, its checkpoint bounds, its buffer size and its consumer limit, all taken from the
+    /// settings given. Where the group starts and how it is numbered are fixed when it is
+    /// created, so those two members are not sent and stay as they are. A consumer connected to
+    /// the group is disconnected with <see cref="GroupUpdatedException"/> and connects again
+    /// under the new settings. When the group runs in another instance that says where, the
+    /// client makes the change there instead, once.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="settings">The settings to change to; its start and its numbering are ignored.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The group's settings after the change, with the start and the numbering it has.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    public async Task<GroupSettings> UpdatePersistentSubscriptionAsync(string stream, string group, GroupSettings settings, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        ArgumentNullException.ThrowIfNull(settings);
+        var wire = settings.ToWire();
+        wire.ClearStart();
+        wire.Numbering = Protocol.V1.Numbering.Unspecified;
+        var request = new UpdateRequest { Stream = stream, Group = group, Settings = wire };
+        try
+        {
+            return await UpdateAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
+        {
+            return await UpdateAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Moves every parked message below a number to the group's outbox, to be delivered again
     /// ahead of the stream, as <see cref="ReplayParkedMessagesAsync"/> moves all or one.
     /// </summary>
@@ -511,6 +545,19 @@ public sealed class NightingaleClient : IAsyncDisposable
         {
             await subscription.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static async Task<GroupSettings> UpdateAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, UpdateRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await client.UpdateAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response.Settings.ToGroupSettings();
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
         }
     }
 

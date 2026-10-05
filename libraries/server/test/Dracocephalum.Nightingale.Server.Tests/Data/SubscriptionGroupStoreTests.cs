@@ -151,6 +151,28 @@ public sealed class SubscriptionGroupStoreTests
     }
 
     [Fact]
+    public async Task UpdateSettings_ShouldReplaceTheGroupsSettingsAndLeaveItsCheckpointAndSayWhenThereIsNoGroup()
+    {
+        // Arrange
+        var sut = Store();
+        var created = GroupSettings.Default with { Start = StreamPosition.From(3), Numbering = Numbering.Ordinal };
+        var changed = created with { MessageTimeout = TimeSpan.FromSeconds(7), MaxRetryCount = 4, CheckpointUpperBound = 50, CheckpointAfter = TimeSpan.FromSeconds(1), CheckpointLowerBound = 5, BufferSize = 20, MaxSubscriberCount = 1 };
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", created, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await sut.SaveCheckpointAsync(Billing, 41, TestContext.Current.CancellationToken);
+
+        // Act
+        var updated = await sut.UpdateSettingsAsync(Billing, changed, TestContext.Current.CancellationToken);
+        var missing = await sut.UpdateSettingsAsync(Guid.NewGuid(), changed, TestContext.Current.CancellationToken);
+        var read = await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+
+        // Assert
+        updated.ShouldBeTrue();
+        missing.ShouldBeFalse();
+        read.ShouldNotBeNull().Settings.ShouldBe(changed);
+        read.Checkpoint.ShouldBe(41);
+    }
+
+    [Fact]
     public async Task Due_ShouldHoldBackWhatIsNotDueYet()
     {
         // Arrange: a message put on the outbox for later.
