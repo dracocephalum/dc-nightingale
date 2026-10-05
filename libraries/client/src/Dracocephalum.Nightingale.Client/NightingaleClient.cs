@@ -295,6 +295,121 @@ public sealed class NightingaleClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Moves every parked message below a number to the group's outbox, to be delivered again
+    /// ahead of the stream, as <see cref="ReplayParkedMessagesAsync"/> moves all or one.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="before">The number the replayed messages are below, in the group's numbering.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many messages were put back.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    public async Task<int> ReplayParkedMessagesBeforeAsync(string stream, string group, long before, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        var request = new ReplayParkedRequest { Stream = stream, Group = group, Before = before };
+        try
+        {
+            return await ReplayAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
+        {
+            return await ReplayAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Removes parked messages for good, so the group never delivers them: all of them, or the
+    /// one at a number. The events stay in their streams.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="position">The number of the one message to remove, in the group's numbering; all of them when null.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many messages were removed.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    /// <exception cref="ParkedMessageNotFoundException">No parked message at that position.</exception>
+    public Task<int> SkipParkedMessagesAsync(string stream, string group, long? position = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        var request = new SkipParkedRequest { Stream = stream, Group = group };
+        if (position is { } wanted)
+        {
+            request.Position = wanted;
+        }
+        else
+        {
+            request.All = new Google.Protobuf.WellKnownTypes.Empty();
+        }
+
+        return SkipAsync(request, cancellationToken);
+    }
+
+    /// <summary>Removes every parked message below a number for good.</summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="before">The number the removed messages are below, in the group's numbering.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many messages were removed.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    public Task<int> SkipParkedMessagesBeforeAsync(string stream, string group, long before, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        return SkipAsync(new SkipParkedRequest { Stream = stream, Group = group, Before = before }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists a group's parked messages in the order of their numbers, a page at a time: which
+    /// event each is, why it was parked and at which retry count.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="after">Only messages above this number, the last of the page before; from the first when null.</param>
+    /// <param name="limit">The most messages to return, 1000 at most.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The page; fewer than the limit means there are no more.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    public async Task<IReadOnlyList<ParkedMessageInfo>> ListParkedMessagesAsync(string stream, string group, long? after = null, int limit = 100, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _persistent.ListParkedAsync(Page(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response.Messages.Select(message => message.ToParkedMessageInfo()).ToList();
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
+    /// <summary>
+    /// Lists the messages on a group's outbox the same way: parked messages a replay put back,
+    /// not delivered yet.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="after">Only messages above this number, the last of the page before; from the first when null.</param>
+    /// <param name="limit">The most messages to return, 1000 at most.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The page; fewer than the limit means there are no more.</returns>
+    /// <exception cref="GroupNotFoundException">No such group.</exception>
+    public async Task<IReadOnlyList<OutboxMessageInfo>> ListOutboxMessagesAsync(string stream, string group, long? after = null, int limit = 100, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _persistent.ListOutboxAsync(Page(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response.Messages.Select(message => message.ToOutboxMessageInfo()).ToList();
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
+    /// <summary>
     /// Describes a persistent-subscription group: its settings, its checkpoint, what is parked
     /// and on its outbox, the last number of its stream, and where it runs. While a consumer is
     /// connected, the instance that runs the group answers and adds what only it knows; when
@@ -396,6 +511,33 @@ public sealed class NightingaleClient : IAsyncDisposable
         {
             await subscription.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static ListMessagesRequest Page(string stream, string group, long? after, int limit)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentException.ThrowIfNullOrEmpty(group);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        var request = new ListMessagesRequest { Stream = stream, Group = group, Limit = limit };
+        if (after is { } number)
+        {
+            request.After = number;
+        }
+
+        return request;
+    }
+
+    private async Task<int> SkipAsync(SkipParkedRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _persistent.SkipParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response.Skipped;
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
         }
     }
 

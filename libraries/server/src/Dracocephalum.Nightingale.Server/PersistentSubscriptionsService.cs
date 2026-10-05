@@ -25,6 +25,12 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     /// <summary>The most ids one acknowledgement may carry.</summary>
     public const int MaxIdsPerAck = 2000;
 
+    /// <summary>How many parked or outbox messages a listing returns when the caller names no limit.</summary>
+    public const int DefaultPageSize = 100;
+
+    /// <summary>The most parked or outbox messages one listing returns.</summary>
+    public const int MaxPageSize = 1000;
+
     /// <inheritdoc/>
     public override async Task<CreateResponse> Create(CreateRequest request, ServerCallContext context)
     {
@@ -181,13 +187,11 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             throw NightingaleErrors.GroupOwnedElsewhere(stream, group, holder);
         }
 
-        // The caller's number is in the group's numbering: a revision for a plain stream, a
-        // position for $all or a virtual stream, an ordinal for a group created under it.
-        var by = definition.Settings.Numbering == Numbering.Ordinal ? SubscriptionParkedNumber.Ordinal
-            : StreamNames.IsReserved(stream) ? SubscriptionParkedNumber.Position
-            : SubscriptionParkedNumber.Revision;
+        var by = NumberOf(definition);
         long? position = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Position ? request.Position : null;
-        var replayed = await groups.ReplayAsync(definition.Id, position, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false);
+        var replayed = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Before
+            ? await groups.ReplayBeforeAsync(definition.Id, request.Before, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false)
+            : await groups.ReplayAsync(definition.Id, position, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false);
         if (position is { } wanted && replayed == 0)
         {
             throw NightingaleErrors.ParkedMessageNotFound(stream, group, wanted);
@@ -197,6 +201,78 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         // gets it at its next connection.
         registry.Wake(definition.Id);
         return new ReplayParkedResponse { Replayed = replayed };
+    }
+
+    /// <inheritdoc/>
+    public override async Task<ListParkedResponse> ListParked(ListMessagesRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+        var by = NumberOf(definition);
+        var response = new ListParkedResponse();
+        foreach (var message in await groups.ListParkedAsync(definition.Id, by, request.HasAfter ? request.After : null, Limit(request.Limit), context.CancellationToken).ConfigureAwait(false))
+        {
+            response.Messages.Add(new ParkedMessage
+            {
+                Number = Number(by, message.Position, message.Revision, message.Ordinal),
+                EventId = message.EventId.ToString("D"),
+                Reason = message.Reason,
+                RetryCount = message.Attempts,
+                ParkedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(message.ParkedAt),
+                Position = message.Position,
+                Revision = message.Revision,
+            });
+        }
+
+        return response;
+    }
+
+    /// <inheritdoc/>
+    public override async Task<ListOutboxResponse> ListOutbox(ListMessagesRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+        var by = NumberOf(definition);
+        var response = new ListOutboxResponse();
+        foreach (var message in await groups.ListOutboxAsync(definition.Id, by, request.HasAfter ? request.After : null, Limit(request.Limit), context.CancellationToken).ConfigureAwait(false))
+        {
+            response.Messages.Add(new OutboxMessage
+            {
+                Number = Number(by, message.Position, message.Revision, message.Ordinal),
+                EventId = message.EventId.ToString("D"),
+                Reason = message.Reason,
+                RetryCount = message.Attempts,
+                DueAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(message.DueAt),
+                Position = message.Position,
+                Revision = message.Revision,
+            });
+        }
+
+        return response;
+    }
+
+    /// <inheritdoc/>
+    public override async Task<SkipParkedResponse> SkipParked(SkipParkedRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // Parked messages are rows and no running group holds them in memory, so any instance
+        // removes them; there is no consumer to wake and nowhere to send the caller.
+        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+        long? position = request.WhichCase == SkipParkedRequest.WhichOneofCase.Position ? request.Position : null;
+        long? before = request.WhichCase == SkipParkedRequest.WhichOneofCase.Before ? request.Before : null;
+        var skipped = await groups.SkipAsync(definition.Id, position, before, NumberOf(definition), context.CancellationToken).ConfigureAwait(false);
+        if (position is { } wanted && skipped == 0)
+        {
+            throw NightingaleErrors.ParkedMessageNotFound(definition.Stream, definition.Group, wanted);
+        }
+
+        return new SkipParkedResponse { Skipped = skipped };
     }
 
     /// <inheritdoc/>
@@ -259,6 +335,39 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         {
             registry.Release(definition.Id);
         }
+    }
+
+    /// <summary>
+    /// The number a group's caller addresses a message by: a revision for a group over a plain
+    /// stream, a position over <c>$all</c> or a virtual stream, an ordinal for a group created
+    /// under ordinal numbering.
+    /// </summary>
+    private static SubscriptionParkedNumber NumberOf(SubscriptionGroupDefinition definition) =>
+        definition.Settings.Numbering == Numbering.Ordinal ? SubscriptionParkedNumber.Ordinal
+        : StreamNames.IsReserved(definition.Stream) ? SubscriptionParkedNumber.Position
+        : SubscriptionParkedNumber.Revision;
+
+    private static long Number(SubscriptionParkedNumber by, long position, long revision, long? ordinal) => by switch
+    {
+        SubscriptionParkedNumber.Revision => revision,
+        SubscriptionParkedNumber.Ordinal => ordinal ?? -1,
+        _ => position,
+    };
+
+    private static int Limit(int asked) => asked switch
+    {
+        <= 0 => DefaultPageSize,
+        > MaxPageSize => throw NightingaleErrors.InvalidArgument($"A page holds at most {MaxPageSize} messages."),
+        _ => asked,
+    };
+
+    /// <summary>The group two names find, known from here on by the names in its own row.</summary>
+    private async Task<SubscriptionGroupDefinition> GroupAsync(string streamName, string groupName, CancellationToken cancellationToken)
+    {
+        var stream = ReadableStreamName(streamName);
+        var group = GroupName(groupName);
+        return await groups.GetAsync(stream, group, cancellationToken).ConfigureAwait(false)
+            ?? throw NightingaleErrors.GroupNotFound(stream, group);
     }
 
     /// <summary>What the store holds about a group, in its wire form.</summary>

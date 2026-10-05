@@ -42,5 +42,12 @@ public sealed class PersistentSubscriptionTests
         report.Info.Live.ShouldNotBeNull().InFlightCount.ShouldBe(0);
         report.Info.Live.FromOwner.ShouldBeTrue();
         report.Listed.ShouldBe(1);
+
+        // The parked message, listed: the payment at revision 1, redelivered once before it was parked, with the consumer's reason.
+        var parked = report.Parked.ShouldHaveSingleItem();
+        parked.Number.ShouldBe(1);
+        parked.Revision.ShouldBe(1);
+        parked.Reason.ShouldBe("payment gateway down");
+        parked.RetryCount.ShouldBe(1);
     }
 }

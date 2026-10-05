@@ -73,10 +73,12 @@ guarantee with `ANY`. That part is not a variance.
 **Why:** bytes keep the client's exact text, which a typed map of doubles
 cannot, and the store keeps headers as a JSON object already.
 
-## Parked messages are replayed one at a time
+## Parked messages are rows: listed, replayed and skipped by number
 
 **Reference:** a parked message goes to a stream per group, and replay puts
-back all of them, or the first so many; one cannot be picked out.
+back all of them, or the first so many; one cannot be picked out. There is
+no call that lists them or removes one: the parked stream is read like any
+stream, and truncated.
 
 **Nightingale:** parked messages are rows, one per group and event, and
 replay moves all of them or the one at a number in the group's numbering,
@@ -87,6 +89,21 @@ once to a consumer connected to the serving instance; the row keeps all
 three numbers, so the same message is addressable whichever way the group
 counts. A replayed message keeps its retry count, and one that fails again
 goes back to parked. Replaying the same message twice is a no-op.
+
+Three things follow from their being rows. A replay can take every message
+below a number, where the reference's `stopAt` counts how many to take.
+The parked messages and the outbox are each listed, a page at a time in the
+order of the group's numbering: which event, why, at which retry
+count; the event itself is read from its stream by its number. And a
+parked message can be skipped, removed for good so the group never
+delivers it, one, all, or every one below a number; the event stays in its
+stream. Skipping and listing are answered by any instance, since no running
+group holds parked messages in memory; a replay still goes to the instance
+that runs the group, which has a consumer to wake.
+
+The client's names are `ListParkedMessagesAsync`, `ListOutboxMessagesAsync`,
+`SkipParkedMessagesAsync`, `SkipParkedMessagesBeforeAsync` and
+`ReplayParkedMessagesBeforeAsync`, beside `ReplayParkedMessagesAsync`.
 
 **Why:** rows have keys; a log does not. Nothing is lost by the difference.
 

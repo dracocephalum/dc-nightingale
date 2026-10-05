@@ -14,6 +14,7 @@ refuse the payment once and see it come back with its retry count, refuse it
 again and see it parked, leave, come back to a checkpoint that covers all
 three revisions, ask the server about the group and see where it runs, its
 checkpoint against the stream's last revision and the one parked message,
+list that parked message with its reason and its retry count,
 replay that one parked message by itself while connected and
 receive it at once, acknowledge it, and delete the group. Then it drops the
 database.

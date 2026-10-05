@@ -170,6 +170,103 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReplayParked_BeforeANumber_ShouldMoveThoseBelowItInTheGroupsNumbering()
+    {
+        // Arrange: a group over a category by position.
+        var definition = new SubscriptionGroupDefinition("$ce-orders", "billing", GroupSettings.Default, -1);
+        A.CallTo(() => _groups.GetAsync("$ce-orders", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.ReplayBeforeAsync(definition.Id, 500, SubscriptionParkedNumber.Position, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(4);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var response = await client.ReplayParkedAsync(new ReplayParkedRequest { Stream = "$ce-orders", Group = "billing", Before = 500 }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        response.Replayed.ShouldBe(4);
+        A.CallTo(() => _groups.ReplayAsync(A<Guid>._, A<long?>._, A<SubscriptionParkedNumber>._, A<DateTimeOffset>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task ListParked_ShouldGiveEachMessageItsNumberInTheGroupsNumberingAPageAtATime()
+    {
+        // Arrange: a group over a category under ordinal numbering; a parked row keeps all three numbers.
+        var definition = new SubscriptionGroupDefinition("$ce-orders", "billing", GroupSettings.Default with { Numbering = Numbering.Ordinal }, -1);
+        var eventId = Guid.NewGuid();
+        A.CallTo(() => _groups.GetAsync("$ce-orders", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.ListParkedAsync(definition.Id, SubscriptionParkedNumber.Ordinal, 7, 2, A<CancellationToken>._))
+            .Returns(new List<SubscriptionParkedMessage> { new(definition.Id, 900, 3, 8, eventId, "poison", 2, Created) });
+        A.CallTo(() => _groups.ListParkedAsync(definition.Id, SubscriptionParkedNumber.Ordinal, null, PersistentSubscriptionsService.DefaultPageSize, A<CancellationToken>._))
+            .Returns(new List<SubscriptionParkedMessage>());
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var page = (await client.ListParkedAsync(new ListMessagesRequest { Stream = "$ce-orders", Group = "billing", After = 7, Limit = 2 }, cancellationToken: TestContext.Current.CancellationToken)).Messages;
+        var byDefault = (await client.ListParkedAsync(new ListMessagesRequest { Stream = "$ce-orders", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Messages;
+        var tooMany = await Should.ThrowAsync<RpcException>(async () => await client.ListParkedAsync(new ListMessagesRequest { Stream = "$ce-orders", Group = "billing", Limit = PersistentSubscriptionsService.MaxPageSize + 1 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        var message = page.ShouldHaveSingleItem();
+        message.Number.ShouldBe(8);
+        message.Position.ShouldBe(900);
+        message.Revision.ShouldBe(3);
+        message.EventId.ShouldBe(eventId.ToString("D"));
+        message.Reason.ShouldBe("poison");
+        message.RetryCount.ShouldBe(2);
+        message.ParkedAt.ToDateTimeOffset().ShouldBe(Created);
+        byDefault.ShouldBeEmpty();
+        tooMany.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+    }
+
+    [Fact]
+    public async Task ListOutbox_ShouldGiveEachMessageItsNumberAndWhenItIsDue()
+    {
+        // Arrange: a group over a plain stream counts by revision.
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1);
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.ListOutboxAsync(definition.Id, SubscriptionParkedNumber.Revision, null, 50, A<CancellationToken>._))
+            .Returns(new List<SubscriptionOutboxMessage> { new(definition.Id, 900, 3, null, Guid.NewGuid(), "poison", 2, Created) });
+        A.CallTo(() => _groups.GetAsync("orders-1", "nobody", A<CancellationToken>._)).Returns((SubscriptionGroupDefinition?)null);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var messages = (await client.ListOutboxAsync(new ListMessagesRequest { Stream = "orders-1", Group = "billing", Limit = 50 }, cancellationToken: TestContext.Current.CancellationToken)).Messages;
+        var missing = await Should.ThrowAsync<RpcException>(async () => await client.ListOutboxAsync(new ListMessagesRequest { Stream = "orders-1", Group = "nobody" }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        var message = messages.ShouldHaveSingleItem();
+        message.Number.ShouldBe(3);
+        message.Position.ShouldBe(900);
+        message.DueAt.ToDateTimeOffset().ShouldBe(Created);
+        missing.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("GROUP_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task SkipParked_ShouldRemoveAllOneOrThoseBelowANumberAndFailWhenTheOneIsMissing()
+    {
+        // Arrange: skipping needs no running group, so it never asks who holds the lease.
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1);
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.SkipAsync(definition.Id, null, null, SubscriptionParkedNumber.Revision, A<CancellationToken>._)).Returns(5);
+        A.CallTo(() => _groups.SkipAsync(definition.Id, 7, null, SubscriptionParkedNumber.Revision, A<CancellationToken>._)).Returns(1);
+        A.CallTo(() => _groups.SkipAsync(definition.Id, 9, null, SubscriptionParkedNumber.Revision, A<CancellationToken>._)).Returns(0);
+        A.CallTo(() => _groups.SkipAsync(definition.Id, null, 4, SubscriptionParkedNumber.Revision, A<CancellationToken>._)).Returns(0);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var all = await client.SkipParkedAsync(new SkipParkedRequest { Stream = "orders-1", Group = "billing", All = new() }, cancellationToken: TestContext.Current.CancellationToken);
+        var one = await client.SkipParkedAsync(new SkipParkedRequest { Stream = "orders-1", Group = "billing", Position = 7 }, cancellationToken: TestContext.Current.CancellationToken);
+        var before = await client.SkipParkedAsync(new SkipParkedRequest { Stream = "orders-1", Group = "billing", Before = 4 }, cancellationToken: TestContext.Current.CancellationToken);
+        var missing = await Should.ThrowAsync<RpcException>(async () => await client.SkipParkedAsync(new SkipParkedRequest { Stream = "orders-1", Group = "billing", Position = 9 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert: none below a number is an answer, zero; one that is not there is an error.
+        all.Skipped.ShouldBe(5);
+        one.Skipped.ShouldBe(1);
+        before.Skipped.ShouldBe(0);
+        missing.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("PARKED_MESSAGE_NOT_FOUND");
+        A.CallTo(() => _groups.LeaseHolderAsync(A<string>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task Read_ShouldConfirmDeliverAndTurnAcknowledgementsIntoTheCheckpoint()
     {
         // Arrange: the group starts at the beginning of a two-event stream, with the checkpoint written on every acknowledgement.
