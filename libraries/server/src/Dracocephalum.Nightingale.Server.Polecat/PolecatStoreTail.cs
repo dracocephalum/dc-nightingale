@@ -20,7 +20,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="store">The store.</param>
 /// <param name="events">Makes the mirror of the store's events table, over the main connection.</param>
 /// <param name="loggerFactory">Where the daemon's logger comes from.</param>
-internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextFactory<EventsDbContext> events, ILoggerFactory loggerFactory) : IStoreTail, IHostedService, IAsyncDisposable
+/// <param name="quietWait">How long one wait on the store's tracker lasts before the tracker ends it with a timeout; a minute when not given.</param>
+internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextFactory<EventsDbContext> events, ILoggerFactory loggerFactory, TimeSpan? quietWait = null) : IStoreTail, IHostedService, IAsyncDisposable
 {
     /// <summary>How many rows past the mark one refresh looks at.</summary>
     private const int RefreshWindow = 10_000;
@@ -91,7 +92,7 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
         _daemon = daemon;
         Publish(daemon.Tracker.HighWaterMark);
         _loop = FollowAsync(
-            (beyond, stopping) => daemon.Tracker.WaitForHighWaterMark(beyond + 1, null).WaitAsync(stopping),
+            (beyond, stopping) => daemon.Tracker.WaitForHighWaterMark(beyond + 1, quietWait).WaitAsync(stopping),
             () => daemon.Tracker.HighWaterMark,
             _stopping.Token);
     }
@@ -160,8 +161,8 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
                 }
                 catch (TimeoutException)
                 {
-                    // The tracker's wait gives up after a time of its own, a minute, when the
-                    // mark has not moved: a store nobody appended to. That is no failure and no
+                    // The tracker's wait ends with a timeout when the mark has not moved in the
+                    // time it was given, a minute: a store nobody appended to. That is no failure and no
                     // reason to stop following; the mark is read and the wait begun again.
                 }
 

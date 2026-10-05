@@ -17,6 +17,40 @@ public sealed class PolecatStoreTailTests(SqlServerTestDatabase database)
     private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
 
     [Fact]
+    public async Task Head_AfterTheStoreWasQuietLongerThanTheTrackersWait_ShouldStillFollowWhatIsAppended()
+    {
+        // Arrange: a server of its own whose tail gives the store's tracker a fifth of a second
+        // per wait where a server gives it a minute, then left alone for seven of those waits.
+        // Each ends in the tracker's own timeout, as a quiet minute does. Nothing else of the
+        // server's timing is touched: the tracker's agent polls on its own cadence, slower than
+        // this wait, so the timeouts here also fall between its polls, which a minute never
+        // does and which only makes the case harder.
+        var name = TestDatabases.NewName();
+        try
+        {
+            using var host = await TestDatabases.StartProvisionedHostAsync(name, options => options.TailQuietWait = TimeSpan.FromMilliseconds(200));
+            var tail = host.Services.GetRequiredService<IStoreTail>();
+            await Task.Delay(TimeSpan.FromMilliseconds(1400), TestContext.Current.CancellationToken);
+
+            // Act: a tail that had stopped following would fail this wait with its cause.
+            var appended = await host.Store().AppendAsync(NewStream(), StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            var head = tail.Head;
+            while (head < appended.Position)
+            {
+                head = await tail.WaitForAdvanceAsync(head, TestContext.Current.CancellationToken);
+            }
+
+            // Assert
+            head.ShouldBeGreaterThanOrEqualTo(appended.Position);
+            await host.StopAsync(TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await TestDatabases.DropAsync(name);
+        }
+    }
+
+    [Fact]
     public async Task Head_AfterAnAppend_ShouldReachTheAppendedPositionWithinThePollingInterval()
     {
         // Arrange

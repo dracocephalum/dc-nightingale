@@ -81,15 +81,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   interval, only during the sequencer's lag, which is about one tail interval.
   Close by: the sequencer publishing its progress in-process, and one poller
   per process for the other instances, once the subscription count demands it.
-- **No test leaves a server idle for a minute.** The tail stopped following
-  the store, for good and without a word, the first time a minute passed
-  with nothing appended: the store's tracker gives up its wait after that
-  long and the tail's loop took the timeout for its end. It is fixed and
-  tested with the tracker stood in for, and a tail that stops for any other
-  reason now fails whoever waits on it with the cause. What is not tested is
-  the real thing: a server against a real store, left quiet for over a
-  minute, then appended to and subscribed to. Close by: that test, at the
-  price of a minute and more in the integration suite.
 - **A bounded read abandoned mid-page has stalled the next read.** While the
   ordinals sample polled a virtual stream by disposing each read right after
   its head, the following read sometimes got no answer for a minute, with no

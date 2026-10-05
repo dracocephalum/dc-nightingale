@@ -50,6 +50,16 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public bool FastBoot { get; set; }
 
     /// <summary>
+    /// Gets or sets how long the tail waits on the store's tracker for the head to move before
+    /// it reads the mark and waits again. The tracker ends a wait that runs this long with a
+    /// timeout; on a store nobody appends to, that is every time. Not a setting a host has a
+    /// reason to change, so it is not bound from configuration: it is here so that a test can
+    /// make a quiet store's minute pass in a fraction of a second, with the real tracker and
+    /// its real timeout.
+    /// </summary>
+    internal TimeSpan TailQuietWait { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// Gets or sets a value indicating whether the server opens a second, read-only connection and
     /// serves from it the reads a readable secondary can answer exactly: pages of <c>$all</c> and of
     /// the virtual streams, by position, at or below the high-water mark as that connection sees

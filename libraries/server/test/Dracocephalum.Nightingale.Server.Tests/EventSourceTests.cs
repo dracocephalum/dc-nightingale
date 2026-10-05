@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 
 using FakeItEasy;
+using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Tests;
@@ -31,16 +32,24 @@ public sealed class EventSourceTests
                 Interlocked.Increment(ref reads) == 1
                     ? []
                     : [new EventRecord(Guid.NewGuid(), "orders-3", 0, 20, "order_placed", Created, Encoding.UTF8.GetBytes("{}"), new JsonObject()) { Ordinal = 8 }]));
-        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        giveUp.CancelAfter(TimeSpan.FromSeconds(20));
+        var time = new FakeTimeProvider(Created);
+        using var abandon = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
 
-        // Act: the first event the feed yields.
-        EventRecord? delivered = null;
-        await foreach (var record in EventSource.FollowAsync(store, tail, "$ce-orders", 8, 10, Numbering.Ordinal, TimeProvider.System, giveUp.Token))
+        // Act: the first event the feed yields. The feed's pause between looks is on the clock
+        // the test holds, so the test moves the clock and waits for nothing. Six intervals are
+        // five more than the feed needs; a feed that still has not delivered is waiting on
+        // something no clock will bring, and is abandoned.
+        var feed = EventSource.FollowAsync(store, tail, "$ce-orders", 8, 10, Numbering.Ordinal, time, abandon.Token).GetAsyncEnumerator(abandon.Token);
+        var next = feed.MoveNextAsync().AsTask();
+        for (var interval = 0; interval < 6 && !next.IsCompleted; interval++)
         {
-            delivered = record;
-            break;
+            await Task.WhenAny(next, Task.Delay(50, TestContext.Current.CancellationToken));
+            time.Advance(EventSource.NumberingPollInterval);
         }
+
+        await Task.WhenAny(next, Task.Delay(500, TestContext.Current.CancellationToken));
+        var delivered = next.IsCompletedSuccessfully && await next ? feed.Current : null;
+        await abandon.CancelAsync();
 
         // Assert: found on the next look, not waited for behind an append that never comes.
         delivered.ShouldNotBeNull().Ordinal.ShouldBe(8);
