@@ -118,15 +118,11 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             info.LastKnownPosition = last;
         }
 
+        // Asked where the group runs, it says how it stands now; asked elsewhere with nowhere to
+        // send the client, what it last wrote to its row is the answer, already in the info.
         if (here && registry.Describe(definition.Id) is { } live)
         {
-            info.Live = new GroupLiveInfo
-            {
-                ConnectedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.ConnectedAt),
-                InFlightCount = live.InFlightCount,
-                AwaitingRetryCount = live.AwaitingRetryCount,
-                ConsumerBufferSize = live.ConsumerBufferSize,
-            };
+            info.Live = Live(live, fromOwner: true);
         }
 
         return new GetInfoResponse { Info = info };
@@ -142,7 +138,17 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         var response = new ListResponse();
         foreach (var summary in await groups.ListAsync(stream, context.CancellationToken).ConfigureAwait(false))
         {
-            response.Groups.Add(Info(summary));
+            // A group this instance runs is asked directly, which costs nothing and is as of
+            // now; the others are as their rows have them.
+            var info = Info(summary);
+            if (summary.Holder is { } holder
+                && string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal)
+                && registry.Describe(summary.Definition.Id) is { } live)
+            {
+                info.Live = Live(live, fromOwner: true);
+            }
+
+            response.Groups.Add(info);
         }
 
         return response;
@@ -239,10 +245,13 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
 
             try
             {
-                await ServeAsync(definition, buffer, lease, requestStream, responseStream, cancellationToken).ConfigureAwait(false);
+                await ServeAsync(definition, buffer, lease, context.Peer, requestStream, responseStream, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
+                // Cleared before the lease goes, so the row never says a consumer is connected
+                // under no lease; an instance that dies first leaves it, and readers go by the lease.
+                await groups.SaveLiveAsync(definition.Id, null, CancellationToken.None).ConfigureAwait(false);
                 await groups.ReleaseLeaseAsync(lease, registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
             }
         }
@@ -266,10 +275,37 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             OutboxCount = summary.OutboxCount,
             Running = summary.Holder is not null,
             OwnerAddress = summary.Holder?.Address?.ToString() ?? string.Empty,
+            Live = summary.Live is null ? null : Live(summary.Live, fromOwner: false),
         };
         if (definition.Checkpoint >= 0)
         {
             info.Checkpoint = definition.Checkpoint;
+        }
+
+        return info;
+    }
+
+    /// <summary>How a running group stands, in its wire form.</summary>
+    private static GroupLiveInfo Live(SubscriptionGroupLive live, bool fromOwner)
+    {
+        var info = new GroupLiveInfo
+        {
+            ConnectedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.ConnectedAt),
+            InFlightCount = live.InFlightCount,
+            AwaitingRetryCount = live.AwaitingRetryCount,
+            ConsumerBufferSize = live.ConsumerBufferSize,
+            ConsumerAddress = live.ConsumerAddress ?? string.Empty,
+            AsOf = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.AsOf),
+            FromOwner = fromOwner,
+        };
+        if (live.Checkpoint is { } checkpoint)
+        {
+            info.Checkpoint = checkpoint;
+        }
+
+        if (live.OldestInFlightAt is { } oldest)
+        {
+            info.OldestInFlightAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(oldest);
         }
 
         return info;
@@ -356,10 +392,15 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         return parsed;
     }
 
-    private async Task ServeAsync(SubscriptionGroupDefinition definition, int buffer, string lease, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task ServeAsync(SubscriptionGroupDefinition definition, int buffer, string lease, string? peer, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
         await using var live = new SubscriptionGroupRuntime(store, tail, groups, timeProvider, definition, buffer);
-        registry.Attach(definition.Id, live.Wake, live.Describe);
+        SubscriptionGroupLive Describe() => live.Describe() with { ConsumerAddress = peer };
+        registry.Attach(definition.Id, live.Wake, Describe);
+
+        // Written once now, so a listing shows the consumer as soon as it is connected, and
+        // again with every renewal of the lease.
+        await groups.SaveLiveAsync(definition.Id, Describe(), cancellationToken).ConfigureAwait(false);
         await responseStream.WriteAsync(
             new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = Guid.NewGuid().ToString("D"), Checkpoint = live.Checkpoint } },
             cancellationToken).ConfigureAwait(false);
@@ -368,7 +409,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         var token = ending.Token;
         var sending = SendAsync(live, responseStream, token);
         var receiving = ReceiveAsync(live, requestStream, token);
-        var keeping = KeepAsync(live, lease, definition.Settings.MessageTimeout, token);
+        var keeping = KeepAsync(live, definition.Id, Describe, lease, definition.Settings.MessageTimeout, token);
 
         var first = await Task.WhenAny(sending, receiving, keeping, live.Delivery).ConfigureAwait(false);
         await ending.CancelAsync().ConfigureAwait(false);
@@ -422,8 +463,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         }
     }
 
-    /// <summary>Renews the lease and redelivers what timed out, on a cadence tied to the message timeout.</summary>
-    private async Task KeepAsync(SubscriptionGroupRuntime live, string lease, TimeSpan messageTimeout, CancellationToken cancellationToken)
+    /// <summary>Renews the lease, redelivers what timed out and writes how the group stands, on a cadence tied to the message timeout.</summary>
+    private async Task KeepAsync(SubscriptionGroupRuntime live, Guid groupId, Func<SubscriptionGroupLive> describe, string lease, TimeSpan messageTimeout, CancellationToken cancellationToken)
     {
         var interval = TimeSpan.FromTicks(Math.Min(messageTimeout.Ticks / 2, LeaseDuration.Ticks / 3));
         while (true)
@@ -436,6 +477,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             }
 
             await live.ExpireAsync().ConfigureAwait(false);
+            await groups.SaveLiveAsync(groupId, describe(), cancellationToken).ConfigureAwait(false);
         }
     }
 }

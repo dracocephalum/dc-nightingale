@@ -77,7 +77,15 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     MaxSubscriberCount = table.Column<int>(type: "int", nullable: false),
                     Numbering = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
                     CheckpointPosition = table.Column<long>(type: "bigint", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)
+                    CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
+                    LiveSnapshotAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
+                    LiveConnectedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
+                    LiveConsumerAddress = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
+                    LiveConsumerBufferSize = table.Column<int>(type: "int", nullable: true),
+                    LiveInFlightCount = table.Column<int>(type: "int", nullable: true),
+                    LiveAwaitingRetryCount = table.Column<int>(type: "int", nullable: true),
+                    LiveCheckpointPosition = table.Column<long>(type: "bigint", nullable: true),
+                    LiveOldestInFlightAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true)
                 },
                 constraints: table =>
                 {

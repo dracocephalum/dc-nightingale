@@ -90,6 +90,7 @@ public sealed class RedirectTests : IAsyncLifetime
             await onSecond.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken));
         var info = (await onFirst.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
         var listed = (await onSecond.ListAsync(new ListRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken)).Groups;
+        var listedByOwner = (await onFirst.ListAsync(new ListRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken)).Groups;
 
         // Assert
         Detail(refusedRead).Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
@@ -106,7 +107,17 @@ public sealed class RedirectTests : IAsyncLifetime
         info.Live.InFlightCount.ShouldBe(1);
         listed.ShouldHaveSingleItem().Running.ShouldBeTrue();
         listed[0].OwnerAddress.ShouldBe(firstAddress.ToString());
-        listed[0].Live.ShouldBeNull();
+
+        // The listing has the group's numbers as the group last wrote them to its row.
+        listed[0].Live.ShouldNotBeNull().ConsumerBufferSize.ShouldBe(5);
+        listed[0].Live.ConsumerAddress.ShouldNotBeEmpty();
+        info.Live.ConsumerAddress.ShouldBe(listed[0].Live.ConsumerAddress);
+
+        // Asked of the instance that does not run the group, the numbers are the stored ones;
+        // asked of the one that does, in a listing as in the info, they are the group's own.
+        listed[0].Live.FromOwner.ShouldBeFalse();
+        info.Live.FromOwner.ShouldBeTrue();
+        listedByOwner.ShouldHaveSingleItem().Live.ShouldNotBeNull().FromOwner.ShouldBeTrue();
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT OwnerAddress FROM nightingale.Lease WHERE [Name] LIKE 'group:%'")).ShouldBe(firstAddress.ToString());
         _ = first;
     }

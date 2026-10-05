@@ -40,6 +40,7 @@ public sealed class PersistentSubscriptionTests
         report.Info.OutboxCount.ShouldBe(0);
         report.Info.Settings.MaxRetryCount.ShouldBe(1);
         report.Info.Live.ShouldNotBeNull().InFlightCount.ShouldBe(0);
+        report.Info.Live.FromOwner.ShouldBeTrue();
         report.Listed.ShouldBe(1);
     }
 }

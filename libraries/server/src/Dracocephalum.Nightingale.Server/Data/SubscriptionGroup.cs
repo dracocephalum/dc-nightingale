@@ -52,4 +52,34 @@ public sealed class SubscriptionGroup
 
     /// <summary>Gets or sets when the group was created.</summary>
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets when the running group last wrote how it stands, which it does with each
+    /// renewal of its lease; <see langword="null"/> when no consumer is connected. The columns
+    /// named <c>Live</c> are that snapshot. They are for reading only, and mean something only
+    /// while the group's lease is held: an instance that stopped without clearing them leaves
+    /// its last numbers behind.
+    /// </summary>
+    public DateTimeOffset? LiveSnapshotAt { get; set; }
+
+    /// <summary>Gets or sets when the consumer connected.</summary>
+    public DateTimeOffset? LiveConnectedAt { get; set; }
+
+    /// <summary>Gets or sets where the consumer connected from.</summary>
+    public string? LiveConsumerAddress { get; set; }
+
+    /// <summary>Gets or sets how many delivered, unacknowledged events the consumer holds at once.</summary>
+    public int? LiveConsumerBufferSize { get; set; }
+
+    /// <summary>Gets or sets how many events are delivered and neither acknowledged nor refused yet.</summary>
+    public int? LiveInFlightCount { get; set; }
+
+    /// <summary>Gets or sets how many events are queued to be delivered again.</summary>
+    public int? LiveAwaitingRetryCount { get; set; }
+
+    /// <summary>Gets or sets the checkpoint as the running group has it, which may be ahead of <see cref="CheckpointPosition"/>.</summary>
+    public long? LiveCheckpointPosition { get; set; }
+
+    /// <summary>Gets or sets when the oldest event still in flight was delivered.</summary>
+    public DateTimeOffset? LiveOldestInFlightAt { get; set; }
 }

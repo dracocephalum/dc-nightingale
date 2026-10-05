@@ -61,6 +61,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             group.Property(row => row.Stream).HasMaxLength(250).IsUnicode(false);
             group.Property(row => row.Name).HasMaxLength(250);
             group.Property(row => row.Numbering).HasConversion<string>().HasMaxLength(20);
+            group.Property(row => row.LiveConsumerAddress).HasMaxLength(200);
             group.HasIndex(row => new { row.TenantId, row.Stream, row.Name }).IsUnique();
         });
 

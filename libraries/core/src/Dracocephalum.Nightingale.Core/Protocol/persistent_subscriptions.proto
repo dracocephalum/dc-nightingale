@@ -46,9 +46,13 @@ service PersistentSubscriptions {
 
   // Lists the groups, every one or those of one stream, each with what the
   // store holds about it. Any instance answers, and none redirects: groups
-  // run in whichever instance their consumer reached, so no instance knows
-  // the live numbers of them all. GetInfo gives those for one group.
-  // Errors: INVALID_STREAM_NAME.
+  // run in whichever instance their consumer reached, so no instance has
+  // them all in memory. A running group writes how it stands to the store
+  // each time it renews its lease, and the listing carries that: the live
+  // numbers as they were at as_of, a few seconds old. The groups the
+  // answering instance runs itself are the exception: their numbers are as
+  // of now, and from_owner says which is which. GetInfo gives them as they
+  // are now, for one group. Errors: INVALID_STREAM_NAME.
   rpc List (ListRequest) returns (ListResponse);
 
   // Connects a consumer to a group. The first request carries the options;
@@ -148,8 +152,8 @@ message ListResponse {
 }
 
 // A group as the server describes it. Fields 1 to 9 are what the store
-// holds and are in every answer; last_known_position and live are only in
-// the answer of GetInfo.
+// holds and are in every answer; last_known_position is only in the answer
+// of GetInfo.
 message GroupInfo {
   // The names the group was created with.
   string stream = 1;
@@ -177,8 +181,10 @@ message GroupInfo {
   // when the stream holds nothing, and in List.
   optional sint64 last_known_position = 10;
 
-  // What only the instance running the group knows. Absent when the group
-  // is not running, and in List.
+  // How the running group stands. From GetInfo answered by the instance
+  // that runs the group it is as of now; in List, and from GetInfo answered
+  // by an instance that could not send the client to the owner, it is what
+  // the group last wrote to the store. Absent when the group is not running.
   GroupLiveInfo live = 11;
 }
 
@@ -191,6 +197,20 @@ message GroupLiveInfo {
   int32 awaiting_retry_count = 3;
   // How many delivered, unacknowledged events the consumer asked to hold.
   int32 consumer_buffer_size = 4;
+  // The group's checkpoint as the running group has it, which may be ahead
+  // of the one written to the store. Absent when there is none yet.
+  optional sint64 checkpoint = 5;
+  // When the oldest event still in flight was delivered: a consumer that is
+  // connected and not answering shows here. Absent when nothing is in flight.
+  google.protobuf.Timestamp oldest_in_flight_at = 6;
+  // Where the consumer connected from, as the server saw it.
+  string consumer_address = 7;
+  // When these numbers were taken.
+  google.protobuf.Timestamp as_of = 8;
+  // Where these numbers came from: true when the instance that answered
+  // runs the group and read them from the running group, so they are as of
+  // now; false when they are what the group last wrote to the store.
+  bool from_owner = 9;
 }
 
 message PersistentReadRequest {

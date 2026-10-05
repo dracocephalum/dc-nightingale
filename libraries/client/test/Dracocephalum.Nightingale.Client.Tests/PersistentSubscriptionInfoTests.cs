@@ -32,7 +32,18 @@ public sealed class PersistentSubscriptionInfoTests
             Running = true,
             OwnerAddress = "http://node-1:5000/",
             LastKnownPosition = 57,
-            Live = new GroupLiveInfo { ConnectedAt = Timestamp.FromDateTimeOffset(Connected), InFlightCount = 4, AwaitingRetryCount = 1, ConsumerBufferSize = 10 },
+            Live = new GroupLiveInfo
+            {
+                ConnectedAt = Timestamp.FromDateTimeOffset(Connected),
+                InFlightCount = 4,
+                AwaitingRetryCount = 1,
+                ConsumerBufferSize = 10,
+                Checkpoint = 43,
+                OldestInFlightAt = Timestamp.FromDateTimeOffset(Connected.AddMinutes(1)),
+                ConsumerAddress = "ipv4:10.0.0.7:51234",
+                AsOf = Timestamp.FromDateTimeOffset(Connected.AddMinutes(2)),
+                FromOwner = true,
+            },
         });
         await using var sut = new NightingaleClient(invoker);
 
@@ -53,7 +64,7 @@ public sealed class PersistentSubscriptionInfoTests
         info.Running.ShouldBeTrue();
         info.OwnerAddress.ShouldBe(new Uri("http://node-1:5000/"));
         info.LastKnownPosition.ShouldBe(57);
-        info.Live.ShouldBe(new PersistentSubscriptionLiveInfo(Connected, 4, 1, 10));
+        info.Live.ShouldBe(new PersistentSubscriptionLiveInfo(Connected, 4, 1, 10, 43, Connected.AddMinutes(1), "ipv4:10.0.0.7:51234", Connected.AddMinutes(2), true));
     }
 
     [Fact]
@@ -96,6 +107,10 @@ public sealed class PersistentSubscriptionInfoTests
         redirectedTo.ShouldBe([new Uri("http://node-2:5000/")]);
         askedOfOwner.ShouldHaveSingleItem().Group.ShouldBe("billing");
         info.Live.ShouldNotBeNull().InFlightCount.ShouldBe(2);
+        info.Live.Checkpoint.ShouldBeNull();
+        info.Live.OldestInFlightAt.ShouldBeNull();
+        info.Live.ConsumerAddress.ShouldBeNull();
+        info.Live.FromOwner.ShouldBeFalse();
     }
 
     [Fact]

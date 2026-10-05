@@ -65,6 +65,9 @@ public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)
         await sut.ParkAsync(new SubscriptionParkedMessage(first, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
         await sut.ReplayAsync(first, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(first), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var live = new SubscriptionGroupLive(Now.AddMinutes(-5), 4, 1, 10, 41, Now.AddSeconds(-20), "ipv4:10.0.0.7:51234", Now);
+        await sut.SaveLiveAsync(first, live, TestContext.Current.CancellationToken);
+        await sut.SaveLiveAsync(second, live, TestContext.Current.CancellationToken);
 
         // Act
         var described = await sut.DescribeAsync(stream, group, TestContext.Current.CancellationToken);
@@ -79,6 +82,11 @@ public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)
         summary.ParkedCount.ShouldBe(1);
         summary.OutboxCount.ShouldBe(1);
         summary.Holder.ShouldBe(new LeaseHolder("one", new Uri("http://one:5000")));
+
+        // The snapshot counts only under a lease: the second group has the same columns and no holder.
+        summary.Live.ShouldBe(live);
+        ofStream[1].Live.ShouldBeNull();
+        lapsed[0].Live.ShouldBeNull();
         ofStream.Select(listed => listed.Definition.Id).ShouldBe([first, second]);
         ofStream[0].ShouldBe(summary);
         ofStream[1].ParkedCount.ShouldBe(0);
