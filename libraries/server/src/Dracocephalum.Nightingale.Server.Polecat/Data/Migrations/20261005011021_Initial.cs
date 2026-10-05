@@ -45,7 +45,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Setting",
+                name: "StoreProperty",
                 schema: "nightingale",
                 columns: table => new
                 {
@@ -55,7 +55,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Setting", x => x.Id);
+                    table.PrimaryKey("PK_StoreProperty", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -67,7 +67,15 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     TenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
                     Stream = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
                     Name = table.Column<string>(type: "nvarchar(250)", maxLength: 250, nullable: false),
-                    Settings = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    StartPosition = table.Column<long>(type: "bigint", nullable: true),
+                    MessageTimeoutMs = table.Column<long>(type: "bigint", nullable: false),
+                    MaxRetryCount = table.Column<int>(type: "int", nullable: false),
+                    CheckpointUpperBound = table.Column<int>(type: "int", nullable: false),
+                    CheckpointAfterMs = table.Column<long>(type: "bigint", nullable: false),
+                    CheckpointLowerBound = table.Column<int>(type: "int", nullable: false),
+                    BufferSize = table.Column<int>(type: "int", nullable: false),
+                    MaxSubscriberCount = table.Column<int>(type: "int", nullable: false),
+                    Numbering = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
                     CheckpointPosition = table.Column<long>(type: "bigint", nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)
                 },
@@ -146,9 +154,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_Setting_Name",
+                name: "IX_StoreProperty_Name",
                 schema: "nightingale",
-                table: "Setting",
+                table: "StoreProperty",
                 column: "Name",
                 unique: true);
 
@@ -186,7 +194,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 schema: "nightingale");
 
             migrationBuilder.DropTable(
-                name: "Setting",
+                name: "StoreProperty",
                 schema: "nightingale");
 
             migrationBuilder.DropTable(

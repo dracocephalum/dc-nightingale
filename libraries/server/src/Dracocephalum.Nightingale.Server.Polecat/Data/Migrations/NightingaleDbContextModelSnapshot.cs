@@ -78,7 +78,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     b.ToTable("SequencerProgress", "nightingale");
                 });
 
-            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.Setting", b =>
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.StoreProperty", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -98,7 +98,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Setting", "nightingale");
+                    b.ToTable("StoreProperty", "nightingale");
                 });
 
             modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.SubscriptionGroup", b =>
@@ -107,20 +107,45 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("BufferSize")
+                        .HasColumnType("int");
+
+                    b.Property<long>("CheckpointAfterMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("CheckpointLowerBound")
+                        .HasColumnType("int");
+
                     b.Property<long>("CheckpointPosition")
                         .HasColumnType("bigint");
 
+                    b.Property<int>("CheckpointUpperBound")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("MaxRetryCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MaxSubscriberCount")
+                        .HasColumnType("int");
+
+                    b.Property<long>("MessageTimeoutMs")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(250)
                         .HasColumnType("nvarchar(250)");
 
-                    b.Property<string>("Settings")
+                    b.Property<string>("Numbering")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<long?>("StartPosition")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Stream")
                         .IsRequired()

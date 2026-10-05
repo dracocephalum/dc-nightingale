@@ -70,7 +70,7 @@ public sealed class NightingaleDbContextTests
             text => text.ShouldContain("CREATE TABLE [elsewhere].[SubscriptionOutboxEntry]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[Lease]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[SequencerProgress]"),
-            text => text.ShouldContain("CREATE TABLE [elsewhere].[Setting]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[StoreProperty]"),
             text => text.ShouldContain("[elsewhere].[__EFMigrationsHistory]"),
             text => text.ShouldNotContain("[" + NightingaleSchema.Default + "]"));
     }
@@ -85,7 +85,7 @@ public sealed class NightingaleDbContextTests
         var script = context.GetService<IMigrator>().GenerateScript();
 
         // Assert
-        script.ShouldContain("CREATE TABLE [nightingale].[Setting]");
+        script.ShouldContain("CREATE TABLE [nightingale].[StoreProperty]");
         script.ShouldContain("[nightingale].[__EFMigrationsHistory]");
     }
 

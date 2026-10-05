@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Dracocephalum.Nightingale;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,7 +5,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 
 /// <summary>
 /// The group store over the gateway's own tables through the context: groups with their settings
-/// as a JSON document and their checkpoint, parked messages one row each, the outbox a replay
+/// as columns and their checkpoint, parked messages one row each, the outbox a replay
 /// moves them to, and leases. Every operation is plain reads and writes, so it runs on any
 /// provider and the in-memory one stands in for a test; the one race that matters, two
 /// instances taking one lease, is settled by the lease row's concurrency tokens rather than by a
@@ -31,13 +29,22 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             throw new GroupExistsException(group.Stream, group.Group);
         }
 
+        var settings = group.Settings;
         context.SubscriptionGroups.Add(new SubscriptionGroup
         {
             Id = group.Id,
             TenantId = tenantId,
             Stream = group.Stream,
             Name = group.Group,
-            Settings = JsonSerializer.Serialize(StoredSettings.From(group.Settings), NightingaleJson.Default),
+            StartPosition = settings.Start.IsEnd ? null : settings.Start.Value,
+            MessageTimeoutMs = (long)settings.MessageTimeout.TotalMilliseconds,
+            MaxRetryCount = settings.MaxRetryCount,
+            CheckpointUpperBound = settings.CheckpointUpperBound,
+            CheckpointAfterMs = (long)settings.CheckpointAfter.TotalMilliseconds,
+            CheckpointLowerBound = settings.CheckpointLowerBound,
+            BufferSize = settings.BufferSize,
+            MaxSubscriberCount = settings.MaxSubscriberCount,
+            Numbering = settings.Numbering,
             CheckpointPosition = group.Checkpoint,
             CreatedAt = timeProvider.GetUtcNow(),
         });
@@ -381,11 +388,20 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
 
     private static SubscriptionGroupDefinition Definition(SubscriptionGroup row)
     {
-        var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings, NightingaleJson.Default) ?? throw new InvalidOperationException("The group's settings are not readable.");
+        var settings = new GroupSettings(
+            row.StartPosition is { } start ? StreamPosition.From(start) : StreamPosition.End,
+            TimeSpan.FromMilliseconds(row.MessageTimeoutMs),
+            row.MaxRetryCount,
+            row.CheckpointUpperBound,
+            TimeSpan.FromMilliseconds(row.CheckpointAfterMs),
+            row.CheckpointLowerBound,
+            row.BufferSize,
+            row.MaxSubscriberCount,
+            row.Numbering);
 
         // The names are the row's own: a case-insensitive database finds the row under another
         // spelling, and the group still goes by the names it was created with.
-        return new SubscriptionGroupDefinition(row.Stream, row.Name, settings.ToSettings(), row.CheckpointPosition) { Id = row.Id };
+        return new SubscriptionGroupDefinition(row.Stream, row.Name, settings, row.CheckpointPosition) { Id = row.Id };
     }
 
     private static LeaseHolder Holder(Lease lease) =>
@@ -423,30 +439,4 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
 
     private static IQueryable<SubscriptionOutboxEntry> OutboxOf(NightingaleDbContext context, Guid groupId) =>
         context.SubscriptionOutboxEntries.Where(row => row.SubscriptionGroupId == groupId);
-
-    /// <summary>The settings as stored: primitives only, so the document outlives the domain type's shape.</summary>
-    private sealed record StoredSettings(long Start, long MessageTimeoutMs, int MaxRetryCount, int CheckpointUpperBound, long CheckpointAfterMs, int CheckpointLowerBound, int BufferSize, int MaxSubscriberCount, int Numbering = 0)
-    {
-        public static StoredSettings From(GroupSettings settings) => new(
-            settings.Start.IsEnd ? -1 : settings.Start.Value,
-            (long)settings.MessageTimeout.TotalMilliseconds,
-            settings.MaxRetryCount,
-            settings.CheckpointUpperBound,
-            (long)settings.CheckpointAfter.TotalMilliseconds,
-            settings.CheckpointLowerBound,
-            settings.BufferSize,
-            settings.MaxSubscriberCount,
-            settings.Numbering == Nightingale.Numbering.Ordinal ? 1 : 0);
-
-        public GroupSettings ToSettings() => new(
-            Start < 0 ? StreamPosition.End : StreamPosition.From(Start),
-            TimeSpan.FromMilliseconds(MessageTimeoutMs),
-            MaxRetryCount,
-            CheckpointUpperBound,
-            TimeSpan.FromMilliseconds(CheckpointAfterMs),
-            CheckpointLowerBound,
-            BufferSize,
-            MaxSubscriberCount,
-            Numbering == 1 ? Nightingale.Numbering.Ordinal : Nightingale.Numbering.Global);
-    }
 }

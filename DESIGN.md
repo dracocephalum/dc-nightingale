@@ -119,9 +119,10 @@ default host's switches and a host's own code all go through it.
   when `Nightingale:CreateDatabase` allows it.
 - An empty database, created by the server or provisioned by hand, gets the
   store's tables and then the gateway's while every table is empty, so no
-  index is ever built over data, and one row per setting recording what
-  shaped it: the settings below, the actual collation, when and by which
-  server version, and the version of the store's library.
+  index is ever built over data, and a row per property of the store in
+  `StoreProperty`: the settings below that shaped it, with the actual
+  collation, then when and by which server version it was initialized, the
+  version of the store's library and the hash of its creation script.
 - An initialized database, one that has any of the gateway's migrations, is
   refused when it has a migration this server does not know, because the
   store is then newer than the server; refused when the configuration
@@ -158,11 +159,15 @@ tenant, which gives each tenant its own sequence, or by the archived flag,
 which keeps deleted streams' events out of every live read, one mode rather
 than one switch per scheme because a table has one partition scheme; and
 whether ordinals are assigned (seam 6). Changing any of them means a new
-database, and the settings rows record each so a changed configuration is
-refused rather than served.
+database, and the store's property rows record each so a changed
+configuration is refused rather than served.
 
-The rows are settings in the plainest sense: each is a name, the path the
-setting has in a settings file, `Store:Partitioning`, and a value, and they
+The table is called `StoreProperty` because not every row is a setting: some
+are what the store was initialized with, `Partitioning`, `Collation`, and the
+rest are facts about it, `CreatedAt`, `StoreSchemaHash`. Every row is a name
+and a value, one level: a setting is a single value, never an object or a
+list, so its row's name is its member's name with no path in front, and a
+test holds the settings type to that. The setting rows
 are read by the configuration binder into `StoreSettings`, the base of the
 type the configuration binds into. Both are seen through one interface,
 `IStoreSettings`, which every backend's settings carry, and the comparison
@@ -287,8 +292,15 @@ single ordinal sequence and is served under global numbering only.
 
 ### 7. The gateway's own tables are one model, and its own schema
 
+A group's settings are columns of its row, a value each: its start, its
+timeouts in milliseconds, its bounds, and its numbering by name. A group is
+one of many rows of one shape, which is what columns are for; they are read
+and compared in the database, and changing one is a column update. The
+store's properties are the other case, one object with a few facts, and are
+a row each.
+
 The tables the gateway keeps, subscription groups, their parked events and
-outbox, leases, the sequencer's progress and the settings rows, are one EF
+outbox, leases, the sequencer's progress and the store's properties, are one EF
 Core context, `NightingaleDbContext`, in the server library. The context owns
 them, under the repository's EF rules for a context that does: a `Guid`
 key named `Id` on each, singular table names, natural keys as unique
@@ -352,7 +364,7 @@ of magnitude slower; and the initializer's questions of the catalog and
 its creation of the database.
 
 The group store's plain reads and writes, the reader's queries and the
-settings rows run on the in-memory provider in unit tests. That provider
+store's property rows run on the in-memory provider in unit tests. That provider
 has no transactions, no unique indexes, no collation and no filtered
 indexes, so it stands in for exactly those reads and writes and for nothing
 else; the lease is written so that it needs nothing else, an optimistic

@@ -32,7 +32,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
     public DbSet<SequencerProgress> SequencerProgress => Set<SequencerProgress>();
 
     /// <summary>Gets the settings the store was initialized with.</summary>
-    public DbSet<Setting> Settings => Set<Setting>();
+    public DbSet<StoreProperty> StoreProperties => Set<StoreProperty>();
 
     /// <inheritdoc/>
     public string Schema => schema.Name;
@@ -60,6 +60,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             group.Property(row => row.TenantId).HasMaxLength(250).IsUnicode(false);
             group.Property(row => row.Stream).HasMaxLength(250).IsUnicode(false);
             group.Property(row => row.Name).HasMaxLength(250);
+            group.Property(row => row.Numbering).HasConversion<string>().HasMaxLength(20);
             group.HasIndex(row => new { row.TenantId, row.Stream, row.Name }).IsUnique();
         });
 
@@ -100,13 +101,13 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             progress.HasIndex(row => row.Name).IsUnique();
         });
 
-        modelBuilder.Entity<Setting>(setting =>
+        modelBuilder.Entity<StoreProperty>(property =>
         {
-            setting.ToTable(nameof(Setting));
-            setting.HasKey(row => row.Id);
-            setting.Property(row => row.Name).HasMaxLength(200);
-            setting.Property(row => row.Value).HasMaxLength(1000);
-            setting.HasIndex(row => row.Name).IsUnique();
+            property.ToTable(nameof(StoreProperty));
+            property.HasKey(row => row.Id);
+            property.Property(row => row.Name).HasMaxLength(200);
+            property.Property(row => row.Value).HasMaxLength(1000);
+            property.HasIndex(row => row.Name).IsUnique();
         });
     }
 }
