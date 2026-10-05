@@ -34,6 +34,19 @@ public interface ISubscriptionGroupStore
     /// <returns>True when a group was deleted.</returns>
     Task<bool> DeleteAsync(string stream, string group, CancellationToken cancellationToken);
 
+    /// <summary>Reads a group with what the store knows around it: its counts and who holds its lease.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="group">The group name.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The group's summary, or <see langword="null"/> when there is no such group.</returns>
+    Task<SubscriptionGroupSummary?> DescribeAsync(string stream, string group, CancellationToken cancellationToken);
+
+    /// <summary>Lists the groups with what the store knows around each, ordered by stream and then by group.</summary>
+    /// <param name="stream">The stream whose groups are listed, or <see langword="null"/> for every group.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The summaries.</returns>
+    Task<IReadOnlyList<SubscriptionGroupSummary>> ListAsync(string? stream, CancellationToken cancellationToken);
+
     /// <summary>Writes the group's checkpoint: the last position every event up to which is done.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <param name="checkpoint">The position.</param>

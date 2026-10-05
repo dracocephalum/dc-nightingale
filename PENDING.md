@@ -100,8 +100,20 @@ position, so a consumer sees one unbroken enumeration across reconnects.
 Persistent subscriptions ship with dispatch to a single consumer and a
 subscriber limit of one. Round-robin and pinned strategies add one dispatcher
 per group fanning out to several connections; the in-flight tracker already
-accepts acknowledgements in any order. Group info and listing, and updating a
-group's settings in place, are in this group too.
+accepts acknowledgements in any order. Group info then lists each consumer
+rather than one. Updating a group's settings in place is in this group too:
+the tunables, ending a connected consumer's call so it reconnects under them.
+
+## Moving a group's position
+
+The reference lets an update change where a group starts, which resets it.
+Here a group's start and its numbering are fixed when it is created, and a
+consumer that wants another position deletes the group and creates it again.
+Moving a group in place, back to replay a stretch or forward to skip one, is
+wanted and parked: it has to say what becomes of the parked messages and the
+outbox on either side of the new position, of events in flight, and of a
+checkpoint that would then move backwards, and whether it may happen while a
+consumer is connected.
 
 ## A relay inside the cluster
 
@@ -125,11 +137,12 @@ row to the group's outbox, the shape of a service bus's dead-letter queue:
 what is on the outbox is delivered ahead of the stream, a delivery that
 fails again moves the row back. Shipped: parking, replay of all and of one,
 delivery at once to a consumer connected to the serving instance. Pending:
-listing parked and outbox rows and skipping one by deleting it, with group
-info; replay of all before a number; and deferred delivery, a retry
+listing parked and outbox rows and skipping one by deleting it; replay of
+all before a number; and deferred delivery, a retry
 with a delay or a nack that says later, which is an outbox row with a due
 time in the future and a timer in the group's loop, the outbox already
-having the column.
+having the column. Shipped since: group info with the parked and outbox
+counts, and the listing of groups.
 
 ## More reads from the read-only connection
 

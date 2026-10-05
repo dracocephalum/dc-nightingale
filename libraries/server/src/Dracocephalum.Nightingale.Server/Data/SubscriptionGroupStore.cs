@@ -18,6 +18,9 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// <param name="timeProvider">The clock leases are measured against.</param>
 public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContext> contexts, string tenantId, TimeProvider timeProvider) : ISubscriptionGroupStore
 {
+    /// <summary>How many times a delete is tried while the group's rows change under it.</summary>
+    private const int DeleteAttempts = 5;
+
     /// <inheritdoc/>
     public async Task CreateAsync(SubscriptionGroupDefinition group, CancellationToken cancellationToken)
     {
@@ -69,30 +72,115 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             return null;
         }
 
-        var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings, NightingaleJson.Default) ?? throw new InvalidOperationException("The group's settings are not readable.");
+        return Definition(row);
+    }
 
-        // The names are the row's own: a case-insensitive database finds the row under another
-        // spelling, and the group still goes by the names it was created with.
-        return new SubscriptionGroupDefinition(row.Stream, row.Name, settings.ToSettings(), row.CheckpointPosition) { Id = row.Id };
+    /// <inheritdoc/>
+    public async Task<SubscriptionGroupSummary?> DescribeAsync(string stream, string group, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await context.SubscriptionGroups.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.Name == group, cancellationToken)
+            .ConfigureAwait(false);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var lease = SubscriptionGroupRegistry.LeaseName(row.Id);
+        var now = timeProvider.GetUtcNow();
+        var held = await context.Leases.AsNoTracking().SingleOrDefaultAsync(held => held.Name == lease, cancellationToken).ConfigureAwait(false);
+        return new SubscriptionGroupSummary(
+            Definition(row),
+            row.CreatedAt,
+            await ParkedOf(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
+            await OutboxOf(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
+            held is null || held.ExpiresAt <= now ? null : Holder(held));
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SubscriptionGroupSummary>> ListAsync(string? stream, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var query = context.SubscriptionGroups.AsNoTracking().Where(row => row.TenantId == tenantId);
+        if (stream is not null)
+        {
+            query = query.Where(row => row.Stream == stream);
+        }
+
+        var rows = await query.OrderBy(row => row.Stream).ThenBy(row => row.Name).ToListAsync(cancellationToken).ConfigureAwait(false);
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        // Three reads for the whole listing, whatever its size: the counts of each kind grouped
+        // by group, and the leases that are groups'. A count per group would be two reads each.
+        var ids = rows.Select(row => row.Id).ToList();
+        var parked = await context.SubscriptionParkedEvents.AsNoTracking()
+            .Where(row => ids.Contains(row.SubscriptionGroupId))
+            .GroupBy(row => row.SubscriptionGroupId)
+            .Select(counted => new { counted.Key, Count = counted.LongCount() })
+            .ToDictionaryAsync(counted => counted.Key, counted => counted.Count, cancellationToken)
+            .ConfigureAwait(false);
+        var outbox = await context.SubscriptionOutboxEntries.AsNoTracking()
+            .Where(row => ids.Contains(row.SubscriptionGroupId))
+            .GroupBy(row => row.SubscriptionGroupId)
+            .Select(counted => new { counted.Key, Count = counted.LongCount() })
+            .ToDictionaryAsync(counted => counted.Key, counted => counted.Count, cancellationToken)
+            .ConfigureAwait(false);
+        var names = ids.Select(SubscriptionGroupRegistry.LeaseName).ToList();
+        var now = timeProvider.GetUtcNow();
+        var leases = (await context.Leases.AsNoTracking()
+                .Where(held => names.Contains(held.Name))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .Where(held => held.ExpiresAt > now)
+            .ToDictionary(held => held.Name, Holder, StringComparer.Ordinal);
+
+        return rows
+            .Select(row => new SubscriptionGroupSummary(
+                Definition(row),
+                row.CreatedAt,
+                parked.GetValueOrDefault(row.Id),
+                outbox.GetValueOrDefault(row.Id),
+                leases.GetValueOrDefault(SubscriptionGroupRegistry.LeaseName(row.Id))))
+            .ToList();
     }
 
     /// <inheritdoc/>
     public async Task<bool> DeleteAsync(string stream, string group, CancellationToken cancellationToken)
     {
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await context.SubscriptionGroups
-            .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.Name == group, cancellationToken)
-            .ConfigureAwait(false);
-        if (row is null)
+        // A group is deleted with its parked messages and its outbox, read first and removed
+        // together. Its consumer, connected or just gone, may still be writing: an outbox row
+        // delivered and taken off, a refusal that parks a message. A row gone under the delete,
+        // or one that arrived after the read, fails the write; what is there is then read again
+        // and the delete repeated, a few times at most, since the consumer's writes end.
+        for (var attempt = 1; ; attempt++)
         {
-            return false;
-        }
+            await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            var row = await context.SubscriptionGroups
+                .SingleOrDefaultAsync(row => row.TenantId == tenantId && row.Stream == stream && row.Name == group, cancellationToken)
+                .ConfigureAwait(false);
+            if (row is null)
+            {
+                // Gone on a later attempt means another delete finished the same work.
+                return attempt > 1;
+            }
 
-        context.SubscriptionParkedEvents.RemoveRange(await ParkedOf(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
-        context.SubscriptionOutboxEntries.RemoveRange(await OutboxOf(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
-        context.SubscriptionGroups.Remove(row);
-        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return true;
+            context.SubscriptionParkedEvents.RemoveRange(await ParkedOf(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
+            context.SubscriptionOutboxEntries.RemoveRange(await OutboxOf(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
+            context.SubscriptionGroups.Remove(row);
+            try
+            {
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            catch (DbUpdateException) when (attempt < DeleteAttempts)
+            {
+                // Read again; see above.
+            }
+        }
     }
 
     /// <inheritdoc/>
@@ -289,6 +377,15 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var lease = await context.Leases.AsNoTracking().SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
         return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : Holder(lease);
+    }
+
+    private static SubscriptionGroupDefinition Definition(SubscriptionGroup row)
+    {
+        var settings = JsonSerializer.Deserialize<StoredSettings>(row.Settings, NightingaleJson.Default) ?? throw new InvalidOperationException("The group's settings are not readable.");
+
+        // The names are the row's own: a case-insensitive database finds the row under another
+        // spelling, and the group still goes by the names it was created with.
+        return new SubscriptionGroupDefinition(row.Stream, row.Name, settings.ToSettings(), row.CheckpointPosition) { Id = row.Id };
     }
 
     private static LeaseHolder Holder(Lease lease) =>

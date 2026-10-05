@@ -29,5 +29,17 @@ public sealed class PersistentSubscriptionTests
         report.Replayed.ShouldBe(1);
         report.CheckpointOnReturn.ShouldBe(2);
         report.ReplayedType.ShouldBe("order_paid");
+
+        // While the second consumer waited: the group ran, at the address the client used, with
+        // its checkpoint at the stream's last revision, one message parked and nothing in flight.
+        report.Info.Running.ShouldBeTrue();
+        report.Info.OwnerAddress.ShouldNotBeNull();
+        report.Info.Checkpoint.ShouldBe(2);
+        report.Info.LastKnownPosition.ShouldBe(2);
+        report.Info.ParkedCount.ShouldBe(1);
+        report.Info.OutboxCount.ShouldBe(0);
+        report.Info.Settings.MaxRetryCount.ShouldBe(1);
+        report.Info.Live.ShouldNotBeNull().InFlightCount.ShouldBe(0);
+        report.Listed.ShouldBe(1);
     }
 }

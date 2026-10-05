@@ -41,7 +41,7 @@ undecided adds it here rather than mentioning it once in a conversation.
   group, and the virtual streams by ordinal on a store initialized with
   `Nightingale:Store:AssignOrdinals`; the samples under `examples/` are the
   end-to-end runs. Not yet: filters and checkpoints on `$all` (they answer
-  unimplemented), group info, listing and updating, competing consumers,
+  unimplemented), updating a group, listing its parked messages, competing consumers,
   and the ordinal backfill, all in `PENDING.md`. Close by: group management
   next.
 - **A delete's expected-revision check is not atomic with the archive.** The
@@ -54,7 +54,9 @@ undecided adds it here rather than mentioning it once in a conversation.
   second `ProgramTests` case, which hosts the default program beside the
   fixture's host on the same database, has failed about one run in three of
   the full suite with "The CancellationTokenSource has been disposed", and
-  never when its class runs alone, eight times over. The tailer's shutdown
+  never when its class runs alone, eight times over. Once it was the first case instead,
+  with the exception thrown from the store daemon's own `StopAllAsync` as the
+  tailer stopped it. The tailer's shutdown
   was reordered to drain its loop before stopping the store's daemon, which
   cured the one reproducible case; what remains looks like a background task
   of a stopped daemon throwing after disposal while several hosts stop at

@@ -51,6 +51,47 @@ public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)
     }
 
     [Fact]
+    public async Task DescribeAndList_ShouldCountParkedAndOutboxRowsPerGroupAndSayWhoHoldsEachLease()
+    {
+        // Arrange: two groups on one stream; the first has two parked, one of them on the outbox, and a lease.
+        var sut = Store();
+        var (stream, group) = Names();
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group, GroupSettings.Default, -1) { Id = first }, TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new SubscriptionGroupDefinition(stream, group + "-2", GroupSettings.Default, -1) { Id = second }, TestContext.Current.CancellationToken);
+        await sut.SaveCheckpointAsync(first, 41, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(first, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(first, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ReplayAsync(first, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(first), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Act
+        var described = await sut.DescribeAsync(stream, group, TestContext.Current.CancellationToken);
+        var ofStream = await sut.ListAsync(stream, TestContext.Current.CancellationToken);
+        var all = await sut.ListAsync(null, TestContext.Current.CancellationToken);
+        _time.Advance(TimeSpan.FromSeconds(31));
+        var lapsed = await sut.ListAsync(stream, TestContext.Current.CancellationToken);
+
+        // Assert
+        var summary = described.ShouldNotBeNull();
+        summary.Definition.Checkpoint.ShouldBe(41);
+        summary.ParkedCount.ShouldBe(1);
+        summary.OutboxCount.ShouldBe(1);
+        summary.Holder.ShouldBe(new LeaseHolder("one", new Uri("http://one:5000")));
+        ofStream.Select(listed => listed.Definition.Id).ShouldBe([first, second]);
+        ofStream[0].ShouldBe(summary);
+        ofStream[1].ParkedCount.ShouldBe(0);
+        ofStream[1].OutboxCount.ShouldBe(0);
+        ofStream[1].Holder.ShouldBeNull();
+        all.Select(listed => listed.Definition.Id).ShouldContain(first);
+        all.Select(listed => listed.Definition.Id).ShouldContain(second);
+        lapsed[0].Holder.ShouldBeNull();
+        await sut.DeleteAsync(stream, group, TestContext.Current.CancellationToken);
+        await sut.DeleteAsync(stream, group + "-2", TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Replay_ShouldMoveParkedMessagesToTheOutboxAndParkingShouldMoveThemBack()
     {
         // Arrange

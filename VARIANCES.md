@@ -98,6 +98,48 @@ or pinned.
 **Nightingale:** one consumer per group for now; a second is refused with
 `CONSUMER_LIMIT_REACHED`. Competing consumers are in `PENDING.md`.
 
+## A group's info comes from its own instance, and a listing from the store
+
+**Reference:** every persistent subscription runs on the leader, so one node
+has all of them in memory. Info about one group and the listing of all are
+both answered there, a follower sending the client to the leader, and both
+carry the live picture: a status, per-connection statistics, rates, buffer
+counts, in-flight and parked counts.
+
+**Nightingale:** a group runs in whichever instance its consumer reached,
+under a lease of its own, so different groups run in different instances and
+no instance has them all.
+
+- **Info about one group** is answered by the instance that runs it, which
+  adds what only it knows: when the consumer connected, how many events are
+  in flight, how many await a retry, and the consumer's buffer size. An
+  instance asked for a group another runs refuses with that instance's
+  address and the client asks there, once, as it does for a read. A group
+  nobody runs, and one whose owner advertises no address, is described by
+  whichever instance was asked, from the store alone.
+- **A listing** is answered by any instance from the store alone: settings,
+  checkpoint, parked and outbox counts, whether the group runs and where.
+  It carries no live numbers and never redirects.
+- **What is reported differs.** There is no status string: a group either
+  runs, which it does while a consumer is connected, or does not. There are
+  no rates, totals or per-connection statistics, and one consumer where the
+  reference lists several. There is an outbox count beside the parked
+  count, the group's numbering, and the address of the instance that runs
+  it. The last number of the group's stream is in the info and not in the
+  listing, since it is a read per group.
+- **The client's names** are `GetPersistentSubscriptionInfoAsync` and
+  `ListPersistentSubscriptionsAsync`, the second taking a stream or none,
+  where the reference client has `GetInfoToStreamAsync`, `GetInfoToAllAsync`,
+  `ListToStreamAsync`, `ListToAllAsync` and `ListAllAsync`: here `$all` is a
+  stream name like any other, as it is for creating and subscribing.
+- **There is no call to restart the subsystem.** Nothing here is a subsystem
+  that one node holds; a group stops when its consumer leaves.
+
+**Why:** a lease per group lets groups spread over instances instead of
+loading one; the price is that the live numbers of all groups are in no one
+place. A listing that gathered them would have the answering instance ask
+every owner, which is the relay in `PENDING.md`.
+
 ## A connection string lists instances, not gossip seeds
 
 The client is opened from one connection string in the reference's shape,

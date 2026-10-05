@@ -283,6 +283,170 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("GROUP_NOT_FOUND");
     }
 
+    [Fact]
+    public async Task GetInfo_WhenNobodyRunsTheGroup_ShouldDescribeItFromTheStoreWithTheLastNumberOfItsStream()
+    {
+        // Arrange
+        var settings = GroupSettings.Default with { Start = StreamPosition.Start, MaxRetryCount = 3 };
+        A.CallTo(() => _groups.DescribeAsync("orders-1", "billing", A<CancellationToken>._))
+            .Returns(new SubscriptionGroupSummary(new SubscriptionGroupDefinition("orders-1", "billing", settings, 4), Created, 2, 1, null));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Backwards, null, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 7), [Record("orders-1", 7, 70)]));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var info = (await client.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+
+        // Assert
+        info.Stream.ShouldBe("orders-1");
+        info.Group.ShouldBe("billing");
+        info.Settings.MaxRetryCount.ShouldBe(3);
+        info.CreatedAt.ToDateTimeOffset().ShouldBe(Created);
+        info.Checkpoint.ShouldBe(4);
+        info.ParkedCount.ShouldBe(2);
+        info.OutboxCount.ShouldBe(1);
+        info.Running.ShouldBeFalse();
+        info.OwnerAddress.ShouldBeEmpty();
+        info.LastKnownPosition.ShouldBe(7);
+        info.Live.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetInfo_WhenTheGroupHasNoCheckpointAndItsStreamHoldsNothing_ShouldLeaveBothNumbersOut()
+    {
+        // Arrange: a group over a category by ordinal, created and never read.
+        var settings = GroupSettings.Default with { Numbering = Numbering.Ordinal };
+        A.CallTo(() => _groups.DescribeAsync("$ce-orders", "billing", A<CancellationToken>._))
+            .Returns(new SubscriptionGroupSummary(new SubscriptionGroupDefinition("$ce-orders", "billing", settings, -1), Created, 0, 0, null));
+        A.CallTo(() => _store.OrdinalHeadAsync(new VirtualStreamName(VirtualStreamKind.Category, "orders"), A<CancellationToken>._)).Returns((StreamHead?)null);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var info = (await client.GetInfoAsync(new GetInfoRequest { Stream = "$ce-orders", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+
+        // Assert
+        info.HasCheckpoint.ShouldBeFalse();
+        info.HasLastKnownPosition.ShouldBeFalse();
+        info.Settings.Numbering.ShouldBe(Protocol.V1.Numbering.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetInfo_WhenAnotherInstanceRunsTheGroup_ShouldRefuseWithItsAddress()
+    {
+        // Arrange
+        A.CallTo(() => _groups.DescribeAsync("orders-1", "billing", A<CancellationToken>._))
+            .Returns(new SubscriptionGroupSummary(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1), Created, 0, 0, new LeaseHolder("other-instance", new Uri("http://other-instance:5000"))));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("GROUP_OWNED_ELSEWHERE");
+        info.Metadata["address"].ShouldBe("http://other-instance:5000/");
+    }
+
+    [Fact]
+    public async Task GetInfo_WhenTheOwnerAdvertisesNoAddress_ShouldAnswerFromTheStoreAndSayItRuns()
+    {
+        // Arrange: there is nowhere to send the client, so what the store holds is the answer.
+        A.CallTo(() => _groups.DescribeAsync("$all", "audit", A<CancellationToken>._))
+            .Returns(new SubscriptionGroupSummary(new SubscriptionGroupDefinition("$all", "audit", GroupSettings.Default, 12), Created, 0, 0, new LeaseHolder("other-instance", null)));
+        _tail.Advance(15);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var info = (await client.GetInfoAsync(new GetInfoRequest { Stream = "$all", Group = "audit" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+
+        // Assert
+        info.Running.ShouldBeTrue();
+        info.OwnerAddress.ShouldBeEmpty();
+        info.LastKnownPosition.ShouldBe(15);
+        info.Live.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetInfo_WhenTheGroupIsMissing_ShouldFailAsNotFound()
+    {
+        // Arrange
+        A.CallTo(() => _groups.DescribeAsync("orders-1", "nobody", A<CancellationToken>._)).Returns((SubscriptionGroupSummary?)null);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "nobody" }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("GROUP_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task GetInfo_WhenThisInstanceRunsTheGroup_ShouldAddWhatTheRunningGroupKnows()
+    {
+        // Arrange: a consumer connected here with a buffer of five has two events delivered and none acknowledged.
+        var settings = GroupSettings.Default with { Start = StreamPosition.Start };
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", settings, -1);
+        var me = _app!.Services.GetRequiredService<SubscriptionGroupRegistry>().InstanceId;
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.DescribeAsync("orders-1", "billing", A<CancellationToken>._))
+            .Returns(new SubscriptionGroupSummary(definition, Created, 0, 0, new LeaseHolder(me, new Uri("http://localhost"))));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, A<long?>._, A<int>._, A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<StreamSlice?>(new StreamSlice(new StreamHead(0, 1), call.GetArgument<long?>(2) == 0 ? [Record("orders-1", 0, 10), Record("orders-1", 1, 11)] : [])));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Backwards, null, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 1, 11)]));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+        using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
+        await Next(call, 3);
+
+        // Act
+        var info = (await client.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+        await call.RequestStream.CompleteAsync();
+
+        // Assert
+        info.Running.ShouldBeTrue();
+        info.LastKnownPosition.ShouldBe(1);
+        var live = info.Live.ShouldNotBeNull();
+        live.InFlightCount.ShouldBe(2);
+        live.AwaitingRetryCount.ShouldBe(0);
+        live.ConsumerBufferSize.ShouldBe(5);
+        live.ConnectedAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task List_ShouldGiveWhatTheStoreHoldsForEachGroupAndNothingOnlyARunningGroupKnows()
+    {
+        // Arrange
+        A.CallTo(() => _groups.ListAsync(null, A<CancellationToken>._)).Returns(new List<SubscriptionGroupSummary>
+        {
+            new(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, 9), Created, 3, 0, new LeaseHolder("other-instance", new Uri("http://other-instance:5000"))),
+            new(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), Created, 0, 0, null),
+        });
+        A.CallTo(() => _groups.ListAsync("orders-2", A<CancellationToken>._)).Returns(new List<SubscriptionGroupSummary>
+        {
+            new(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), Created, 0, 0, null),
+        });
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var all = (await client.ListAsync(new ListRequest(), cancellationToken: TestContext.Current.CancellationToken)).Groups;
+        var ofOne = (await client.ListAsync(new ListRequest { Stream = "orders-2" }, cancellationToken: TestContext.Current.CancellationToken)).Groups;
+        var badName = await Should.ThrowAsync<RpcException>(async () => await client.ListAsync(new ListRequest { Stream = "$nonsense" }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert: another instance runs the first group and the listing says where, without sending anyone there.
+        all.Count.ShouldBe(2);
+        all[0].Running.ShouldBeTrue();
+        all[0].OwnerAddress.ShouldBe("http://other-instance:5000/");
+        all[0].Checkpoint.ShouldBe(9);
+        all[0].ParkedCount.ShouldBe(3);
+        all[0].HasLastKnownPosition.ShouldBeFalse();
+        all[0].Live.ShouldBeNull();
+        all[1].Running.ShouldBeFalse();
+        all[1].HasCheckpoint.ShouldBeFalse();
+        ofOne.ShouldHaveSingleItem().Stream.ShouldBe("orders-2");
+        badName.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
+    }
+
     private static EventRecord Record(string stream, long revision, long position) =>
         new(Guid.NewGuid(), stream, revision, position, "order_placed", Created, Encoding.UTF8.GetBytes("{}"), new JsonObject());
 
