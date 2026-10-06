@@ -11,8 +11,10 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="ConsumerBufferSize">How many delivered, unacknowledged events the consumer holds at once.</param>
 /// <param name="Checkpoint">The checkpoint as the running group has it, or <see langword="null"/> when there is none yet.</param>
 /// <param name="OldestInFlightAt">When the oldest event still in flight was delivered, or <see langword="null"/> when nothing is.</param>
-/// <param name="ConsumerAddress">Where the consumer connected from, or <see langword="null"/> when it is not known.</param>
+/// <param name="ConsumerAddress">Where the first consumer connected from, or <see langword="null"/> when it is not known.</param>
 /// <param name="AsOf">When these numbers were taken.</param>
+/// <param name="ConsumerCount">How many consumers are connected.</param>
+/// <param name="Consumers">Each consumer, from the running group; empty from the store, which keeps the count and the totals only.</param>
 public sealed record SubscriptionGroupLive(
     DateTimeOffset ConnectedAt,
     int InFlightCount,
@@ -21,4 +23,10 @@ public sealed record SubscriptionGroupLive(
     long? Checkpoint,
     DateTimeOffset? OldestInFlightAt,
     string? ConsumerAddress,
-    DateTimeOffset AsOf);
+    DateTimeOffset AsOf,
+    int ConsumerCount = 1,
+    IReadOnlyList<SubscriptionConsumerLive>? Consumers = null)
+{
+    /// <summary>Gets each consumer, or none.</summary>
+    public IReadOnlyList<SubscriptionConsumerLive> Consumers { get; init; } = Consumers ?? [];
+}

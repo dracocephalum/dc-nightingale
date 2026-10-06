@@ -44,6 +44,34 @@ public sealed class PersistentSubscriptionTests
     }
 
     [Fact]
+    public async Task DisposeAsync_ShouldCompleteTheRequestsAndWaitForTheServerToEndTheCallDroppingWhatIsStillOnTheWay()
+    {
+        // Arrange: the server has three events on the way; the consumer takes one and leaves.
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (invoker, sent, writer) = DuplexRead(
+            Trickle(
+            [
+                new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = "p-1", Checkpoint = -1 } },
+                new PersistentReadResponse { Event = new PersistentEvent { Event = Recorded("orders-1", 5, 50) } },
+                new PersistentReadResponse { Event = new PersistentEvent { Event = Recorded("orders-1", 6, 60) } },
+                new PersistentReadResponse { Event = new PersistentEvent { Event = Recorded("orders-1", 7, 70) } },
+            ],
+            ended.Task));
+        writer.Completed = ended.SetResult;
+        await using var sut = new NightingaleClient(invoker);
+        var subscription = await sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", 7, TestContext.Current.CancellationToken);
+        var first = await subscription.Messages.OfType<PersistentSubscriptionMessage.Recorded>().FirstAsync(TestContext.Current.CancellationToken);
+
+        // Act
+        await subscription.DisposeAsync();
+
+        // Assert: the requests were completed, which is what ended the call; the two events still on the way went nowhere.
+        first.Record.Revision.ShouldBe(5);
+        sent.Count.ShouldBe(1, "only the options were sent");
+        ended.Task.IsCompleted.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task NackAsync_ShouldSendTheActionTheReasonAndTheIds()
     {
         // Arrange
@@ -129,33 +157,51 @@ public sealed class PersistentSubscriptionTests
     /// <summary>A duplex call whose responses are scripted and whose requests are collected.</summary>
     private static (CallInvoker Invoker, List<PersistentReadRequest> Sent) DuplexRead(IEnumerable<PersistentReadResponse> responses, RpcException? failure = null)
     {
+        var (invoker, sent, _) = DuplexRead(responses.ToAsyncEnumerable(), failure);
+        return (invoker, sent);
+    }
+
+    /// <summary>A duplex call whose responses are scripted, and may wait, and whose requests are collected.</summary>
+    private static (CallInvoker Invoker, List<PersistentReadRequest> Sent, CollectingWriter Writer) DuplexRead(IAsyncEnumerable<PersistentReadResponse> responses, RpcException? failure = null)
+    {
         var sent = new List<PersistentReadRequest>();
+        var writer = new CollectingWriter(sent);
         var invoker = A.Fake<CallInvoker>();
         A.CallTo(() => invoker.AsyncDuplexStreamingCall(A<Method<PersistentReadRequest, PersistentReadResponse>>._, A<string?>._, A<CallOptions>._))
             .ReturnsLazily(_ =>
             {
                 var reader = new ScriptedReader(responses, failure);
-                var writer = new CollectingWriter(sent);
                 return new AsyncDuplexStreamingCall<PersistentReadRequest, PersistentReadResponse>(writer, reader, Task.FromResult(new Metadata()), () => Status.DefaultSuccess, () => [], () => { });
             });
-        return (invoker, sent);
+        return (invoker, sent, writer);
     }
 
-    private sealed class ScriptedReader(IEnumerable<PersistentReadResponse> responses, RpcException? failure) : IAsyncStreamReader<PersistentReadResponse>
+    /// <summary>The responses one by one, then the end of the call once the server is told the consumer has left.</summary>
+    private static async IAsyncEnumerable<PersistentReadResponse> Trickle(IEnumerable<PersistentReadResponse> responses, Task ended)
     {
-        private readonly IEnumerator<PersistentReadResponse> _responses = responses.GetEnumerator();
+        foreach (var response in responses)
+        {
+            yield return response;
+        }
+
+        await ended;
+    }
+
+    private sealed class ScriptedReader(IAsyncEnumerable<PersistentReadResponse> responses, RpcException? failure) : IAsyncStreamReader<PersistentReadResponse>
+    {
+        private readonly IAsyncEnumerator<PersistentReadResponse> _responses = responses.GetAsyncEnumerator();
 
         public PersistentReadResponse Current => _responses.Current;
 
-        public Task<bool> MoveNext(CancellationToken cancellationToken)
+        public async Task<bool> MoveNext(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_responses.MoveNext())
+            if (await _responses.MoveNextAsync())
             {
-                return Task.FromResult(true);
+                return true;
             }
 
-            return failure is null ? Task.FromResult(false) : throw failure;
+            return failure is null ? false : throw failure;
         }
     }
 
@@ -163,12 +209,18 @@ public sealed class PersistentSubscriptionTests
     {
         public WriteOptions? WriteOptions { get; set; }
 
+        public Action? Completed { get; set; }
+
         public Task WriteAsync(PersistentReadRequest message)
         {
             sent.Add(message);
             return Task.CompletedTask;
         }
 
-        public Task CompleteAsync() => Task.CompletedTask;
+        public Task CompleteAsync()
+        {
+            Completed?.Invoke();
+            return Task.CompletedTask;
+        }
     }
 }

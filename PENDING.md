@@ -104,14 +104,6 @@ that is what the reference client leaves to the application too. A client
 option that resubscribes on its own, with backoff and from the last delivered
 position, so a consumer sees one unbroken enumeration across reconnects.
 
-## Competing consumers
-
-Persistent subscriptions ship with dispatch to a single consumer and a
-subscriber limit of one. Round-robin and pinned strategies add one dispatcher
-per group fanning out to several connections; the in-flight tracker already
-accepts acknowledgements in any order. Group info then lists each consumer
-rather than one, and an update ends each consumer's call.
-
 ## Moving a group's position
 
 The reference lets an update change where a group starts, which resets it.

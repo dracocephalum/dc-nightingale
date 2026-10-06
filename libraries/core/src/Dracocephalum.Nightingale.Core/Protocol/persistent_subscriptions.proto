@@ -33,7 +33,7 @@ service PersistentSubscriptions {
   rpc Create (CreateRequest) returns (CreateResponse);
 
   // Changes a group's settings in place: its timeouts, its retry limit, its
-  // checkpoint bounds, its buffer size and its consumer limit. A field left
+  // checkpoint bounds, its buffer size, its consumer limit and its strategy. A field left
   // unset keeps its value. Where the group starts and how it is numbered
   // are fixed when it is created: naming another value for either is
   // refused, and a consumer that wants one deletes the group and creates it
@@ -68,7 +68,9 @@ service PersistentSubscriptions {
   // are now, for one group. Errors: INVALID_STREAM_NAME.
   rpc List (ListRequest) returns (ListResponse);
 
-  // Connects a consumer to a group. The first request carries the options;
+  // Connects a consumer to a group, one of as many as the group allows, and
+  // the group's events are shared among them by its strategy. The first
+  // request carries the options;
   // every following request acknowledges or refuses delivered events. The
   // first response is the confirmation; every following one is an event with
   // its retry count. An event not acknowledged within the group's message
@@ -146,8 +148,8 @@ message GroupSettings {
   // How many events the server reads ahead of the consumer. Default 500.
   int32 buffer_size = 9;
 
-  // How many consumers may connect at once. Only 1 is served today; see
-  // PENDING.md for competing consumers.
+  // How many consumers may connect at once; one more is refused with
+  // CONSUMER_LIMIT_REACHED. Default 0: no limit.
   int32 max_subscriber_count = 10;
 
   // How the group's numbers are meant, fixed when the group is created: its
@@ -158,6 +160,11 @@ message GroupSettings {
   // with ORDINALS_NOT_ENABLED on a store without ordinals. A consumer that
   // wants the other numbering creates another group.
   Numbering numbering = 11;
+
+  // How the group's events are shared among its consumers. Default
+  // ROUND_ROBIN; see ConsumerStrategy in shared.proto. Changed through
+  // Update like the other settings; the consumers connect again under it.
+  ConsumerStrategy consumer_strategy = 12;
 }
 
 message UpdateRequest {
@@ -238,7 +245,8 @@ message GroupInfo {
 message GroupLiveInfo {
   // When the consumer connected.
   google.protobuf.Timestamp connected_at = 1;
-  // Events delivered and neither acknowledged nor refused yet.
+  // Events delivered and neither acknowledged nor refused yet, over every
+  // consumer.
   int32 in_flight_count = 2;
   // Events queued to be delivered again.
   int32 awaiting_retry_count = 3;
@@ -258,6 +266,22 @@ message GroupLiveInfo {
   // runs the group and read them from the running group, so they are as of
   // now; false when they are what the group last wrote to the store.
   bool from_owner = 9;
+  // How many consumers are connected.
+  int32 consumer_count = 10;
+  // Each consumer, only when from_owner: the stored numbers hold the count
+  // and the totals, not each one.
+  repeated ConsumerInfo consumers = 11;
+}
+
+message ConsumerInfo {
+  // When the consumer connected.
+  google.protobuf.Timestamp connected_at = 1;
+  // Where it connected from, as the server saw it.
+  string address = 2;
+  // How many delivered, unacknowledged events it asked to hold.
+  int32 buffer_size = 3;
+  // Events delivered to it and neither acknowledged nor refused yet.
+  int32 in_flight_count = 4;
 }
 
 message PersistentReadRequest {

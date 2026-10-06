@@ -43,6 +43,12 @@ public sealed class PersistentSubscriptionInfoTests
                 ConsumerAddress = "ipv4:10.0.0.7:51234",
                 AsOf = Timestamp.FromDateTimeOffset(Connected.AddMinutes(2)),
                 FromOwner = true,
+                ConsumerCount = 2,
+                Consumers =
+                {
+                    new ConsumerInfo { ConnectedAt = Timestamp.FromDateTimeOffset(Connected), Address = "ipv4:10.0.0.7:51234", BufferSize = 6, InFlightCount = 3 },
+                    new ConsumerInfo { ConnectedAt = Timestamp.FromDateTimeOffset(Connected.AddSeconds(30)), Address = "ipv4:10.0.0.8:51234", BufferSize = 4, InFlightCount = 1 },
+                },
             },
         });
         await using var sut = new NightingaleClient(invoker);
@@ -64,7 +70,18 @@ public sealed class PersistentSubscriptionInfoTests
         info.Running.ShouldBeTrue();
         info.OwnerAddress.ShouldBe(new Uri("http://node-1:5000/"));
         info.LastKnownPosition.ShouldBe(57);
-        info.Live.ShouldBe(new PersistentSubscriptionLiveInfo(Connected, 4, 1, 10, 43, Connected.AddMinutes(1), "ipv4:10.0.0.7:51234", Connected.AddMinutes(2), true));
+        info.Live.ShouldBeEquivalentTo(new PersistentSubscriptionLiveInfo(
+            Connected,
+            4,
+            1,
+            10,
+            43,
+            Connected.AddMinutes(1),
+            "ipv4:10.0.0.7:51234",
+            Connected.AddMinutes(2),
+            true,
+            2,
+            new List<PersistentSubscriptionConsumerInfo> { new(Connected, "ipv4:10.0.0.7:51234", 6, 3), new(Connected.AddSeconds(30), "ipv4:10.0.0.8:51234", 4, 1) }));
     }
 
     [Fact]

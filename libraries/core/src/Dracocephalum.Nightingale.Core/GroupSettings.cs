@@ -4,7 +4,8 @@ namespace Dracocephalum.Nightingale;
 /// What the server keeps for a persistent-subscription group. The defaults are the reference
 /// client's where it has them: a group starts at the end of its stream, an event is redelivered
 /// after thirty seconds unacknowledged and parked after ten retries, and the checkpoint is
-/// written every thousand acknowledgements or every two seconds once ten have accrued.
+/// written every thousand acknowledgements or every two seconds once ten have accrued, any number
+/// of consumers may connect, and they share the events in turn.
 /// </summary>
 /// <remarks>
 /// The name is the contract's, kept on purpose: the reference client says "persistent subscription" and
@@ -17,10 +18,11 @@ namespace Dracocephalum.Nightingale;
 /// <param name="CheckpointAfter">Time after which a checkpoint is written, given the lower bound.</param>
 /// <param name="CheckpointLowerBound">The fewest acknowledgements a timed checkpoint write needs.</param>
 /// <param name="BufferSize">How many events the server reads ahead of the consumer.</param>
-/// <param name="MaxSubscriberCount">How many consumers may connect at once; only one is served today.</param>
+/// <param name="MaxSubscriberCount">How many consumers may connect at once; 0 for no limit, the default.</param>
 /// <param name="Numbering">How the group's numbers are meant, fixed when it is created: its start, its checkpoint and
 /// the position a parked message is replayed by. <see cref="Numbering.Ordinal"/> only over a virtual stream on a
 /// store with ordinals; a consumer that wants the other numbering creates another group.</param>
+/// <param name="ConsumerStrategy">How the group shares its events among its consumers; <see cref="ConsumerStrategy.RoundRobin"/> unless said otherwise.</param>
 public sealed record GroupSettings(
     StreamPosition Start,
     TimeSpan MessageTimeout,
@@ -30,7 +32,8 @@ public sealed record GroupSettings(
     int CheckpointLowerBound,
     int BufferSize,
     int MaxSubscriberCount,
-    Numbering Numbering = Numbering.Global)
+    Numbering Numbering = Numbering.Global,
+    ConsumerStrategy ConsumerStrategy = ConsumerStrategy.RoundRobin)
 {
     /// <summary>The defaults.</summary>
     public static GroupSettings Default { get; } = new(
@@ -41,7 +44,7 @@ public sealed record GroupSettings(
         TimeSpan.FromSeconds(2),
         10,
         500,
-        1);
+        0);
 
     /// <summary>Checks the settings are usable.</summary>
     /// <exception cref="ArgumentOutOfRangeException">A value is out of range.</exception>
@@ -53,6 +56,6 @@ public sealed record GroupSettings(
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(CheckpointAfter, TimeSpan.Zero, nameof(CheckpointAfter));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(CheckpointLowerBound, nameof(CheckpointLowerBound));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(BufferSize, nameof(BufferSize));
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxSubscriberCount, nameof(MaxSubscriberCount));
+        ArgumentOutOfRangeException.ThrowIfNegative(MaxSubscriberCount, nameof(MaxSubscriberCount));
     }
 }

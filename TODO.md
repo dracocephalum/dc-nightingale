@@ -41,8 +41,7 @@ undecided adds it here rather than mentioning it once in a conversation.
   group, and the virtual streams by ordinal on a store initialized with
   `Nightingale:Store:AssignOrdinals`; the samples under `examples/` are the
   end-to-end runs. Not yet: filters and checkpoints on `$all` (they answer
-  unimplemented), competing consumers,
-  and the ordinal backfill, all in `PENDING.md`. Close by: see `PENDING.md`.
+  unimplemented) and the ordinal backfill, both in `PENDING.md`. Close by: see `PENDING.md`.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,

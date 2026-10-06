@@ -114,10 +114,11 @@ among them, and drops its connections so they reconnect under the new ones.
 Changing the start resets the group.
 
 **Nightingale:** an update changes the timeouts, the retry limit, the
-checkpoint bounds, the buffer size and the consumer limit, and ends the
-connected consumer's call with `GROUP_UPDATED`, which the client raises as
-`GroupUpdatedException`; the consumer connects again and what it had not
-acknowledged is delivered again. Three things differ.
+checkpoint bounds, the buffer size, the consumer limit and the consumer
+strategy, and ends every connected consumer's call with `GROUP_UPDATED`,
+which the client raises as `GroupUpdatedException`; the consumers connect
+again and what they had not acknowledged is delivered again. Three things
+differ.
 
 - **The start and the numbering are not changed.** They say what the
   group's checkpoint means. Naming another value for either is refused, and
@@ -128,7 +129,7 @@ acknowledged is delivered again. Three things differ.
   one setting without restating the others. The answer carries all of them
   as they then stand.
 - **The change is made by the instance that runs the group**, which is the
-  one that can end its consumer's call: another refuses with that
+  one that can end its consumers' calls: another refuses with that
   instance's address and the client repeats the call there, as for a
   replay. A group nobody runs is changed by whichever instance was asked.
 
@@ -136,13 +137,45 @@ acknowledged is delivered again. Three things differ.
 parked messages, its outbox and what is in flight; that is parked in
 `PENDING.md` rather than done by a side door of the update.
 
-## A persistent subscription serves one consumer
+## Competing consumers share a group where it runs
 
-**Reference:** a group dispatches to several consumers at once, round-robin
-or pinned.
+**Reference:** a group dispatches to several consumers at once, by a
+strategy: round robin, pinned, where a hash of the stream keeps each stream
+with one consumer, or dispatch to a single consumer with the others standing
+by. A limit on consumers, zero for none, is part of the settings.
 
-**Nightingale:** one consumer per group for now; a second is refused with
-`CONSUMER_LIMIT_REACHED`. Competing consumers are in `PENDING.md`.
+**Nightingale:** the same three strategies under the same names,
+`RoundRobin` the default, settable when the group is created and changed by
+an update, and the same limit, zero for none and the default. The group runs
+once per instance, in the instance that holds its lease, and its consumers
+there share that one running copy: the first to connect starts it, the last
+to leave stops it, and a consumer sent to the owner by another instance
+joins it there. Every consumer connected to the same group is on that one
+instance, which is what the lease says. Four things are worth knowing.
+
+- **A consumer that leaves hands over what it held at once.** Disposing the
+  client's subscription completes the request stream, the server applies
+  whatever the consumer last sent, acknowledgements and refusals, hands the
+  events the consumer still held to the remaining consumers ahead of the
+  stream, and ends the call; the client waits for that end. Those events
+  carry the retry count they had: changing hands is not a retry. A consumer
+  whose connection drops instead is left in flight until the message timeout,
+  which does count.
+- **Pinned goes by a hash of the stream name over the consumers connected**,
+  the same in every process, and streams are shared out again whenever a
+  consumer joins or leaves; the reference's pinning is by its own hash over
+  its own buckets, so which consumer a stream lands on differs, and nothing
+  depends on it. A pinned consumer that is full holds up its streams rather
+  than lending an event to another consumer; so does the single consumer
+  under dispatch to single, whose stand-ins take over only when it leaves.
+- **A retry goes before the stream, whoever is to receive it**, and no event
+  is taken from the stream until a consumer has room for it, so what a
+  leaver held, a refused event and a timed-out one all go out ahead of
+  anything new.
+- **Group info lists each consumer** where the reference lists each
+  connection: when it connected, its address, its buffer and what it holds,
+  from the instance that runs the group; the stored numbers, which any
+  instance answers with, keep the count and the totals only.
 
 ## A group's info comes from its own instance, and a listing from the store
 
@@ -179,8 +212,7 @@ no instance has them all.
   clearing them leaves nothing that is believed.
 - **What is reported differs.** There is no status string: a group either
   runs, which it does while a consumer is connected, or does not. There are
-  no rates, totals or per-connection statistics, and one consumer where the
-  reference lists several. There is an outbox count beside the parked
+  no rates, totals or per-connection statistics. There is an outbox count beside the parked
   count, the group's numbering, and the address of the instance that runs
   it. The last number of the group's stream is in the info and not in the
   listing, since it is a read per group.

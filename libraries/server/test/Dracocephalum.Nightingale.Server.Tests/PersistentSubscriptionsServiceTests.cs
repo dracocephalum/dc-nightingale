@@ -342,9 +342,9 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Update_WhenAConsumerIsConnectedHere_ShouldEndItsCallSoItReconnectsUnderTheNewSettings()
+    public async Task Update_WhenConsumersAreConnectedHere_ShouldEndTheirCallsSoTheyReconnectUnderTheNewSettings()
     {
-        // Arrange: a consumer connected to this instance, two events delivered.
+        // Arrange: two consumers connected to this instance, two events delivered between them.
         var settings = GroupSettings.Default with { Start = StreamPosition.Start };
         var definition = new SubscriptionGroupDefinition("orders-1", "billing", settings, -1);
         var me = _app!.Services.GetRequiredService<SubscriptionGroupRegistry>().InstanceId;
@@ -355,19 +355,78 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
             .ReturnsLazily(call => Task.FromResult<StreamSlice?>(new StreamSlice(new StreamHead(0, 1), call.GetArgument<long?>(2) == 0 ? [Record("orders-1", 0, 10), Record("orders-1", 1, 11)] : [])));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
-        await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
-        await Next(call, 3);
+        await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 1 } }, TestContext.Current.CancellationToken);
+        await Next(call, 2);
+        using var other = client.Read(cancellationToken: TestContext.Current.CancellationToken);
+        await other.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 1 } }, TestContext.Current.CancellationToken);
+        await Next(other, 2);
 
         // Act
         var response = await client.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
         var ended = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+        var otherEnded = await Should.ThrowAsync<RpcException>(async () => await other.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
 
-        // Assert: the change is made, and the consumer is told why its call ended.
+        // Assert: the change is made, and each consumer is told why its call ended.
         response.Settings.MaxRetryCount.ShouldBe(7);
-        ended.StatusCode.ShouldBe(StatusCode.Aborted);
-        var info = ended.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
-        info.Reason.ShouldBe("GROUP_UPDATED");
-        info.Metadata["group"].ShouldBe("billing");
+        foreach (var exception in new[] { ended, otherEnded })
+        {
+            exception.StatusCode.ShouldBe(StatusCode.Aborted);
+            var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+            info.Reason.ShouldBe("GROUP_UPDATED");
+            info.Metadata["group"].ShouldBe("billing");
+        }
+    }
+
+    [Fact]
+    public async Task Read_WithTwoConsumers_ShouldShareOneRunningGroupAndHandOverWhatALeaverHeld()
+    {
+        // Arrange: a three-event stream, two consumers with a buffer of one each.
+        var settings = GroupSettings.Default with { Start = StreamPosition.Start };
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", settings, -1);
+        var me = _app!.Services.GetRequiredService<SubscriptionGroupRegistry>().InstanceId;
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.DescribeAsync("orders-1", "billing", A<CancellationToken>._))
+            .Returns(new SubscriptionGroupSummary(definition, Created, 0, 0, new LeaseHolder(me, new Uri("http://localhost"))));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, A<long?>._, A<int>._, A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<StreamSlice?>(new StreamSlice(new StreamHead(0, 2), call.GetArgument<long?>(2) == 0 ? [Record("orders-1", 0, 10), Record("orders-1", 1, 11), Record("orders-1", 2, 12)] : [])));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Backwards, null, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 2, 12)]));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+        using var first = client.Read(cancellationToken: TestContext.Current.CancellationToken);
+        await first.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 1 } }, TestContext.Current.CancellationToken);
+        var toFirst = await Next(first, 2);
+        using var second = client.Read(cancellationToken: TestContext.Current.CancellationToken);
+        await second.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 1 } }, TestContext.Current.CancellationToken);
+        var toSecond = await Next(second, 2);
+
+        // Act: the owner describes both consumers; then the first leaves cleanly, and what it held goes to the second.
+        var info = (await client.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
+        await first.RequestStream.CompleteAsync();
+        var firstEnded = await first.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
+        await second.RequestStream.WriteAsync(new PersistentReadRequest { Ack = new Ack { Ids = { toSecond[1].Event.Event.Id } } }, TestContext.Current.CancellationToken);
+        var handedOver = await Next(second, 1);
+        await second.RequestStream.CompleteAsync();
+        await second.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
+
+        // Assert
+        toFirst[1].Event.Event.Revision.ShouldBe(0);
+        toSecond[1].Event.Event.Revision.ShouldBe(1);
+        toFirst[0].Confirmed.SubscriptionId.ShouldNotBe(toSecond[0].Confirmed.SubscriptionId);
+        var live = info.Live.ShouldNotBeNull();
+        live.FromOwner.ShouldBeTrue();
+        live.ConsumerCount.ShouldBe(2);
+        live.InFlightCount.ShouldBe(2);
+        live.ConsumerBufferSize.ShouldBe(2);
+        live.Consumers.Count.ShouldBe(2);
+        live.Consumers.ShouldAllBe(consumer => consumer.BufferSize == 1 && consumer.InFlightCount == 1 && consumer.ConnectedAt != null);
+        firstEnded.ShouldBeFalse("a clean leave ends the call without an error");
+        handedOver[0].Event.Event.Revision.ShouldBe(0, "what the leaver held goes out first, ahead of the stream");
+        handedOver[0].Event.RetryCount.ShouldBe(0, "a consumer leaving is not the event's fault");
+
+        // One lease for the two, taken when the first arrived and given back when the last left.
+        A.CallTo(() => _groups.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), me, A<Uri?>._, PersistentSubscriptionsService.LeaseDuration, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        await Until(() => A.CallTo(() => _groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), me, A<CancellationToken>._)).MustHaveHappenedOnceExactly());
+        A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -402,7 +461,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     {
         // Arrange: a case-insensitive store answers "Orders-1" and "Billing" with the group created
         // as "orders-1" and "billing". One consumer is connected under the names it was created with.
-        var definition = new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default with { Start = StreamPosition.Start }, -1);
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default with { Start = StreamPosition.Start, MaxSubscriberCount = 1 }, -1);
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
         A.CallTo(() => _groups.GetAsync("Orders-1", "Billing", A<CancellationToken>._)).Returns(definition);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, definition.Settings.BufferSize, A<CancellationToken>._))

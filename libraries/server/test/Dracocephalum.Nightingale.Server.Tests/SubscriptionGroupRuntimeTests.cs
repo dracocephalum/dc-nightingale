@@ -10,7 +10,9 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 /// <summary>
 /// The group runtime against a strict fake of the stream store, a recording fake of the group
 /// store, a tail moved by hand and a clock moved by hand: what is delivered, in what order, and
-/// what each acknowledgement, refusal and timeout does to the checkpoint and the parked rows.
+/// what each acknowledgement, refusal and timeout does to the checkpoint and the parked rows;
+/// then how several consumers share the events under each strategy, and what a consumer's
+/// leaving does to what it held.
 /// </summary>
 public sealed class SubscriptionGroupRuntimeTests
 {
@@ -21,6 +23,7 @@ public sealed class SubscriptionGroupRuntimeTests
     private readonly ISubscriptionGroupStore _groups = A.Fake<ISubscriptionGroupStore>();
     private readonly FakeTail _tail = new();
     private readonly FakeTimeProvider _time = new(Now);
+    private SubscriptionConsumer? _consumer;
 
     public SubscriptionGroupRuntimeTests()
     {
@@ -211,7 +214,7 @@ public sealed class SubscriptionGroupRuntimeTests
         var deliveredAgain = false;
         try
         {
-            deliveredAgain = await sut.Outgoing.WaitToReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+            deliveredAgain = await _consumer!.Outgoing.Reader.WaitToReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
         }
         catch (TimeoutException)
         {
@@ -303,11 +306,144 @@ public sealed class SubscriptionGroupRuntimeTests
         first.Record.Ordinal.ShouldBe(5);
     }
 
+    [Fact]
+    public async Task RoundRobin_ShouldHandEachEventToTheNextConsumerWithRoom()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 3), [Record("orders-1", 0, 10), Record("orders-1", 1, 11), Record("orders-1", 2, 12), Record("orders-1", 3, 13)]));
+        await using var sut = Group("orders-1", -1, 1, settings => settings with { Start = StreamPosition.Start });
+        var second = sut.Join(1, "two");
+
+        // Act
+        var toFirst = await Next(sut);
+        var toSecond = await Next(second);
+        await sut.AcknowledgeAsync([toSecond.Record.Id]);
+        var toSecondAgain = await Next(second);
+
+        // Assert
+        toFirst.Record.Revision.ShouldBe(0);
+        toSecond.Record.Revision.ShouldBe(1);
+        toSecondAgain.Record.Revision.ShouldBe(2, "the first consumer is full, so the next event skips it");
+        var live = sut.Describe();
+        live.ConsumerCount.ShouldBe(2);
+        live.InFlightCount.ShouldBe(2);
+        live.ConsumerBufferSize.ShouldBe(2);
+        live.Consumers.Select(consumer => consumer.InFlightCount).ShouldBe([1, 1]);
+    }
+
+    [Fact]
+    public async Task Pinned_ShouldKeepAStreamWithOneConsumer()
+    {
+        // Arrange
+        var records = Enumerable.Range(0, 12).Select(index => Record("orders-" + (index % 3), index, 10 + index)).ToList();
+        _tail.Advance(21);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 21, 500, A<CancellationToken>._)).Returns(records);
+        await using var sut = Group(StreamNames.All, -1, 12, settings => settings with { Start = StreamPosition.Start, ConsumerStrategy = ConsumerStrategy.Pinned });
+        var second = sut.Join(12, "two");
+        var third = sut.Join(12, "three");
+        var consumers = new[] { _consumer!, second, third };
+        await WaitUntilAsync(() => sut.Describe().InFlightCount == 12);
+
+        // Act
+        var streamsPerConsumer = consumers.Select(consumer => Drain(consumer).Select(message => message.Record.Stream).Distinct().ToList()).ToList();
+
+        // Assert
+        streamsPerConsumer.SelectMany(streams => streams).Count().ShouldBe(3, "each stream is with exactly one consumer");
+        streamsPerConsumer.SelectMany(streams => streams).Distinct().Count().ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task DispatchToSingle_ShouldSendEverythingToTheFirstConsumerUntilItLeaves()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 0, 10), Record("orders-1", 1, 11), Record("orders-1", 2, 12)]));
+        await using var sut = Group("orders-1", -1, 2, settings => settings with { Start = StreamPosition.Start, ConsumerStrategy = ConsumerStrategy.DispatchToSingle });
+        var second = sut.Join(2, "two");
+
+        // Act
+        var first = await Next(sut);
+        var next = await Next(sut);
+        sut.Leave(_consumer!);
+        var afterLeaving = new[] { await Next(second), await Next(second) };
+
+        // Assert
+        first.Record.Revision.ShouldBe(0);
+        next.Record.Revision.ShouldBe(1);
+        afterLeaving.Select(message => message.Record.Revision).ShouldBe([0, 1], "what the first consumer held goes to the next, ahead of the stream");
+        afterLeaving.Select(message => message.RetryCount).ShouldBe([0, 0], "a consumer leaving is not the event's fault");
+        sut.Describe().ConsumerCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Leave_ShouldCompleteTheConsumersChannelAndKeepWhatItAcknowledges()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 0, 10), Record("orders-1", 1, 11)]));
+        await using var sut = Group("orders-1", -1, 2, settings => settings with { Start = StreamPosition.Start, CheckpointUpperBound = 1 });
+        var first = await Next(sut);
+        await Next(sut);
+
+        // Act
+        sut.Leave(_consumer!);
+        await sut.AcknowledgeAsync([first.Record.Id]);
+        await _consumer!.Outgoing.Reader.Completion.WaitAsync(Wait, TestContext.Current.CancellationToken);
+
+        // Assert
+        _consumer.Outgoing.Reader.Completion.IsCompletedSuccessfully.ShouldBeTrue();
+        sut.Checkpoint.ShouldBe(-1, "the acknowledgement arrived after the event went back to the group, so it is not done");
+        sut.Describe().AwaitingRetryCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Fail_ShouldEndEveryConsumerWithTheCauseAndRefuseTheNext()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10)]));
+        await using var sut = Group("orders-1", -1, 1, settings => settings with { Start = StreamPosition.Start });
+        var second = sut.Join(1, "two");
+        var cause = new InvalidOperationException("updated");
+
+        // Act
+        sut.Fail(cause);
+        var late = sut.Join(1, "three");
+
+        // Assert
+        foreach (var consumer in new[] { _consumer!, second, late })
+        {
+            var ended = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            {
+                await foreach (var message in consumer.Outgoing.Reader.ReadAllAsync(TestContext.Current.CancellationToken))
+                {
+                    // What was delivered before the failure still comes through; the end is what matters.
+                    message.ShouldNotBeNull();
+                }
+            });
+            ended.ShouldBeSameAs(cause);
+        }
+    }
+
     private static EventRecord Record(string stream, long revision, long position) =>
         new(Guid.NewGuid(), stream, revision, position, "order_placed", Now, Encoding.UTF8.GetBytes("{}"), new JsonObject());
 
-    private static async Task<PersistentSubscriptionMessage.Recorded> Next(SubscriptionGroupRuntime group) =>
-        await group.Outgoing.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(Wait);
+    private static async Task<PersistentSubscriptionMessage.Recorded> Next(SubscriptionConsumer consumer) =>
+        await consumer.Outgoing.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(Wait);
+
+    private static List<PersistentSubscriptionMessage.Recorded> Drain(SubscriptionConsumer consumer)
+    {
+        var messages = new List<PersistentSubscriptionMessage.Recorded>();
+        while (consumer.Outgoing.Reader.TryRead(out var message))
+        {
+            messages.Add(message);
+        }
+
+        return messages;
+    }
+
+    private async Task<PersistentSubscriptionMessage.Recorded> Next(SubscriptionGroupRuntime group) => await Next(_consumer!);
 
     /// <summary>Polls for something the group does on its own thread, within the usual wait.</summary>
     private static async Task WaitUntilAsync(Func<bool> condition)
@@ -324,9 +460,12 @@ public sealed class SubscriptionGroupRuntimeTests
         }
     }
 
+    /// <summary>A running group with one consumer joined, the one <see cref="Next(SubscriptionGroupRuntime)"/> reads for.</summary>
     private SubscriptionGroupRuntime Group(string stream, long checkpoint, int consumerBuffer, Func<GroupSettings, GroupSettings>? adjust = null)
     {
         var settings = (adjust ?? (defaults => defaults))(GroupSettings.Default);
-        return new SubscriptionGroupRuntime(_store, _tail, _groups, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint), consumerBuffer);
+        var runtime = new SubscriptionGroupRuntime(_store, _tail, _groups, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint));
+        _consumer = runtime.Join(consumerBuffer, "one");
+        return runtime;
     }
 }

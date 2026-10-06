@@ -52,8 +52,8 @@ public static class Scenario
         await using var toSecond = second.Connect();
 
         await toSecond.Client.AppendToStreamAsync(Stream, StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
-        await toSecond.Client.CreatePersistentSubscriptionAsync(Stream, Group, GroupSettings.Default with { Start = StreamPosition.Start }, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync("3. Through the second instance: appended two events and created the group, which any instance serves.").ConfigureAwait(false);
+        await toSecond.Client.CreatePersistentSubscriptionAsync(Stream, Group, GroupSettings.Default with { Start = StreamPosition.Start, MaxSubscriberCount = 1 }, cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync("3. Through the second instance: appended two events and created the group with room for one consumer, which any instance serves.").ConfigureAwait(false);
 
         var delivered = new List<string>();
         await using var consumer = await toFirst.Client.SubscribeToPersistentSubscriptionAsync(Stream, Group, bufferSize: 5, cancellationToken).ConfigureAwait(false);
@@ -79,7 +79,7 @@ public static class Scenario
             refusal = nameof(ConsumerLimitReachedException);
         }
 
-        await output.WriteLineAsync($"5. A second consumer asked the second instance, was sent to the first, and was refused there: {refusal}.").ConfigureAwait(false);
+        await output.WriteLineAsync($"5. A second consumer asked the second instance, was sent to the first, and was refused there, where the group's limit is kept: {refusal}.").ConfigureAwait(false);
 
         var replayed = await ReplayWhenParkedAsync(toSecond.Client, cancellationToken).ConfigureAwait(false);
         await messages.MoveNextAsync().ConfigureAwait(false);

@@ -194,14 +194,22 @@ refused there and everything else still works.
 ### 5. A group runs in one place, on a lease
 
 A persistent-subscription group is a checkpoint the server keeps and a set of
-events in flight to one consumer. The checkpoint, the group's settings and its
+events in flight to its consumers. The checkpoint, the group's settings and its
 parked messages are rows in the gateway's own tables, through the `ISubscriptionGroupStore`
 port and its one implementation, `SubscriptionGroupStore`, over the context of seam 7;
-the in-flight events, their retry counts and their deadlines are in
-memory, in `SubscriptionGroupRuntime`, in the one instance that holds the group's lease.
+the in-flight events, their retry counts, their deadlines and which consumer
+holds each are in memory, in `SubscriptionGroupRuntime`, in the one instance
+that holds the group's lease. The runtime is one per group per instance, one
+reader and one dispatcher feeding every consumer connected there by the
+group's strategy, round robin, pinned by a hash of the stream name, or a
+single consumer with the others standing by; `SubscriptionGroupRegistry`
+seats the consumers, the first to arrive starting the runtime under the lease
+and the last to leave stopping it, and `SubscriptionGroupHost` keeps the
+lease renewed, redelivers what timed out and writes how the group stands for
+as long as any consumer is there.
 The lease is a row that only a free, expired or already owned lease lets an
 instance write, two instances racing for it told apart by the row's
-concurrency tokens, renewed while the consumer stays, released when it
+concurrency tokens, renewed while a consumer stays, released when the last
 leaves. The lease carries the owner's address, derived from what the owner
 listens on unless configured, and an instance asked for a group another runs
 refuses with that address; the client goes there itself, once, and keeps the
@@ -221,11 +229,11 @@ ordinal, so a replay addresses it by whichever number the group speaks. A
 replay is a move, the shape of a service bus's dead-letter queue: the row
 goes from parked to the group's outbox, a message is always in exactly one of
 the two, and a delivery that fails again moves it back with its new reason
-and count. Delivery has the reference's shape: one dispatcher owns the
+and count. Delivery has the reference's shape: one dispatcher counts each
 consumer's slots and serves a list of retries before the live buffer, so
-what is due on the outbox, queued as retries when the consumer connects and
-whenever the group is woken, which the replay call does through the registry
-when the consumer is connected to the same instance, goes out ahead of the
+what is due on the outbox, queued as retries when the group starts and
+whenever it is woken, which the replay call does through the registry
+when a consumer is connected to the same instance, goes out ahead of the
 next event the stream would have sent; the events already in flight complete
 as they are. A message stays on the outbox while it is in flight, so a wake
 in the meantime never delivers it twice. The outbox row has a due time, so a
@@ -302,7 +310,7 @@ a row each.
 A group's row has three kinds of column: its settings, its state, the
 checkpoint and when it was created, and a snapshot of how it stands while
 it runs, the columns named `Live`, written with each renewal of its lease
-and cleared when its consumer leaves. The snapshot is what lets any
+and cleared when its last consumer leaves. The snapshot is what lets any
 instance list every group with its live numbers. It is read only under a
 held lease and nothing decides by it.
 

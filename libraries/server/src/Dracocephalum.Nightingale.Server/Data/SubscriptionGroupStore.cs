@@ -48,6 +48,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             BufferSize = settings.BufferSize,
             MaxSubscriberCount = settings.MaxSubscriberCount,
             Numbering = settings.Numbering,
+            ConsumerStrategy = settings.ConsumerStrategy,
             CheckpointPosition = group.Checkpoint,
             CreatedAt = timeProvider.GetUtcNow(),
         });
@@ -107,6 +108,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         row.BufferSize = settings.BufferSize;
         row.MaxSubscriberCount = settings.MaxSubscriberCount;
         row.Numbering = settings.Numbering;
+        row.ConsumerStrategy = settings.ConsumerStrategy;
         try
         {
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -134,6 +136,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
 
         row.LiveSnapshotAt = live?.AsOf;
         row.LiveConnectedAt = live?.ConnectedAt;
+        row.LiveConsumerCount = live?.ConsumerCount;
         row.LiveConsumerAddress = live?.ConsumerAddress is { Length: > MaxConsumerAddressLength } address ? address[..MaxConsumerAddressLength] : live?.ConsumerAddress;
         row.LiveConsumerBufferSize = live?.ConsumerBufferSize;
         row.LiveInFlightCount = live?.InFlightCount;
@@ -562,7 +565,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             row.CheckpointLowerBound,
             row.BufferSize,
             row.MaxSubscriberCount,
-            row.Numbering);
+            row.Numbering,
+            row.ConsumerStrategy);
 
         // The names are the row's own: a case-insensitive database finds the row under another
         // spelling, and the group still goes by the names it was created with.
@@ -584,7 +588,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
                 row.LiveCheckpointPosition,
                 row.LiveOldestInFlightAt,
                 row.LiveConsumerAddress,
-                asOf);
+                asOf,
+                row.LiveConsumerCount ?? 1);
 
     private static LeaseHolder Holder(Lease lease) =>
         new(lease.Owner, lease.OwnerAddress is null ? null : new Uri(lease.OwnerAddress, UriKind.Absolute));

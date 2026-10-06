@@ -1,19 +1,19 @@
-using System.Collections.Concurrent;
-
 namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
-/// The groups this instance is serving right now, one consumer each, and the id the instance
-/// leases them under. A group is claimed when its consumer connects and released when the
-/// consumer leaves, so the limit of one consumer per group holds within the instance; the lease
-/// holds it across instances. Once the group runs, it attaches a wake-up, so a replay asked for
-/// while its consumer is connected reaches the consumer at once instead of at its next
-/// connection, a way to ask how it stands, for whoever asks this instance about the group, and
-/// a way to end its consumer's call, for a change of settings the consumer has to reconnect under.
+/// The groups this instance is serving right now, the consumers each has here, and the id the
+/// instance leases them under. A group has one running copy per instance, shared by its
+/// consumers there: the first to join starts it, under the group's lease, and the last to leave
+/// stops it, so the group's limit on consumers holds within the instance and the lease holds
+/// one instance per group across them. Once the group runs it can be woken, so a replay asked
+/// for while consumers are connected reaches one at once instead of at the next connection;
+/// asked how it stands, for whoever asks this instance about the group; and stopped, for a
+/// change of settings its consumers have to connect again under.
 /// </summary>
 public sealed class SubscriptionGroupRegistry
 {
-    private readonly ConcurrentDictionary<string, Running?> _live = new(StringComparer.Ordinal);
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, Entry> _groups = new(StringComparer.Ordinal);
 
     /// <summary>Gets the id this instance leases groups under, unique per process.</summary>
     public string InstanceId { get; } = Guid.NewGuid().ToString("N");
@@ -23,63 +23,141 @@ public sealed class SubscriptionGroupRegistry
     /// <returns>The name.</returns>
     public static string LeaseName(Guid groupId) => "group:" + groupId.ToString("N");
 
-    /// <summary>Claims a group for a consumer in this instance.</summary>
-    /// <param name="groupId">The group's id.</param>
-    /// <returns>True when no consumer holds it here; false when one does.</returns>
-    public bool TryClaim(Guid groupId) => _live.TryAdd(LeaseName(groupId), null);
-
-    /// <summary>Attaches a running group, once it runs.</summary>
-    /// <param name="groupId">The group's id.</param>
-    /// <param name="wake">What to call so the group looks at its outbox.</param>
-    /// <param name="describe">What to call to ask the group how it stands; none when it cannot say.</param>
-    /// <param name="stop">What to call to end the consumer's call because the group was updated; none when it cannot be.</param>
-    public void Attach(Guid groupId, Action wake, Func<SubscriptionGroupLive>? describe = null, Action? stop = null)
-    {
-        ArgumentNullException.ThrowIfNull(wake);
-        var name = LeaseName(groupId);
-        if (_live.ContainsKey(name))
-        {
-            _live[name] = new Running(wake, describe, stop);
-        }
-    }
-
     /// <summary>Wakes a group running here, so it looks at its outbox.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <returns>True when a running group was woken; false when none runs here.</returns>
     public bool Wake(Guid groupId)
     {
-        if (!_live.TryGetValue(LeaseName(groupId), out var running) || running is null)
+        if (Running(groupId) is not { } host)
         {
             return false;
         }
 
-        running.Wake();
+        host.Runtime.Wake();
         return true;
     }
 
     /// <summary>Asks a group running here how it stands.</summary>
     /// <param name="groupId">The group's id.</param>
-    /// <returns>What it says, or <see langword="null"/> when none runs here or it cannot say.</returns>
-    public SubscriptionGroupLive? Describe(Guid groupId) =>
-        _live.TryGetValue(LeaseName(groupId), out var running) ? running?.Describe?.Invoke() : null;
+    /// <returns>What it says, or <see langword="null"/> when none runs here.</returns>
+    public SubscriptionGroupLive? Describe(Guid groupId) => Running(groupId)?.Runtime.Describe();
 
-    /// <summary>Ends the call of the consumer of a group running here, because the group was updated.</summary>
+    /// <summary>Ends the calls of every consumer of a group running here, with the cause: the group was updated.</summary>
     /// <param name="groupId">The group's id.</param>
+    /// <param name="cause">What each consumer's call ends with.</param>
     /// <returns>True when a running group was told; false when none runs here.</returns>
-    public bool Stop(Guid groupId)
+    public bool Stop(Guid groupId, Exception cause)
     {
-        if (!_live.TryGetValue(LeaseName(groupId), out var running) || running?.Stop is null)
+        ArgumentNullException.ThrowIfNull(cause);
+        if (Running(groupId) is not { } host)
         {
             return false;
         }
 
-        running.Stop();
+        host.Runtime.Fail(cause);
         return true;
     }
 
-    /// <summary>Releases a group a consumer held here.</summary>
+    /// <summary>
+    /// Seats a consumer at a group in this instance. The first seat starts the group: its holder
+    /// sets <see cref="SubscriptionGroupSeat.Host"/> once it runs, or fails it, and the others
+    /// wait on that. A group being stopped by its last consumer is waited for, so the next
+    /// consumer starts it afresh rather than joining what is going down.
+    /// </summary>
     /// <param name="groupId">The group's id.</param>
-    public void Release(Guid groupId) => _live.TryRemove(LeaseName(groupId), out _);
+    /// <param name="limit">How many consumers the group allows here at once; 0 for no limit.</param>
+    /// <param name="cancellationToken">A token to cancel the wait.</param>
+    /// <returns>The seat, or <see langword="null"/> when the group is full.</returns>
+    internal async Task<SubscriptionGroupSeat?> JoinAsync(Guid groupId, int limit, CancellationToken cancellationToken)
+    {
+        var name = LeaseName(groupId);
+        while (true)
+        {
+            Task closed;
+            lock (_gate)
+            {
+                if (!_groups.TryGetValue(name, out var entry))
+                {
+                    entry = new Entry();
+                    _groups[name] = entry;
+                    entry.Count = 1;
+                    return new SubscriptionGroupSeat(entry, true);
+                }
 
-    private sealed record Running(Action Wake, Func<SubscriptionGroupLive>? Describe, Action? Stop);
+                if (!entry.Closing)
+                {
+                    if (limit > 0 && entry.Count >= limit)
+                    {
+                        return null;
+                    }
+
+                    entry.Count++;
+                    return new SubscriptionGroupSeat(entry, false);
+                }
+
+                closed = entry.Closed.Task;
+            }
+
+            await closed.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Gives a seat back. The last seat's holder stops the group, and says so with
+    /// <see cref="Closed"/> once it has; until then nobody joins the group here.
+    /// </summary>
+    /// <param name="seat">The seat.</param>
+    /// <returns>True when it was the last seat and the group is the holder's to stop.</returns>
+    internal bool Leave(SubscriptionGroupSeat seat)
+    {
+        lock (_gate)
+        {
+            seat.Entry.Count--;
+            if (seat.Entry.Count > 0)
+            {
+                return false;
+            }
+
+            seat.Entry.Closing = true;
+            return true;
+        }
+    }
+
+    /// <summary>The group the seat's holder was the last to leave has stopped; the next consumer starts it afresh.</summary>
+    /// <param name="seat">The seat.</param>
+    internal void Closed(SubscriptionGroupSeat seat)
+    {
+        lock (_gate)
+        {
+            var name = _groups.FirstOrDefault(pair => pair.Value == seat.Entry).Key;
+            if (name is not null)
+            {
+                _groups.Remove(name);
+            }
+        }
+
+        seat.Entry.Closed.TrySetResult();
+    }
+
+    private SubscriptionGroupHost? Running(Guid groupId)
+    {
+        lock (_gate)
+        {
+            return _groups.TryGetValue(LeaseName(groupId), out var entry) && !entry.Closing && entry.Ready.Task.IsCompletedSuccessfully
+                ? entry.Ready.Task.Result
+                : null;
+        }
+    }
+
+    /// <summary>A group in this instance: how many consumers are seated and the running group, once the first has started it.</summary>
+    internal sealed class Entry
+    {
+        public int Count { get; set; }
+
+        public bool Closing { get; set; }
+
+        public TaskCompletionSource<SubscriptionGroupHost> Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 }

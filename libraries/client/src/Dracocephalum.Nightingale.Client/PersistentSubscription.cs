@@ -13,7 +13,9 @@ namespace Dracocephalum.Nightingale.Client;
 /// every one with <see cref="AckAsync"/> or <see cref="NackAsync"/>; an event left unanswered is
 /// redelivered after the group's message timeout. Enumerate the subscription itself for the
 /// events, or <see cref="Messages"/> for the confirmation as well; one or the other, once.
-/// Disposal ends the connection, and whatever was in flight is redelivered to the next consumer.
+/// Disposal leaves the group cleanly: the server is told, applies whatever the consumer last
+/// asked for, and hands what the consumer still had in flight to the group's other consumers
+/// at once, rather than after the message timeout.
 /// </summary>
 public sealed class PersistentSubscription : IAsyncEnumerable<PersistentSubscriptionMessage.Recorded>, IAsyncDisposable
 {
@@ -80,17 +82,35 @@ public sealed class PersistentSubscription : IAsyncEnumerable<PersistentSubscrip
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
-        _call.Dispose();
+        // Completing the requests tells the server the consumer is leaving; the server ends the
+        // call once what the consumer last asked for is applied, and the pump ends with it. No
+        // more events are wanted meanwhile: the consumer's enumeration ends, and whatever the
+        // server still sends is dropped here and goes back out there. A call that has already
+        // ended, or a server that cannot be reached, has nothing to wait for.
         try
         {
+            _messages.Writer.TryComplete();
+            await _writing.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _call.RequestStream.CompleteAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _writing.Release();
+            }
+
             await _pump.ConfigureAwait(false);
         }
         catch (Exception)
         {
-            // Disposal cancels the call; whatever the pump saw was already handed to the consumer.
+            // Leaving is the point; whatever the pump saw was already handed to the consumer.
         }
-
-        _writing.Dispose();
+        finally
+        {
+            _call.Dispose();
+            _writing.Dispose();
+        }
     }
 
     internal async Task WriteAsync(PersistentReadRequest request)
@@ -140,7 +160,14 @@ public sealed class PersistentSubscription : IAsyncEnumerable<PersistentSubscrip
                     _confirmed.TrySetResult(confirmed);
                 }
 
-                await _messages.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await _messages.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+                }
+                catch (ChannelClosedException)
+                {
+                    // The consumer is leaving; the server takes the event back when it has gone.
+                }
             }
 
             _messages.Writer.TryComplete();

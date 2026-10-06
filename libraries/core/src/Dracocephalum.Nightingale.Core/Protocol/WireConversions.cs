@@ -102,6 +102,26 @@ public static class WireConversions
     public static Numbering ToNumbering(this Protocol.V1.Numbering numbering) =>
         numbering == Protocol.V1.Numbering.Ordinal ? Numbering.Ordinal : Numbering.Global;
 
+    /// <summary>Maps a consumer strategy to its wire form.</summary>
+    /// <param name="strategy">The strategy.</param>
+    /// <returns>The wire value.</returns>
+    public static Protocol.V1.ConsumerStrategy ToWire(this ConsumerStrategy strategy) => strategy switch
+    {
+        ConsumerStrategy.Pinned => Protocol.V1.ConsumerStrategy.Pinned,
+        ConsumerStrategy.DispatchToSingle => Protocol.V1.ConsumerStrategy.DispatchToSingle,
+        _ => Protocol.V1.ConsumerStrategy.RoundRobin,
+    };
+
+    /// <summary>Maps a consumer strategy from its wire form; unspecified is round robin.</summary>
+    /// <param name="strategy">The wire value.</param>
+    /// <returns>The strategy.</returns>
+    public static ConsumerStrategy ToConsumerStrategy(this Protocol.V1.ConsumerStrategy strategy) => strategy switch
+    {
+        Protocol.V1.ConsumerStrategy.Pinned => ConsumerStrategy.Pinned,
+        Protocol.V1.ConsumerStrategy.DispatchToSingle => ConsumerStrategy.DispatchToSingle,
+        _ => ConsumerStrategy.RoundRobin,
+    };
+
     /// <summary>Maps group settings from their wire form; unset fields take the defaults.</summary>
     /// <param name="settings">The wire message.</param>
     /// <returns>The settings.</returns>
@@ -124,7 +144,8 @@ public static class WireConversions
             settings.CheckpointLowerBound > 0 ? settings.CheckpointLowerBound : defaults.CheckpointLowerBound,
             settings.BufferSize > 0 ? settings.BufferSize : defaults.BufferSize,
             settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount,
-            settings.Numbering.ToNumbering());
+            settings.Numbering.ToNumbering(),
+            settings.ConsumerStrategy.ToConsumerStrategy());
     }
 
     /// <summary>Maps group settings to their wire form.</summary>
@@ -143,6 +164,7 @@ public static class WireConversions
             BufferSize = settings.BufferSize,
             MaxSubscriberCount = settings.MaxSubscriberCount,
             Numbering = settings.Numbering.ToWire(),
+            ConsumerStrategy = settings.ConsumerStrategy.ToWire(),
         };
         if (settings.Start.IsEnd)
         {
@@ -188,7 +210,9 @@ public static class WireConversions
                     info.Live.OldestInFlightAt?.ToDateTimeOffset(),
                     info.Live.ConsumerAddress.Length == 0 ? null : info.Live.ConsumerAddress,
                     info.Live.AsOf?.ToDateTimeOffset() ?? default,
-                    info.Live.FromOwner));
+                    info.Live.FromOwner,
+                    info.Live.ConsumerCount,
+                    info.Live.Consumers.Select(consumer => new PersistentSubscriptionConsumerInfo(consumer.ConnectedAt?.ToDateTimeOffset() ?? default, consumer.Address.Length == 0 ? null : consumer.Address, consumer.BufferSize, consumer.InFlightCount)).ToList()));
     }
 
     /// <summary>Maps a parked message from its wire form.</summary>

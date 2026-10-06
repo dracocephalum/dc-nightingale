@@ -1,3 +1,6 @@
+using System.Runtime.ExceptionServices;
+using System.Threading.Channels;
+
 using Dracocephalum.Nightingale.Protocol;
 using Dracocephalum.Nightingale.Protocol.V1;
 using Grpc.Core;
@@ -127,6 +130,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             CheckpointLowerBound = asked.CheckpointLowerBound > 0 ? asked.CheckpointLowerBound : current.CheckpointLowerBound,
             BufferSize = asked.BufferSize > 0 ? asked.BufferSize : current.BufferSize,
             MaxSubscriberCount = asked.MaxSubscriberCount > 0 ? asked.MaxSubscriberCount : current.MaxSubscriberCount,
+            ConsumerStrategy = asked.ConsumerStrategy == Protocol.V1.ConsumerStrategy.Unspecified ? current.ConsumerStrategy : asked.ConsumerStrategy.ToConsumerStrategy(),
         };
         try
         {
@@ -142,9 +146,9 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             throw NightingaleErrors.GroupNotFound(definition.Stream, definition.Group);
         }
 
-        // The consumer connected here was delivered to under the old settings; its call ends
-        // and it connects again under the new ones.
-        registry.Stop(definition.Id);
+        // The consumers connected here were delivered to under the old settings; their calls
+        // end and they connect again under the new ones.
+        registry.Stop(definition.Id, NightingaleErrors.GroupUpdated(definition.Stream, definition.Group));
         return new UpdateResponse { Settings = settings.ToWire() };
     }
 
@@ -371,37 +375,82 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         stream = definition.Stream;
         group = definition.Group;
 
-        if (!registry.TryClaim(definition.Id))
-        {
-            throw NightingaleErrors.ConsumerLimitReached(stream, group, definition.Settings.MaxSubscriberCount);
-        }
-
+        // The group runs once in this instance, shared by its consumers here: the first to
+        // arrive starts it, the others join it, the last to leave stops it.
+        var seat = await registry.JoinAsync(definition.Id, definition.Settings.MaxSubscriberCount, cancellationToken).ConfigureAwait(false)
+            ?? throw NightingaleErrors.ConsumerLimitReached(stream, group, definition.Settings.MaxSubscriberCount);
         try
         {
-            // Refused with the owner's address: the client goes there itself, the way the
-            // reference client follows a not-leader answer.
-            var lease = SubscriptionGroupRegistry.LeaseName(definition.Id);
-            var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
-            if (owner is not null)
+            SubscriptionGroupHost host;
+            if (seat.First)
             {
-                throw NightingaleErrors.GroupOwnedElsewhere(stream, group, owner);
+                try
+                {
+                    host = await StartAsync(definition, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception cause)
+                {
+                    seat.Failed(cause);
+                    throw;
+                }
+
+                seat.Started(host);
+            }
+            else
+            {
+                host = await seat.Host.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            try
-            {
-                await ServeAsync(definition, buffer, lease, context.Peer, requestStream, responseStream, cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                // Cleared before the lease goes, so the row never says a consumer is connected
-                // under no lease; an instance that dies first leaves it, and readers go by the lease.
-                await groups.SaveLiveAsync(definition.Id, null, CancellationToken.None).ConfigureAwait(false);
-                await groups.ReleaseLeaseAsync(lease, registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
-            }
+            await ServeAsync(host.Runtime, buffer, context.Peer, requestStream, responseStream, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            registry.Release(definition.Id);
+            if (registry.Leave(seat))
+            {
+                try
+                {
+                    if (seat.Host.IsCompletedSuccessfully)
+                    {
+                        await StopAsync(seat.Host.Result).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    registry.Closed(seat);
+                }
+            }
+        }
+    }
+
+    /// <summary>Starts a group in this instance, under its lease.</summary>
+    private async Task<SubscriptionGroupHost> StartAsync(SubscriptionGroupDefinition definition, CancellationToken cancellationToken)
+    {
+        // Refused with the owner's address: the client goes there itself, the way the reference
+        // client follows a not-leader answer.
+        var lease = SubscriptionGroupRegistry.LeaseName(definition.Id);
+        var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
+        if (owner is not null)
+        {
+            throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, owner);
+        }
+
+        var runtime = new SubscriptionGroupRuntime(store, tail, groups, timeProvider, definition);
+        return new SubscriptionGroupHost(definition, runtime, (live, token) => KeepAsync(live, definition, lease, token));
+    }
+
+    /// <summary>Stops a group in this instance: its last consumer has left.</summary>
+    private async Task StopAsync(SubscriptionGroupHost host)
+    {
+        try
+        {
+            await host.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleared before the lease goes, so the row never says a consumer is connected under
+            // no lease; an instance that dies first leaves it, and readers go by the lease.
+            await groups.SaveLiveAsync(host.Definition.Id, null, CancellationToken.None).ConfigureAwait(false);
+            await groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.LeaseName(host.Definition.Id), registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -474,7 +523,19 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             ConsumerAddress = live.ConsumerAddress ?? string.Empty,
             AsOf = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.AsOf),
             FromOwner = fromOwner,
+            ConsumerCount = live.ConsumerCount,
         };
+        foreach (var consumer in live.Consumers)
+        {
+            info.Consumers.Add(new ConsumerInfo
+            {
+                ConnectedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(consumer.ConnectedAt),
+                Address = consumer.Address ?? string.Empty,
+                BufferSize = consumer.BufferSize,
+                InFlightCount = consumer.InFlightCount,
+            });
+        }
+
         if (live.Checkpoint is { } checkpoint)
         {
             info.Checkpoint = checkpoint;
@@ -569,55 +630,63 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         return parsed;
     }
 
-    private async Task ServeAsync(SubscriptionGroupDefinition definition, int buffer, string lease, string? peer, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
+    /// <summary>
+    /// Serves one consumer of a running group: its events go out as the group hands them over,
+    /// what it acknowledges or refuses goes back, and the call ends when the consumer completes
+    /// its requests, a clean leave, when it goes away, or when the group has no more for it,
+    /// with the cause.
+    /// </summary>
+    private async Task ServeAsync(SubscriptionGroupRuntime live, int buffer, string? peer, IAsyncStreamReader<PersistentReadRequest> requestStream, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
-        await using var live = new SubscriptionGroupRuntime(store, tail, groups, timeProvider, definition, buffer);
-        SubscriptionGroupLive Describe() => live.Describe() with { ConsumerAddress = peer };
-        var updated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        registry.Attach(definition.Id, live.Wake, Describe, () => updated.TrySetResult());
-
-        // Written once now, so a listing shows the consumer as soon as it is connected, and
-        // again with every renewal of the lease.
-        await groups.SaveLiveAsync(definition.Id, Describe(), cancellationToken).ConfigureAwait(false);
-        await responseStream.WriteAsync(
-            new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = Guid.NewGuid().ToString("D"), Checkpoint = live.Checkpoint } },
-            cancellationToken).ConfigureAwait(false);
-
-        using var ending = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var token = ending.Token;
-        var sending = SendAsync(live, responseStream, token);
-        var receiving = ReceiveAsync(live, requestStream, token);
-        var keeping = KeepAsync(live, definition.Id, Describe, lease, definition.Settings.MessageTimeout, token);
-
-        var first = await Task.WhenAny(sending, receiving, keeping, live.Delivery, updated.Task).ConfigureAwait(false);
-        await ending.CancelAsync().ConfigureAwait(false);
+        var consumer = live.Join(buffer, peer);
         try
         {
-            await Task.WhenAll(sending, receiving, keeping).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Ending the call cancels the others; the first task's outcome is what matters.
-        }
+            // Written now, so a listing shows the consumer as soon as it is connected, and again
+            // with every renewal of the lease.
+            await groups.SaveLiveAsync(live.Definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
+            await responseStream.WriteAsync(
+                new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = consumer.Id.ToString("D"), Checkpoint = live.Checkpoint } },
+                cancellationToken).ConfigureAwait(false);
 
-        if (first == updated.Task)
-        {
-            throw NightingaleErrors.GroupUpdated(definition.Stream, definition.Group);
-        }
+            using var ending = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var token = ending.Token;
+            var sending = SendAsync(consumer, responseStream, token);
+            var receiving = ReceiveAsync(live, requestStream, token);
 
-        if (first != live.Delivery || first.IsFaulted)
-        {
+            var first = await Task.WhenAny(sending, receiving).ConfigureAwait(false);
+            await ending.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(sending, receiving).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Ending the call cancels the other; the first task's outcome is what matters.
+            }
+
             await first.ConfigureAwait(false);
+        }
+        finally
+        {
+            live.Leave(consumer);
         }
     }
 
-    private static async Task SendAsync(SubscriptionGroupRuntime live, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
+    private static async Task SendAsync(SubscriptionConsumer consumer, IServerStreamWriter<PersistentReadResponse> responseStream, CancellationToken cancellationToken)
     {
-        await foreach (var message in live.Outgoing.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            await responseStream.WriteAsync(
-                new PersistentReadResponse { Event = new PersistentEvent { Event = message.Record.ToRecordedEvent(), RetryCount = message.RetryCount } },
-                cancellationToken).ConfigureAwait(false);
+            await foreach (var message in consumer.Outgoing.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await responseStream.WriteAsync(
+                    new PersistentReadResponse { Event = new PersistentEvent { Event = message.Record.ToRecordedEvent(), RetryCount = message.RetryCount } },
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (ChannelClosedException closed) when (closed.InnerException is { } cause)
+        {
+            // The group completed the channel with a cause; the call ends with that, not the wrapper.
+            ExceptionDispatchInfo.Throw(cause);
         }
     }
 
@@ -647,20 +716,20 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     }
 
     /// <summary>Renews the lease, redelivers what timed out and writes how the group stands, on a cadence tied to the message timeout.</summary>
-    private async Task KeepAsync(SubscriptionGroupRuntime live, Guid groupId, Func<SubscriptionGroupLive> describe, string lease, TimeSpan messageTimeout, CancellationToken cancellationToken)
+    private async Task KeepAsync(SubscriptionGroupRuntime live, SubscriptionGroupDefinition definition, string lease, CancellationToken cancellationToken)
     {
-        var interval = TimeSpan.FromTicks(Math.Min(messageTimeout.Ticks / 2, LeaseDuration.Ticks / 3));
+        var interval = TimeSpan.FromTicks(Math.Min(definition.Settings.MessageTimeout.Ticks / 2, LeaseDuration.Ticks / 3));
         while (true)
         {
             await Task.Delay(interval, timeProvider, cancellationToken).ConfigureAwait(false);
             var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
             if (owner is not null)
             {
-                throw NightingaleErrors.GroupOwnedElsewhere(live.ToString() ?? string.Empty, lease, owner);
+                throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, owner);
             }
 
             await live.ExpireAsync().ConfigureAwait(false);
-            await groups.SaveLiveAsync(groupId, describe(), cancellationToken).ConfigureAwait(false);
+            await groups.SaveLiveAsync(definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
         }
     }
 }
