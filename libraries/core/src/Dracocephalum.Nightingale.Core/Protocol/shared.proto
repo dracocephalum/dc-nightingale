@@ -111,6 +111,26 @@ message RecordedEvent {
   optional sint64 ordinal = 9;
 }
 
+// How a persistent-subscription group shares its events among the consumers
+// connected to it at once. An event is with one consumer at a time whatever
+// the strategy; one refused or timed out is delivered again to whichever
+// consumer the strategy then picks.
+enum ConsumerStrategy {
+  // Treated as ROUND_ROBIN.
+  CONSUMER_STRATEGY_UNSPECIFIED = 0;
+  // Each event to the next consumer in turn, the first with room. Two events
+  // of one stream can be with two consumers at once.
+  CONSUMER_STRATEGY_ROUND_ROBIN = 1;
+  // A stream's events always to the same consumer, by a hash of the stream
+  // name over the consumers connected, so one consumer at a time processes a
+  // stream in order. Streams are shared out again when a consumer joins or
+  // leaves.
+  CONSUMER_STRATEGY_PINNED = 2;
+  // Every event to the consumer that connected first; the others wait, and
+  // the next takes over when it leaves.
+  CONSUMER_STRATEGY_DISPATCH_TO_SINGLE = 3;
+}
+
 // How a read or subscription of a virtual stream is numbered; see
 // "Numbering" above.
 enum Numbering {

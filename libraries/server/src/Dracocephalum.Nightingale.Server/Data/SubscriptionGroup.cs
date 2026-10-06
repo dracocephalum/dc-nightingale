@@ -47,6 +47,9 @@ public sealed class SubscriptionGroup
     /// <summary>Gets or sets how the group's numbers are meant, fixed when it is created; stored by name.</summary>
     public Numbering Numbering { get; set; }
 
+    /// <summary>Gets or sets how the group shares its events among its consumers; stored by name.</summary>
+    public ConsumerStrategy ConsumerStrategy { get; set; }
+
     /// <summary>Gets or sets the checkpoint: the last number every event up to which is done, or -1.</summary>
     public long CheckpointPosition { get; set; }
 
@@ -65,10 +68,13 @@ public sealed class SubscriptionGroup
     /// <summary>Gets or sets when the consumer connected.</summary>
     public DateTimeOffset? LiveConnectedAt { get; set; }
 
-    /// <summary>Gets or sets where the consumer connected from.</summary>
+    /// <summary>Gets or sets how many consumers are connected.</summary>
+    public int? LiveConsumerCount { get; set; }
+
+    /// <summary>Gets or sets where the first consumer connected from.</summary>
     public string? LiveConsumerAddress { get; set; }
 
-    /// <summary>Gets or sets how many delivered, unacknowledged events the consumer holds at once.</summary>
+    /// <summary>Gets or sets how many delivered, unacknowledged events the consumers hold at once, over all of them.</summary>
     public int? LiveConsumerBufferSize { get; set; }
 
     /// <summary>Gets or sets how many events are delivered and neither acknowledged nor refused yet.</summary>

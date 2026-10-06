@@ -122,6 +122,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     b.Property<int>("CheckpointUpperBound")
                         .HasColumnType("int");
 
+                    b.Property<string>("ConsumerStrategy")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -139,6 +144,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<int?>("LiveConsumerBufferSize")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LiveConsumerCount")
                         .HasColumnType("int");
 
                     b.Property<int?>("LiveInFlightCount")

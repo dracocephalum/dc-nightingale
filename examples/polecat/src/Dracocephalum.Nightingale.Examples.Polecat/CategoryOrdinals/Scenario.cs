@@ -114,16 +114,14 @@ public static class Scenario
                 }
             }
 
-            // An acknowledgement is one-way: it is on the wire when AckAsync returns, not yet
-            // applied. Leaving the moment it is sent can cancel the call before the server reads
-            // it, and the event would come again on reconnect, as at-least-once delivery allows.
-            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+            // Disposing the subscription leaves cleanly: the server applies the acknowledgement
+            // already on the wire before it ends the call, so the event does not come again.
         }
 
         await output.WriteLineAsync($"11. Created the group billing over {Category} under ordinal numbering, from the start, and acknowledged ordinals {string.Join(", ", groupOrdinals)}: the numbering is the group's for life.").ConfigureAwait(false);
 
         long groupCheckpoint;
-        await using (var group = await ReconnectAsync(client, cancellationToken).ConfigureAwait(false))
+        await using (var group = await client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken))
         {
             groupCheckpoint = (await group.Confirmed.ConfigureAwait(false)).Checkpoint;
         }
@@ -144,27 +142,6 @@ public static class Scenario
 
     private static EventData Event(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
-
-    /// <summary>
-    /// Connects to the group again. The server frees a consumer's place a moment after its call
-    /// ends, so a consumer that reconnects at once may be told the place is still taken; it tries
-    /// again shortly, as a consumer resuming after a dropped connection would.
-    /// </summary>
-    private static async Task<Client.PersistentSubscription> ReconnectAsync(NightingaleClient client, CancellationToken cancellationToken)
-    {
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                // The call returns once the server has confirmed the consumer, and throws when it refuses.
-                return await client.SubscribeToPersistentSubscriptionAsync(Category, "billing", cancellationToken: cancellationToken).ConfigureAwait(false);
-            }
-            catch (ConsumerLimitReachedException) when (attempt < 50)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
-            }
-        }
-    }
 
     /// <summary>
     /// Reads a virtual stream by ordinal once the sequencer, which runs behind the store's head on

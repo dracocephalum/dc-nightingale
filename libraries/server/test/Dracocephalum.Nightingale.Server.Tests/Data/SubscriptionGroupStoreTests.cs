@@ -25,7 +25,7 @@ public sealed class SubscriptionGroupStoreTests
     {
         // Arrange
         var sut = Store();
-        var settings = GroupSettings.Default with { Start = StreamPosition.From(3), MaxRetryCount = 4, MessageTimeout = TimeSpan.FromSeconds(7), Numbering = Numbering.Ordinal };
+        var settings = GroupSettings.Default with { Start = StreamPosition.From(3), MaxRetryCount = 4, MessageTimeout = TimeSpan.FromSeconds(7), Numbering = Numbering.Ordinal, ConsumerStrategy = ConsumerStrategy.Pinned };
 
         // Act
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", settings, -1) { Id = Billing }, TestContext.Current.CancellationToken);
@@ -342,7 +342,7 @@ public sealed class SubscriptionGroupStoreTests
     {
         // Arrange: a running group writes how it stands, under a lease that lasts thirty seconds.
         var sut = Store();
-        var live = new SubscriptionGroupLive(Now.AddMinutes(-5), 4, 1, 10, 41, Now.AddSeconds(-20), "ipv4:10.0.0.7:51234", Now);
+        var live = new SubscriptionGroupLive(Now.AddMinutes(-5), 4, 1, 10, 41, Now.AddSeconds(-20), "ipv4:10.0.0.7:51234", Now, 2, [new SubscriptionConsumerLive(Now.AddMinutes(-5), "ipv4:10.0.0.7:51234", 5, 3), new SubscriptionConsumerLive(Now.AddMinutes(-4), "ipv4:10.0.0.8:51234", 5, 1)]);
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
         await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
@@ -357,9 +357,11 @@ public sealed class SubscriptionGroupStoreTests
         var cleared = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
         await sut.SaveLiveAsync(Guid.NewGuid(), live, TestContext.Current.CancellationToken);
 
-        // Assert: without a holder the columns are leftovers; cleared, there is nothing to read.
-        described.ShouldNotBeNull().Live.ShouldBe(live);
-        listed.ShouldHaveSingleItem().Live.ShouldBe(live);
+        // Assert: the row keeps the count and the totals, not each consumer; without a holder the
+        // columns are leftovers; cleared, there is nothing to read.
+        var stored = live with { Consumers = [] };
+        described.ShouldNotBeNull().Live.ShouldBe(stored);
+        listed.ShouldHaveSingleItem().Live.ShouldBe(stored);
         lapsed.ShouldNotBeNull().Live.ShouldBeNull();
         cleared.ShouldNotBeNull().Holder.ShouldNotBeNull();
         cleared.Live.ShouldBeNull();

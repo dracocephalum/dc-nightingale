@@ -37,6 +37,11 @@ public static class Scenarios
             ClusterRedirect.Scenario.RunAsync,
             report => $"Done: the second consumer was refused as {report.SecondConsumerRefusal}; {report.Replayed} replayed through the other instance and the {report.ReplayedType} arrived at once."),
         ExampleScenario.Create(
+            "competing-consumers",
+            "two consumers on one group: pinned streams, both ended by an update, a leaver's event handed over",
+            CompetingConsumers.Scenario.RunAsync,
+            report => $"Done: {report.PinnedDelivered} events pinned over {report.PinnedStreams[0].Count} and {report.PinnedStreams[1].Count} streams; both ended with {report.EndedWith[0]}; the leaver's event was handed over with retry count {report.QuickReceived[^1].RetryCount}."),
+        ExampleScenario.Create(
             "delete-and-tombstone",
             "delete hides a stream, tombstone frees its name, and the default server refuses both",
             DeleteAndTombstone.Scenario.RunAsync,
