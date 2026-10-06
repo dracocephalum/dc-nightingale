@@ -15,6 +15,11 @@ banned-API list. The authority for each item is
 | `userId`, `sessionId`, request id as a metric tag | Observability | `issue` |
 | New `DateTime` property, parameter, or return | Time | `issue` |
 | `new DateTimeOffset(dateTime)` on a value of unknown `Kind` | Time | `issue (blocking)` — silently assumes local |
+| A timeout added to make a hang visible, with no reason of its own | Waits, delays and timeouts | `issue` |
+| An awaited call to a database, a network service or another process with no time to give up in, where an overload offers one | Waits, delays and timeouts | `issue` |
+| A timeout around each read of a stream to tell a quiet peer from a dead one; a heartbeat with no stated reason | Waits, delays and timeouts | `suggestion` |
+| A background loop that can end without failing its waiters; a cancellation caught as "stopping" that its own token did not ask for | Waits, delays and timeouts | `issue (blocking)` |
+| A long duration as a literal at its call site, or two dependent durations as separate constants | Waits, delays and timeouts | `suggestion` |
 | `DateTime.Now` / `UtcNow` in production code — the build should have caught it; if it did not, `BannedSymbols.txt` is not attached | Time | `issue` |
 | `async` method without a `CancellationToken`, or one that drops it | Types and APIs | `issue` |
 | `.Result`, `.Wait()`, `.GetAwaiter().GetResult()` | Types and APIs | `issue (blocking)` |
@@ -62,6 +67,7 @@ Tests:
 | `A.Fake<T>()` without `.Strict()` | Strict fakes | `issue` |
 | Asserting on an AutoFixture value that was never set | Assert what you set | `issue` |
 | `Thread.Sleep`, `Task.Delay`, real clock | Independent and deterministic | `issue (blocking)` |
+| A test that waits out a production duration, or one on shortened time never shown to fail without the fix | A long wait is shortened, and the test still reproduces | `issue` |
 | Test name not `Method_WhenCondition_ShouldResult` (or the Given form) | Naming | `nitpick` |
 | No `// Arrange` / `// Act` / `// Assert` | Structure | `nitpick` |
 | Private method tested via reflection | Public behaviour only | `issue` |

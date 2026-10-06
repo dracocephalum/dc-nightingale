@@ -144,7 +144,7 @@ noise, and a folder that exists implies a decision that has not been made:
 | `libraries/` | packages published to NuGet |
 | `jobs/` | scheduled executables (Kubernetes CronJobs and similar) |
 | `tools/` | never shipped to production |
-| `examples/` | runnable samples of the repository's own libraries, each a component; never shipped — see *Samples* below |
+| `examples/` | runnable samples of the repository's own libraries, a component per subject holding its scenarios; never shipped — see *Samples* below |
 | `infrastructure/` | Terraform and similar provisioning |
 | `ui/` | front-end applications that are **deployed** — a shared component library is a package and belongs in `libraries/` |
 | `docs/` | documentation written for people — architecture, decisions, guides; created only when there is some |
@@ -246,21 +246,35 @@ follows it too.
 A sample under `examples/` is a component like any other, with its own
 solution, `src/` and `test/`, and it exists to show a consumer how the
 libraries are used against something real. Its shape keeps it from drifting
-away from what is verified:
+away from what is verified, and keeps it cheap to build:
 
+- **One component per subject, not per scenario.** Every scenario of one
+  thing a consumer would pick, one backend or one library, lives in one
+  program: `examples/<subject>`. A component per scenario builds the same
+  dependencies once per scenario. Measured on eight of them: about six
+  minutes to build and test them all, against two and a half as one.
+- **A scenario is a folder in the source project.** Its code and a
+  `README.md` that walks through it, nothing else. The component's README
+  lists the scenarios and links each.
 - **One scenario method does the work and returns a report.** A static
   `Scenario.RunAsync` takes what it needs and a `TextWriter`, narrates each
   step to the writer, and returns a record of what it observed.
-- **The program prints; the test asserts.** `Program.cs` runs the scenario
-  against the console and turns success or failure into an exit code. The
-  test project runs the *same method* with a null writer and asserts the
-  report. A sample whose test exercised different code would be a sample
+- **One entry point names the scenario.** Without an argument the program
+  lists its scenarios; with names it runs those; with `all` it runs every
+  one and goes on after a failure. One file holds the list: name, a line of
+  what the scenario shows, how to run it. The exit code says whether every
+  scenario asked for completed.
+- **The program prints; the test asserts.** The test project has a test per
+  scenario that runs the *same method* with a null writer and asserts the
+  report. A scenario whose test exercised different code would be a scenario
   nobody has run.
-- **What samples share is a library, not a sample.** The hosting, the
-  throwaway resources and the program shell go in `examples/common`, so each
-  sample is only its scenario.
-- **A sample leaves nothing behind.** Whatever it creates — a database, a
-  file, a container — it removes, pass or fail.
+- **What scenarios share is a folder of the same project.** The hosting, the
+  throwaway resources and the program around the scenarios go in `Common`,
+  so each scenario is only its steps.
+- **A scenario owns what it creates and leaves nothing behind.** Each makes
+  its own database, file or container, never one another scenario uses, and
+  removes it, pass or fail. Their tests run one at a time when what they
+  create is heavy.
 
 A sample that needs a real dependency is an integration test and is gated
 like one; see `csharp-unit-tests-rules.md`.

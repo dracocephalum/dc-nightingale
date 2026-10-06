@@ -50,6 +50,16 @@ Layout, naming, and project wiring are defined in the repository's root
 
 - **Strict fakes.** Configure only the calls you expect; any other call fails
   the test. That is what turns a fake into a specification.
+- **A long wait is shortened, not waited out, and the test still reproduces.**
+  Code that waits takes its durations from somewhere a test can reach
+  (`csharp-coding-rules.md`, *Waits, delays and timeouts*): a fake clock
+  where the code owns the wait, a shortened value where a library does. Two
+  cautions. A shortened duration can change what happens: a wait cut below
+  the interval something else polls at now runs out between polls, which the
+  real one never does, so say in the test which relationship it relies on
+  and whether the change makes the case harder or easier. And a test on
+  shortened time has to be shown to catch the fault: take the fix out once,
+  see the test fail for that reason, and put it back.
 - **`sut`** names the system under test, whether field or local.
 - **`// Arrange`, `// Act`, `// Assert`** in that order. `// Act & Assert` when
   the two are a single expression, as with `Should.Throw`.
@@ -105,9 +115,12 @@ project and follows the same rules, with four differences:
   report can tell the two kinds apart.
 - **Tests that each create a database share one collection**, so they run
   one at a time. A test class runs in parallel with every other class by
-  default, and a database server short of memory hands out one memory grant
-  at a time for the catalog queries a schema apply runs; parallel creations
-  then stall each other until the command timeout, which reads as a hang.
+  default, and the first schema comparison in a new database compiles a
+  large batch of catalog queries, seconds of processor time each time;
+  several at once compete for it and every one of them is slower.
+- **A test waits on real time only for a real dependency's own clock**, and
+  then for a fraction of a second: a server left idle past a library's wait
+  that a test shortened, not past the minute production gives it.
 
 Until a pipeline runs them, automated integration tests are worth less than a
 sample program that exercises the same path and can be read. A repository with
