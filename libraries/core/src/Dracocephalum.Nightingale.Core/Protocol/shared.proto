@@ -55,22 +55,26 @@
 //   the object. Every other key is stored as-is and returned as-is.
 //
 // Call metadata (gRPC headers)
-//   Authentication and tenancy are pending features; two headers are
-//   reserved for them.
-//   authorization       the standard header, Basic or Bearer scheme, as the
-//                       reference client sends it and as proxies and log
-//                       redaction expect it. A credential is bound to
-//                       exactly one tenant, or carries the admin role.
-//   nightingale-tenant  for a tenant-bound credential: optional, and
-//                       refused unless equal to the credential's tenant.
-//                       For an admin credential: required on every data
-//                       operation, so nothing lands in a tenant or spans
-//                       tenants by omission. The value "*" spans all
-//                       tenants, admin only, reads only, and only while the
-//                       store keeps one shared sequence across tenants; a
-//                       server whose store does not advertises that through
-//                       ServerFeatures and refuses the wildcard.
-//                       Management operations take no tenant.
+//   authorization       the standard header, as the reference client sends
+//                       it and as proxies and log redaction expect it. The
+//                       Basic scheme carries a user name and password; the
+//                       Bearer scheme is reserved for tokens. Every call but
+//                       ServerFeatures.Ping needs it while the server has
+//                       authentication on, which Ping says. A credential
+//                       has a role, user, ops or admin, and is bound to one
+//                       tenant or is global.
+//   nightingale-tenant  a tenant id, a UUID in its canonical form, or "*".
+//                       For a tenant-bound credential: optional, and refused
+//                       unless equal to the credential's tenant. For a
+//                       global credential: required on every data operation,
+//                       so nothing lands in a tenant or spans tenants by
+//                       omission. The value "*" spans all tenants, on reads
+//                       and subscriptions only, and only while the store
+//                       keeps one shared sequence across tenants; a server
+//                       whose store does not advertises that through
+//                       ServerFeatures and refuses the wildcard. Management
+//                       operations on groups and streams take the tenant
+//                       the same way.
 //   Every stream name, $all included, is read within the resolved tenant.
 //
 // Errors

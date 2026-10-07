@@ -1,4 +1,5 @@
 using Dracocephalum.Nightingale.Client;
+using Dracocephalum.Nightingale.Server.Data;
 
 namespace Dracocephalum.Nightingale.Examples.Polecat.Common;
 
@@ -28,7 +29,7 @@ public sealed class ExampleConnection : IAsyncDisposable
     public static ExampleConnection ToCluster(params ExampleServer[] servers)
     {
         ArgumentNullException.ThrowIfNull(servers);
-        return new($"nightingale://{string.Join(',', servers.Select(server => server.Address.Authority))}?tls=false");
+        return new($"nightingale://{UserCredentials.AdminUserName}:{ExampleServer.AdminPassword}@{string.Join(',', servers.Select(server => server.Address.Authority))}?tls=false&tenant={Tenant.DefaultId:D}");
     }
 
     /// <inheritdoc/>

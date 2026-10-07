@@ -95,6 +95,23 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Tenant",
+                schema: "nightingale",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(250)", maxLength: 250, nullable: false),
+                    StoreTenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
+                    IsDisabled = table.Column<bool>(type: "bit", nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Tenant", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "SubscriptionOutboxEntry",
                 schema: "nightingale",
                 columns: table => new
@@ -149,6 +166,49 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "Credential",
+                schema: "nightingale",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(250)", maxLength: 250, nullable: false),
+                    PasswordHash = table.Column<string>(type: "varchar(500)", unicode: false, maxLength: 500, nullable: false),
+                    Role = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
+                    TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    IsDisabled = table.Column<bool>(type: "bit", nullable: false),
+                    SecurityStamp = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    FailedAttempts = table.Column<int>(type: "int", nullable: false),
+                    LockedUntil = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
+                    PasswordChangedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Credential", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Credential_Tenant_TenantId",
+                        column: x => x.TenantId,
+                        principalSchema: "nightingale",
+                        principalTable: "Tenant",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Credential_Name",
+                schema: "nightingale",
+                table: "Credential",
+                column: "Name",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Credential_TenantId",
+                schema: "nightingale",
+                table: "Credential",
+                column: "TenantId");
+
             migrationBuilder.CreateIndex(
                 name: "IX_Lease_Name",
                 schema: "nightingale",
@@ -190,11 +250,29 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 table: "SubscriptionParkedEvent",
                 columns: new[] { "SubscriptionGroupId", "Position" },
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Tenant_Name",
+                schema: "nightingale",
+                table: "Tenant",
+                column: "Name",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Tenant_StoreTenantId",
+                schema: "nightingale",
+                table: "Tenant",
+                column: "StoreTenantId",
+                unique: true);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "Credential",
+                schema: "nightingale");
+
             migrationBuilder.DropTable(
                 name: "Lease",
                 schema: "nightingale");
@@ -213,6 +291,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 
             migrationBuilder.DropTable(
                 name: "SubscriptionParkedEvent",
+                schema: "nightingale");
+
+            migrationBuilder.DropTable(
+                name: "Tenant",
                 schema: "nightingale");
 
             migrationBuilder.DropTable(

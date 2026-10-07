@@ -34,6 +34,12 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
     /// <summary>Gets the settings the store was initialized with.</summary>
     public DbSet<StoreProperty> StoreProperties => Set<StoreProperty>();
 
+    /// <summary>Gets the tenants.</summary>
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+
+    /// <summary>Gets the credentials.</summary>
+    public DbSet<Credential> Credentials => Set<Credential>();
+
     /// <inheritdoc/>
     public string Schema => schema.Name;
 
@@ -101,6 +107,27 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             progress.HasKey(row => row.Id);
             progress.Property(row => row.Name).HasMaxLength(100);
             progress.HasIndex(row => row.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<Tenant>(tenant =>
+        {
+            tenant.ToTable(nameof(Tenant));
+            tenant.HasKey(row => row.Id);
+            tenant.Property(row => row.Name).HasMaxLength(250);
+            tenant.Property(row => row.StoreTenantId).HasMaxLength(250).IsUnicode(false);
+            tenant.HasIndex(row => row.Name).IsUnique();
+            tenant.HasIndex(row => row.StoreTenantId).IsUnique();
+        });
+
+        modelBuilder.Entity<Credential>(credential =>
+        {
+            credential.ToTable(nameof(Credential));
+            credential.HasKey(row => row.Id);
+            credential.Property(row => row.Name).HasMaxLength(250);
+            credential.Property(row => row.PasswordHash).HasMaxLength(500).IsUnicode(false);
+            credential.Property(row => row.Role).HasConversion<string>().HasMaxLength(20);
+            credential.HasIndex(row => row.Name).IsUnique();
+            credential.HasOne<Tenant>().WithMany().HasForeignKey(row => row.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<StoreProperty>(property =>

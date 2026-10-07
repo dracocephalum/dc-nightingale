@@ -28,7 +28,7 @@ public sealed class ApprovedStoreSchemaTests
         // Arrange: the store as a host registers it, with ordinals, so every column and index is
         // in the script; against a server nobody connects to.
         var services = new ServiceCollection();
-        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", options => options.Store.AssignOrdinals = true);
+        services.AddNightingalePolecat("Server=example;Database=nightingale;Trusted_Connection=True", TestAuth.Off(options => options.Store.AssignOrdinals = true));
         await using var provider = services.BuildServiceProvider();
         var databases = await provider.GetRequiredService<IDocumentStore>().Options.Tenancy!.BuildDatabasesAsync(TestContext.Current.CancellationToken);
         var written = Path.Combine(AppContext.BaseDirectory, "store-schema." + Guid.NewGuid().ToString("N") + ".sql");

@@ -18,7 +18,7 @@ public sealed class ProgramTests(SqlServerTestDatabase database)
     {
         // Arrange
         using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseSetting("ConnectionStrings:Nightingale", database.ConnectionString));
+            .WithWebHostBuilder(builder => builder.UseSetting("ConnectionStrings:Nightingale", database.ConnectionString).UseSetting("Nightingale:Auth:AdminPassword", "program-test-admin-password"));
 
         // Act
         var response = await Ping(factory);
@@ -34,7 +34,8 @@ public sealed class ProgramTests(SqlServerTestDatabase database)
         using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder
                 .UseSetting("Nightingale:ConnectionStringName", "Store")
-                .UseSetting("ConnectionStrings:Store", database.ConnectionString));
+                .UseSetting("ConnectionStrings:Store", database.ConnectionString)
+                .UseSetting("Nightingale:Auth:AdminPassword", "program-test-admin-password"));
 
         // Act
         var response = await Ping(factory);

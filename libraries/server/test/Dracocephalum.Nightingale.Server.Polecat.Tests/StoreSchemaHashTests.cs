@@ -51,7 +51,7 @@ public sealed class StoreSchemaHashTests
     {
         // The store is registered as a host registers it, against a server nobody connects to.
         var services = new ServiceCollection();
-        services.AddNightingalePolecat(ConnectionString, configure);
+        services.AddNightingalePolecat(ConnectionString, TestAuth.Off(configure));
         await using var provider = services.BuildServiceProvider();
         return await provider.GetRequiredService<StoreSchema>().ComputeStoreHashAsync(TestContext.Current.CancellationToken);
     }

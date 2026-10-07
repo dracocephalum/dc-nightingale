@@ -26,4 +26,7 @@ message PingResponse {
   // "Numbering" in shared.proto. A store without the feature refuses such a
   // read with ORDINALS_NOT_ENABLED.
   bool supports_ordinals = 2;
+  // Whether every other call needs credentials in the authorization header;
+  // see "Call metadata" in shared.proto. This call never does.
+  bool authentication_required = 3;
 }

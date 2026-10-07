@@ -179,7 +179,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         {
             await TestDatabases.ProvisionAsync(name, Ordinals);
             var services = new ServiceCollection();
-            services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(name), TestDatabases.FastBoot(Ordinals));
+            services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(name), TestAuth.Off(TestDatabases.FastBoot(Ordinals)));
             await using (var provider = services.BuildServiceProvider())
             {
                 var held = await provider.GetRequiredService<ISubscriptionGroupStore>()

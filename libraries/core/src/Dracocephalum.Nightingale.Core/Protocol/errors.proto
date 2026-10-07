@@ -69,4 +69,19 @@ enum ErrorReason {
   // connected; its call ends so that it connects again under them. What it
   // had not acknowledged is delivered again. metadata: stream, group.
   ERROR_REASON_GROUP_UPDATED = 15;
+  // UNAUTHENTICATED. The call's credentials were not accepted: none were
+  // sent, the name or the password is wrong, the credential is disabled or
+  // locked out, or credentials came over a transport the server does not
+  // take them on. Which of these is not said. metadata: none.
+  ERROR_REASON_AUTHENTICATION_FAILED = 16;
+  // PERMISSION_DENIED. The credential may not do this: its role is too low
+  // or the tenant is not its own. metadata: required (the role the call
+  // needs: user, ops or admin), when the role is what was missing.
+  ERROR_REASON_ACCESS_DENIED = 17;
+  // NOT_FOUND. No tenant with that id, or the call named none where its
+  // credential needs one, or named one its credential is not bound to.
+  // metadata: tenant (empty when none was named).
+  ERROR_REASON_TENANT_NOT_FOUND = 18;
+  // FAILED_PRECONDITION. The tenant is disabled. metadata: tenant.
+  ERROR_REASON_TENANT_DISABLED = 19;
 }

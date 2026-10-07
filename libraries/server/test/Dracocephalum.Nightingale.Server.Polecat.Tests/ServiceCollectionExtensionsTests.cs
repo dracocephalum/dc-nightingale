@@ -108,8 +108,9 @@ public sealed class ServiceCollectionExtensionsTests
         provider.GetRequiredService<NightingaleOptions>().MaxEventsPerAppend.ShouldBe(190);
     }
 
+    /// <summary>A configuration of these values, with authentication off unless a value says otherwise: it is on by default and wants the administrator's password.</summary>
     private static IConfiguration Configuration(params (string Key, string? Value)[] values) =>
         new ConfigurationBuilder()
-            .AddInMemoryCollection(values.Select(pair => new KeyValuePair<string, string?>(pair.Key, pair.Value)))
+            .AddInMemoryCollection(values.Select(pair => new KeyValuePair<string, string?>(pair.Key, pair.Value)).Prepend(new KeyValuePair<string, string?>("Nightingale:Auth:Enabled", "false")))
             .Build();
 }

@@ -625,8 +625,25 @@ public sealed class NightingaleClient : IAsyncDisposable
         return CreateInvoker(channel);
     }
 
-    private CallInvoker CreateInvoker(GrpcChannel channel) =>
-        _settings?.DefaultDeadline is { } deadline
-            ? channel.Intercept(new DefaultDeadlineInterceptor(deadline, TimeProvider.System))
-            : channel.CreateCallInvoker();
+    /// <summary>
+    /// The channel as calls are made on it: with the credentials from the connection string sent
+    /// on every call, and the default deadline on every unary and client-streaming call, when
+    /// the settings have them.
+    /// </summary>
+    private CallInvoker CreateInvoker(GrpcChannel channel)
+    {
+        var invoker = channel.CreateCallInvoker();
+        if (_settings?.DefaultDeadline is { } deadline)
+        {
+            invoker = invoker.Intercept(new DefaultDeadlineInterceptor(deadline, TimeProvider.System));
+        }
+
+        if (_settings is { UserName: { Length: > 0 } } || _settings?.Tenant is not null)
+        {
+            var credentials = _settings.UserName is { Length: > 0 } userName ? new UserCredentials(userName, _settings.Password ?? string.Empty) : null;
+            invoker = invoker.Intercept(new CredentialsInterceptor(credentials, _settings.Tenant));
+        }
+
+        return invoker;
+    }
 }

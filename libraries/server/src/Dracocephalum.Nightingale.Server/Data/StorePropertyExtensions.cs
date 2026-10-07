@@ -45,6 +45,43 @@ public static class StorePropertyExtensions
         return WriteAsync(context, Flatten(settings), cancellationToken);
     }
 
+    /// <summary>
+    /// Writes the default tenant's row unless it is there: the store's own default id under a
+    /// name, so a single-tenant store needs no tenant made and a credential bound to the default
+    /// tenant is what today's callers are. Done when the schema is applied, after the
+    /// migrations, which carry no data of their own.
+    /// </summary>
+    /// <param name="context">The context.</param>
+    /// <param name="now">The clock's time, for the row's dates.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the row is there.</returns>
+    public static async Task EnsureDefaultTenantAsync(this NightingaleDbContext context, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (await context.Tenants.AnyAsync(tenant => tenant.Id == Tenant.DefaultId, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        context.Tenants.Add(new Tenant
+        {
+            Id = Tenant.DefaultId,
+            Name = Tenant.DefaultName,
+            StoreTenantId = Tenant.DefaultStoreTenantId,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            // Another instance wrote it first; the row is there either way.
+            context.ChangeTracker.Clear();
+        }
+    }
+
     /// <summary>Reads one property's value by name.</summary>
     /// <param name="context">The context.</param>
     /// <param name="name">The property's name.</param>

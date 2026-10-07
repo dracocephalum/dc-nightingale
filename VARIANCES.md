@@ -444,6 +444,45 @@ server's index.
 predicates. Regular-expression filters are applied to each page after it is
 read, so a selective regex over a large store reads more rows than it returns.
 
+## Authentication is Basic, roles are three, and a credential has a tenant
+
+**Reference:** a user name and password per call in the `authorization`
+header, users kept by the server, the groups `$admins` and `$ops`, a default
+administrator with a well-known password, and client certificates.
+
+**Nightingale:** the same header and scheme, so the reference's clients and
+proxies carry it unchanged; what is behind it differs.
+
+- **The built-in administrator's password is configuration**,
+  `Nightingale:Auth:AdminPassword`, not a row: nothing done through the API
+  can delete, demote or lock everyone out, and `Nightingale:Auth:AdminDisabled`
+  retires it once other administrators exist. Authentication is on by
+  default and the server refuses to start without that password unless told
+  `Nightingale:Auth:Enabled` is false; there is no well-known password.
+- **Credentials are rows** in the gateway's schema, the password a salted,
+  peppered PBKDF2-HMAC-SHA256 hash in PHC form that carries its parameters, so
+  the cost can be raised and the pepper rotated and a hash made under older
+  ones is remade on the next login. A verified name and password are
+  remembered on the instance for a few minutes, so the slow hash is not
+  recomputed per call; wrong passwords are counted on the row and the
+  credential is locked out past a threshold; an unknown name costs the same
+  time as a wrong password. Which part was wrong is never said.
+- **Roles are `user`, `ops` and `admin`**, each including the ones below:
+  reads, appends and subscriptions; plus management of groups and streams;
+  plus management of credentials and, globally, tenants. Where the reference
+  has groups a user may be in, a credential here has one role.
+- **A credential is bound to one tenant or is global.** A tenant-bound one
+  works in its tenant and needs no header; a global one, whatever its role,
+  sends `nightingale-tenant` on every data call, a tenant id or `*` on reads
+  and subscriptions, so nothing lands in a tenant by omission and a
+  cross-tenant consumer needs no more than the `user` role. The client sends
+  it from the `tenant` setting of its connection string.
+- **Basic over cleartext is refused** unless `Nightingale:Auth:AllowInsecureTransport`
+  says the network is private; the reference leaves that to the operator.
+- **The features call needs no credentials** and says whether the others do.
+- **No client certificates, and no tokens yet**; the Bearer scheme is
+  reserved, see `PENDING.md`.
+
 ## Multi-tenancy exists
 
 **Reference:** no tenancy.

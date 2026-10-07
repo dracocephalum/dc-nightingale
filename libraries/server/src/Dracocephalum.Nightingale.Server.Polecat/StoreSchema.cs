@@ -24,7 +24,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="contexts">Makes the gateway's own context.</param>
 /// <param name="database">The database the tables are in.</param>
 /// <param name="options">The host's options.</param>
-internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<NightingaleDbContext> contexts, IStoreDatabase database, NightingaleOptions options) : IStoreSchema
+/// <param name="time">The clock, for the default tenant's dates.</param>
+internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<NightingaleDbContext> contexts, IStoreDatabase database, NightingaleOptions options, TimeProvider time) : IStoreSchema
 {
     /// <summary>The row that says when the store was initialized. Not a setting: nothing is compared with it.</summary>
     public const string CreatedAtRow = "CreatedAt";
@@ -126,6 +127,7 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+        await context.EnsureDefaultTenantAsync(time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
         await context.WriteStorePropertyAsync(StoreLibraryRow, StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
         await context.WriteStorePropertyAsync(StoreSchemaHashRow, await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }

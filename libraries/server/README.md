@@ -88,6 +88,18 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:ReadStreamsFromReadOnlyConnection` | `false` | serve bounded reads of plain streams from the read-only connection too; they are then eventually consistent, and an append made on a read that was behind is refused with a revision conflict |
 | `Nightingale:Deletion:AllowDelete` | `false` | accept `Delete`: a stream's events leave every read and it cannot be appended to again; the rows stay |
 | `Nightingale:Deletion:AllowTombstone` | `false` | accept `Tombstone`: a stream and its events are removed for good and the name is free again; irreversible, so a switch of its own |
+| `Nightingale:Auth:Enabled` | `true` | authenticate every call but the features call from the `authorization` header; off, every caller is the administrator, for a private network or a test |
+| `Nightingale:Auth:AdminPassword` | none | the built-in administrator's password; required while authentication is on and the administrator is not disabled, so that nothing done through the API can lock everyone out |
+| `Nightingale:Auth:AdminDisabled` | `false` | refuse the built-in administrator, once other administrators exist |
+| `Nightingale:Auth:Pepper` | none | a secret mixed into every password before it is hashed, so a copy of the credentials table verifies nothing without it; a key vault's configuration provider supplies it like any setting |
+| `Nightingale:Auth:PepperId` | `1` | the pepper's id, kept with each hash; raise it with a new pepper and hashes are remade on the next login |
+| `Nightingale:Auth:Iterations` | `600000` | key-derivation iterations for a new hash; a hash made with fewer is remade on the next login |
+| `Nightingale:Auth:AllowInsecureTransport` | `false` | accept credentials over a connection that is not TLS, which sends the password as it is; for a private network |
+| `Nightingale:Auth:VerificationCacheDuration` | `00:05:00` | how long a verified name and password are remembered on the instance |
+| `Nightingale:Auth:LockoutThreshold` | `5` | wrong passwords in a row that lock a credential out; 0 for never |
+| `Nightingale:Auth:LockoutDuration` | `00:15:00` | how long a locked-out credential is refused |
+| `Nightingale:Auth:MinimumPasswordLength` | `12` | the shortest password accepted when one is set |
+| `Nightingale:Tenants:RefreshInterval` | `00:00:10` | how often an instance reads the tenants again, which is how a tenant disabled elsewhere is noticed |
 | `Nightingale:Store:Schema` | `dbo` | the schema the event store's tables live in |
 | `Nightingale:Store:Collation` | `Latin1_General_100_BIN2_UTF8` | the collation the database is created with, and the one a database provisioned by hand must have. It must be a UTF-8 collation: any other is refused, because names in another script would collide. The default is binary, so names that differ in case are different names; a case-insensitive UTF-8 collation makes them one |
 | `Nightingale:Store:IgnoreCollationCompatibility` | `false` | work with a collation that is not UTF-8, for a database that already has one or a server older than SQL Server 2019. The host's own choice and consequence: a character of a name outside the collation's code page is stored as a question mark, so two such names can become one. Not recorded with the store; the server logs a warning at every start |

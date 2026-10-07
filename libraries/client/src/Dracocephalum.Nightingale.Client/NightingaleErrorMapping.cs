@@ -44,6 +44,10 @@ public static class NightingaleErrorMapping
             ErrorReason.GroupUpdated => new GroupUpdatedException(stream, GetText(info, "group")),
             ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, GetText(info, "group")),
             ErrorReason.OrdinalsNotEnabled => new OrdinalsNotEnabledException(stream),
+            ErrorReason.AuthenticationFailed => new AuthenticationFailedException(exception.Status.Detail),
+            ErrorReason.AccessDenied => Enum.TryParse<CredentialRole>(GetText(info, "required"), true, out var required) ? new AccessDeniedException(exception.Status.Detail, required) : new AccessDeniedException(exception.Status.Detail),
+            ErrorReason.TenantNotFound => new TenantNotFoundException(Guid.TryParse(GetText(info, "tenant"), out var missing) ? missing : null),
+            ErrorReason.TenantDisabled => new TenantDisabledException(Guid.TryParse(GetText(info, "tenant"), out var disabled) ? disabled : Guid.Empty),
             ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument =>
                 new ArgumentException(exception.Status.Detail),
             _ => exception,
