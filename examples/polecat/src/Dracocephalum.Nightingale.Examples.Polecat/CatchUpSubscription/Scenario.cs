@@ -51,7 +51,7 @@ public static class Scenario
         var orders = "orders-" + suffix;
         var shipments = "shipments-" + suffix;
 
-        await client.AppendToStreamAsync(orders, StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync(orders, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"3. Appended two events to {orders} before anyone subscribed.").ConfigureAwait(false);
 
         await using var streamSubscription = client.SubscribeToStreamAsync(orders, StreamPosition.Start, cancellationToken: cancellationToken);
@@ -67,8 +67,8 @@ public static class Scenario
         await ReadUntil<SubscriptionMessage.CaughtUp>(allMessages, []).ConfigureAwait(false);
         await output.WriteLineAsync($"5. Subscribed to $all from the end: confirmed at position {allConfirmed.Head}; nothing to catch up on.").ConfigureAwait(false);
 
-        await client.AppendToStreamAsync(orders, StreamState.StreamRevision(1), [Event("order_shipped")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync(shipments, StreamState.NoStream, [Event("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync(orders, StreamState.StreamRevision(1), [CreateEvent("order_shipped")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync(shipments, StreamState.NoStream, [CreateEvent("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"6. Appended one event to {orders} and one to {shipments} while both subscriptions were live.").ConfigureAwait(false);
 
         var live = new List<string>();
@@ -111,6 +111,6 @@ public static class Scenario
         throw new InvalidOperationException("The subscription ended before the expected note.");
     }
 
-    private static EventData Event(string type) =>
+    private static EventData CreateEvent(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }

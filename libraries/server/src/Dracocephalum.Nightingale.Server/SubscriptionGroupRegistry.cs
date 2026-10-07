@@ -21,14 +21,14 @@ public sealed class SubscriptionGroupRegistry
     /// <summary>The lease name of a group.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <returns>The name.</returns>
-    public static string LeaseName(Guid groupId) => "group:" + groupId.ToString("N");
+    public static string GetLeaseName(Guid groupId) => "group:" + groupId.ToString("N");
 
     /// <summary>Wakes a group running here, so it looks at its outbox.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <returns>True when a running group was woken; false when none runs here.</returns>
     public bool Wake(Guid groupId)
     {
-        if (Running(groupId) is not { } host)
+        if (FindRunning(groupId) is not { } host)
         {
             return false;
         }
@@ -40,7 +40,7 @@ public sealed class SubscriptionGroupRegistry
     /// <summary>Asks a group running here how it stands.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <returns>What it says, or <see langword="null"/> when none runs here.</returns>
-    public SubscriptionGroupLive? Describe(Guid groupId) => Running(groupId)?.Runtime.Describe();
+    public SubscriptionGroupLive? Describe(Guid groupId) => FindRunning(groupId)?.Runtime.Describe();
 
     /// <summary>Ends the calls of every consumer of a group running here, with the cause: the group was updated.</summary>
     /// <param name="groupId">The group's id.</param>
@@ -49,7 +49,7 @@ public sealed class SubscriptionGroupRegistry
     public bool Stop(Guid groupId, Exception cause)
     {
         ArgumentNullException.ThrowIfNull(cause);
-        if (Running(groupId) is not { } host)
+        if (FindRunning(groupId) is not { } host)
         {
             return false;
         }
@@ -70,7 +70,7 @@ public sealed class SubscriptionGroupRegistry
     /// <returns>The seat, or <see langword="null"/> when the group is full.</returns>
     internal async Task<SubscriptionGroupSeat?> JoinAsync(Guid groupId, int limit, CancellationToken cancellationToken)
     {
-        var name = LeaseName(groupId);
+        var name = GetLeaseName(groupId);
         while (true)
         {
             Task closed;
@@ -139,11 +139,11 @@ public sealed class SubscriptionGroupRegistry
         seat.Entry.Closed.TrySetResult();
     }
 
-    private SubscriptionGroupHost? Running(Guid groupId)
+    private SubscriptionGroupHost? FindRunning(Guid groupId)
     {
         lock (_gate)
         {
-            return _groups.TryGetValue(LeaseName(groupId), out var entry) && !entry.Closing && entry.Ready.Task.IsCompletedSuccessfully
+            return _groups.TryGetValue(GetLeaseName(groupId), out var entry) && !entry.Closing && entry.Ready.Task.IsCompletedSuccessfully
                 ? entry.Ready.Task.Result
                 : null;
         }

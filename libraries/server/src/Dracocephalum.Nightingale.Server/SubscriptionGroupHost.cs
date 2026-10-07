@@ -13,13 +13,13 @@ internal sealed class SubscriptionGroupHost : IAsyncDisposable
     /// <summary>Initializes a new instance of the <see cref="SubscriptionGroupHost"/> class and starts the keeper.</summary>
     /// <param name="definition">The group as read from the store.</param>
     /// <param name="runtime">The running group.</param>
-    /// <param name="keep">The keeper's loop, which runs until stopped and throws when the group can no longer be kept.</param>
-    public SubscriptionGroupHost(SubscriptionGroupDefinition definition, SubscriptionGroupRuntime runtime, Func<SubscriptionGroupRuntime, CancellationToken, Task> keep)
+    /// <param name="keeper">The keeper's loop, which runs until stopped and throws when the group can no longer be kept.</param>
+    public SubscriptionGroupHost(SubscriptionGroupDefinition definition, SubscriptionGroupRuntime runtime, Func<SubscriptionGroupRuntime, CancellationToken, Task> keeper)
     {
-        ArgumentNullException.ThrowIfNull(keep);
+        ArgumentNullException.ThrowIfNull(keeper);
         Definition = definition;
         Runtime = runtime;
-        Keeping = Task.Run(() => KeepAsync(keep));
+        Keeping = Task.Run(() => KeepAsync(keeper));
     }
 
     /// <summary>Gets the group as read from the store when it was started.</summary>
@@ -48,11 +48,11 @@ internal sealed class SubscriptionGroupHost : IAsyncDisposable
         _stopping.Dispose();
     }
 
-    private async Task KeepAsync(Func<SubscriptionGroupRuntime, CancellationToken, Task> keep)
+    private async Task KeepAsync(Func<SubscriptionGroupRuntime, CancellationToken, Task> keeper)
     {
         try
         {
-            await keep(Runtime, _stopping.Token).ConfigureAwait(false);
+            await keeper(Runtime, _stopping.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
         {

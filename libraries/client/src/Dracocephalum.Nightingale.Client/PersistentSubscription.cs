@@ -30,7 +30,7 @@ public sealed class PersistentSubscription : IAsyncEnumerable<PersistentSubscrip
         Stream = stream;
         Group = group;
         _call = call;
-        _pump = Pump(cancellationToken);
+        _pump = PumpAsync(cancellationToken);
     }
 
     /// <summary>Gets the stream the group is over.</summary>
@@ -138,7 +138,7 @@ public sealed class PersistentSubscription : IAsyncEnumerable<PersistentSubscrip
         }
     }
 
-    private async Task Pump(CancellationToken cancellationToken)
+    private async Task PumpAsync(CancellationToken cancellationToken)
     {
         try
         {

@@ -63,9 +63,9 @@ public static class Scenario
         await using var connection = server.Connect();
         var client = connection.Client;
 
-        await client.AppendToStreamAsync("orders-1", StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("shipments-1", StreamState.NoStream, [Event("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [Event("order_placed")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-1", StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("shipments-1", StreamState.NoStream, [CreateEvent("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync("3. Appended to orders-1, shipments-1 and orders-2: four events at positions 1 to 4, three of them orders.").ConfigureAwait(false);
 
         var (ordinals, ordinalHead) = await ReadNumberedAsync(client, Category, expectedLast: 2, cancellationToken).ConfigureAwait(false);
@@ -80,7 +80,7 @@ public static class Scenario
         await output.WriteLineAsync($"6. Subscribed to {Category} by ordinal from the end: confirmed at ordinal {confirmed.Head}.").ConfigureAwait(false);
 
         await client.DeleteStreamAsync("orders-1", StreamState.Any, cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("orders-3", StreamState.NoStream, [Event("order_placed")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-3", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync("7. Deleted orders-1, whose two events held ordinals 0 and 1, then appended to orders-3.").ConfigureAwait(false);
 
         long? live = null;
@@ -140,7 +140,7 @@ public static class Scenario
             groupCheckpoint);
     }
 
-    private static EventData Event(string type) =>
+    private static EventData CreateEvent(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>

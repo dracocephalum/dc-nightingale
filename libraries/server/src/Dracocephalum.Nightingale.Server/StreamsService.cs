@@ -36,7 +36,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         ArgumentNullException.ThrowIfNull(responseStream);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = ValidStreamName(request.Stream);
+        var stream = RequireValidStreamName(request.Stream);
         var all = stream == StreamNames.All;
         var isVirtual = StreamNames.TryParseVirtual(stream, out var virtualStream);
         if (request.Filter is not null)
@@ -125,8 +125,8 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         }
 
         var appendOptions = requestStream.Current.Options;
-        var stream = PlainStreamName(appendOptions.Stream);
-        var expected = Expected(appendOptions.ExpectedRevision);
+        var stream = RequirePlainStreamName(appendOptions.Stream);
+        var expected = ToStreamState(appendOptions.ExpectedRevision);
 
         var events = new List<EventData>();
         while (await requestStream.MoveNext(context.CancellationToken).ConfigureAwait(false))
@@ -203,13 +203,13 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = PlainStreamName(request.Stream);
+        var stream = RequirePlainStreamName(request.Stream);
         if (!options.Deletion.AllowDelete)
         {
             throw NightingaleErrors.DeletionDisabled(stream, "Delete");
         }
 
-        await Deleting(stream, () => store.DeleteAsync(stream, Expected(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
+        await RunDeletionAsync(stream, () => store.DeleteAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
         return new DeleteResponse();
     }
 
@@ -219,17 +219,17 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = PlainStreamName(request.Stream);
+        var stream = RequirePlainStreamName(request.Stream);
         if (!options.Deletion.AllowTombstone)
         {
             throw NightingaleErrors.DeletionDisabled(stream, "Tombstone");
         }
 
-        await Deleting(stream, () => store.TombstoneAsync(stream, Expected(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
+        await RunDeletionAsync(stream, () => store.TombstoneAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
         return new TombstoneResponse();
     }
 
-    private static StreamState Expected(long expectedRevision)
+    private static StreamState ToStreamState(long expectedRevision)
     {
         try
         {
@@ -241,7 +241,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         }
     }
 
-    private static async Task Deleting(string stream, Func<Task> operation)
+    private static async Task RunDeletionAsync(string stream, Func<Task> operation)
     {
         try
         {
@@ -265,9 +265,9 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     /// Validates a name where a plain stream is required. Reserved names are valid in the contract but
     /// not appended to.
     /// </summary>
-    private static string PlainStreamName(string stream)
+    private static string RequirePlainStreamName(string stream)
     {
-        var name = ValidStreamName(stream);
+        var name = RequireValidStreamName(stream);
         if (StreamNames.IsReserved(name))
         {
             throw NightingaleErrors.InvalidStreamName(name, "reserved; only plain streams are appended to");
@@ -280,7 +280,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     /// Validates a name for a read: a plain stream, <c>$all</c>, or a virtual stream with a key. Any
     /// other reserved name is invalid.
     /// </summary>
-    private static string ValidStreamName(string stream)
+    private static string RequireValidStreamName(string stream)
     {
         if (string.IsNullOrEmpty(stream))
         {
@@ -644,7 +644,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 return;
             }
 
-            from = direction == Direction.Forwards ? OrdinalOf(page[^1]) + 1 : OrdinalOf(page[^1]) - 1;
+            from = direction == Direction.Forwards ? GetOrdinal(page[^1]) + 1 : GetOrdinal(page[^1]) - 1;
         }
     }
 
@@ -689,7 +689,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                     // Ordinals are dense, so the distance to the highest assigned one is the count,
                     // holes included.
                     var head = (await store.OrdinalHeadAsync(stream, cancellationToken).ConfigureAwait(false))?.Last ?? own;
-                    if (head > OrdinalOf(page[^1]))
+                    if (head > GetOrdinal(page[^1]))
                     {
                         behind = true;
                         await responseStream.WriteAsync(FellBehindAt(head, head - next + 1, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
@@ -699,7 +699,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
                 foreach (var record in page)
                 {
                     await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
-                    own = OrdinalOf(record);
+                    own = GetOrdinal(record);
                     delivered = true;
                 }
 
@@ -723,7 +723,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         }
     }
 
-    private static long OrdinalOf(EventRecord record) =>
+    private static long GetOrdinal(EventRecord record) =>
         record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.");
 
     /// <summary>One page of a plain stream; a bounded read accepts a view that may lag, a subscription does not.</summary>

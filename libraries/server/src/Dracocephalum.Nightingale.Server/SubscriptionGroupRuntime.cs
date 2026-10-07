@@ -265,7 +265,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                 }
 
                 ReleaseRoom(flight);
-                MarkDone(Key(flight.Record));
+                MarkDone(GetKey(flight.Record));
                 if (flight.FromOutbox)
                 {
                     toDequeue.Add(flight.Record.Position);
@@ -304,7 +304,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                 switch (action)
                 {
                     case NackAction.Skip:
-                        MarkDone(Key(flight.Record));
+                        MarkDone(GetKey(flight.Record));
                         if (flight.FromOutbox)
                         {
                             toDequeue.Add(flight.Record.Position);
@@ -312,7 +312,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
 
                         break;
                     case NackAction.Park:
-                        MarkDone(Key(flight.Record));
+                        MarkDone(GetKey(flight.Record));
                         toPark.Add(flight);
                         break;
                     default:
@@ -398,7 +398,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         return (int)(hash & 0x7FFFFFFF);
     }
 
-    private long Key(EventRecord record) =>
+    private long GetKey(EventRecord record) =>
         _byOrdinal ? record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.")
         : _byPosition ? record.Position
         : record.Revision;
@@ -441,7 +441,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     {
         if (flight.Attempts >= _definition.Settings.MaxRetryCount)
         {
-            MarkDone(Key(flight.Record));
+            MarkDone(GetKey(flight.Record));
             toPark.Add(flight);
             return;
         }
@@ -778,7 +778,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         lock (_gate)
         {
             _inFlight[timed.Record.Id] = timed;
-            _delivered.TryAdd(Key(timed.Record), false);
+            _delivered.TryAdd(GetKey(timed.Record), false);
         }
 
         // A consumer that left between being chosen and being written to has its channel

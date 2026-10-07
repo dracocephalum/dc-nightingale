@@ -77,7 +77,7 @@ internal sealed class JsonEvent : Event<JsonElement>, IEvent
     /// <summary>Rebuilds the metadata object of a stored event from its headers and its two columns.</summary>
     /// <param name="stored">The event as the store returned it.</param>
     /// <returns>The metadata; empty when the event carries none.</returns>
-    public static JsonObject MetadataOf(IEvent stored)
+    public static JsonObject GetMetadata(IEvent stored)
     {
         var metadata = stored.Headers is { Count: > 0 } headers
             ? JsonSerializer.SerializeToNode(headers, NightingaleJson.Default) as JsonObject ?? []

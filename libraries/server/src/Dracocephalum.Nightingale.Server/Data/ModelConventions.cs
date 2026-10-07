@@ -84,7 +84,7 @@ public static class ModelConventions
                 }
 
                 var key = entity.FindPrimaryKey();
-                if (key is null || key.Properties.Count != 1 || key.Properties[0].Name != "Id" || StoreType(key.Properties[0]) != typeof(Guid))
+                if (key is null || key.Properties.Count != 1 || key.Properties[0].Name != "Id" || GetStoreType(key.Properties[0]) != typeof(Guid))
                 {
                     violations.Add($"{name}: primary key must be a single Guid column named Id");
                 }
@@ -107,7 +107,7 @@ public static class ModelConventions
             foreach (var property in entity.GetProperties())
             {
                 var clr = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
-                if (clr.IsEnum && (StoreType(property) != typeof(string) || property.GetMaxLength() is null))
+                if (clr.IsEnum && (GetStoreType(property) != typeof(string) || property.GetMaxLength() is null))
                 {
                     violations.Add($"{name}.{property.Name}: enum must be a bounded string - .HasConversion<string>().HasMaxLength(64)");
                 }
@@ -148,5 +148,5 @@ public static class ModelConventions
         || candidate == name + "es"
         || (name.EndsWith('y') && candidate == name[..^1] + "ies");
 
-    private static Type StoreType(IProperty property) => property.GetTypeMapping().Converter?.ProviderClrType ?? property.ClrType;
+    private static Type GetStoreType(IProperty property) => property.GetTypeMapping().Converter?.ProviderClrType ?? property.ClrType;
 }

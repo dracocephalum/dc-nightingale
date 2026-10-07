@@ -317,7 +317,7 @@ public sealed class SubscriptionGroupStoreTests
         await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
         await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
         await sut.ReplayAsync(Billing, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(Billing), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // Act
         var held = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
@@ -344,7 +344,7 @@ public sealed class SubscriptionGroupStoreTests
         var sut = Store();
         var live = new SubscriptionGroupLive(Now.AddMinutes(-5), 4, 1, 10, 41, Now.AddSeconds(-20), "ipv4:10.0.0.7:51234", Now, 2, [new SubscriptionConsumerLive(Now.AddMinutes(-5), "ipv4:10.0.0.7:51234", 5, 3), new SubscriptionConsumerLive(Now.AddMinutes(-4), "ipv4:10.0.0.8:51234", 5, 1)]);
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
-        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // Act
         await sut.SaveLiveAsync(Billing, live, TestContext.Current.CancellationToken);
@@ -352,7 +352,7 @@ public sealed class SubscriptionGroupStoreTests
         var listed = await sut.ListAsync("orders-1", TestContext.Current.CancellationToken);
         _time.Advance(TimeSpan.FromSeconds(31));
         var lapsed = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
-        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await sut.SaveLiveAsync(Billing, null, TestContext.Current.CancellationToken);
         var cleared = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
         await sut.SaveLiveAsync(Guid.NewGuid(), live, TestContext.Current.CancellationToken);
@@ -378,7 +378,7 @@ public sealed class SubscriptionGroupStoreTests
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
         await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
         await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(shipping), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(shipping), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await sut.AcquireLeaseAsync("ordinals", "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // Act

@@ -11,7 +11,7 @@ internal static class ContiguousPrefix
     /// <param name="mark">The position every event up to which is known to be committed.</param>
     /// <param name="following">The positions visible after the mark, ascending.</param>
     /// <returns>The mark when the next position is missing; otherwise the last position before the first gap.</returns>
-    public static long After(long mark, IReadOnlyList<long> following)
+    public static long Extend(long mark, IReadOnlyList<long> following)
     {
         ArgumentNullException.ThrowIfNull(following);
         var reached = mark;

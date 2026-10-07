@@ -139,6 +139,18 @@ Metrics and spans:
   collide with a property `Value`, a field is already marked, and the compiler
   catches the rest. `stylecop.ruleset` has both rules off on purpose and says
   what turning either on would cost.
+- **A method name opens with a verb, or with `To`, `From`, `Is`, `Has`,
+  `Can` or `Try`; never with the noun it returns.** `GetLeaseName(id)`,
+  `ToInfo(summary)`, `ParseIds(text)`, `RequireGroupName(name)`, not
+  `LeaseName(id)`, `Info(summary)`, `Ids(text)`, `GroupName(name)`, and not
+  the suffix forms `OrdinalOf`, `OptionsFor`, `OwnerAt` either. A
+  delegate-typed parameter, field or property is a role noun: `callback`,
+  `factory`, `keySelector`, `keeper`. That split is what keeps `Foo(x)`
+  readable: a verb is a method being called, a noun is a stored delegate
+  being invoked. No analyzer checks it; review does. Two shapes are allowed
+  as they are: factories of results or errors under a class that supplies
+  the verb (`Results.NotFound()`, `Errors.GroupNotFound(stream, group)`), and
+  test-data builders in test projects (`Record(stream, 3)`, `Event("paid")`).
 
 ## One type per file, and the feature file
 

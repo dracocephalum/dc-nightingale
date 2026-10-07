@@ -23,7 +23,7 @@ public sealed class ReadOnlyConnectionTests
     public void Resolve_WhenNoNameIsConfigured_ShouldSetTheIntentOnTheMainString()
     {
         // Act
-        var resolved = ReadOnlyConnection.Resolve(Main, new NightingaleOptions(), named: null);
+        var resolved = ReadOnlyConnection.Resolve(Main, new NightingaleOptions(), namedConnectionStrings: null);
 
         // Assert: the same server and database, asked for with a read-only intent.
         var builder = new SqlConnectionStringBuilder(resolved);
@@ -36,7 +36,7 @@ public sealed class ReadOnlyConnectionTests
     public void Resolve_WhenTheMainStringStatesAnIntent_ShouldReplaceIt()
     {
         // Act
-        var resolved = ReadOnlyConnection.Resolve(Main + ";ApplicationIntent=ReadWrite", new NightingaleOptions(), named: null);
+        var resolved = ReadOnlyConnection.Resolve(Main + ";ApplicationIntent=ReadWrite", new NightingaleOptions(), namedConnectionStrings: null);
 
         // Assert
         new SqlConnectionStringBuilder(resolved).ApplicationIntent.ShouldBe(ApplicationIntent.ReadOnly);

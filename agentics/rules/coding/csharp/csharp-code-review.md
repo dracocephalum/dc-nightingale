@@ -58,6 +58,7 @@ banned-API list. The authority for each item is
 | Comment that contradicts the code beside it | Comments | `issue` — a stale claim misleads with authority |
 | Public type or member without a `<summary>`, or one that only restates the name | Comments | `issue` |
 | Comment narrating what the code plainly does | Comments | `nitpick` — improve the name instead |
+| Method named for the noun it returns (`LeaseName(id)`, `OptionsFor(x)`), or a delegate-typed member named as a verb; not a result/error factory under a class that supplies the verb | Naming | `suggestion` |
 | Commented-out code, change history, author tag, or task narration ("added per request") | Comments | `issue` |
 
 Tests:

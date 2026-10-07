@@ -322,7 +322,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(running);
         A.CallTo(() => _groups.GetAsync("orders-2", "billing", A<CancellationToken>._)).Returns(gone);
         A.CallTo(() => _groups.GetAsync("orders-3", "billing", A<CancellationToken>._)).Returns((SubscriptionGroupDefinition?)null);
-        A.CallTo(() => _groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(running.Id), A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
+        A.CallTo(() => _groups.LeaseHolderAsync(SubscriptionGroupRegistry.GetLeaseName(running.Id), A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
         A.CallTo(() => _groups.UpdateSettingsAsync(gone.Id, A<GroupSettings>._, A<CancellationToken>._)).Returns(false);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         var change = new Protocol.V1.GroupSettings { MaxRetryCount = 7 };
@@ -349,7 +349,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var definition = new SubscriptionGroupDefinition("orders-1", "billing", settings, -1);
         var me = _app!.Services.GetRequiredService<SubscriptionGroupRegistry>().InstanceId;
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
-        A.CallTo(() => _groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), A<CancellationToken>._)).Returns(new LeaseHolder(me, new Uri("http://localhost")));
+        A.CallTo(() => _groups.LeaseHolderAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), A<CancellationToken>._)).Returns(new LeaseHolder(me, new Uri("http://localhost")));
         A.CallTo(() => _groups.UpdateSettingsAsync(definition.Id, A<GroupSettings>._, A<CancellationToken>._)).Returns(true);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, A<long?>._, A<int>._, A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<StreamSlice?>(new StreamSlice(new StreamHead(0, 1), call.GetArgument<long?>(2) == 0 ? [Record("orders-1", 0, 10), Record("orders-1", 1, 11)] : [])));
@@ -424,8 +424,8 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         handedOver[0].Event.RetryCount.ShouldBe(0, "a consumer leaving is not the event's fault");
 
         // One lease for the two, taken when the first arrived and given back when the last left.
-        A.CallTo(() => _groups.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), me, A<Uri?>._, PersistentSubscriptionsService.LeaseDuration, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
-        await Until(() => A.CallTo(() => _groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), me, A<CancellationToken>._)).MustHaveHappenedOnceExactly());
+        A.CallTo(() => _groups.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<Uri?>._, PersistentSubscriptionsService.LeaseDuration, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        await Until(() => A.CallTo(() => _groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<CancellationToken>._)).MustHaveHappenedOnceExactly());
         A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 

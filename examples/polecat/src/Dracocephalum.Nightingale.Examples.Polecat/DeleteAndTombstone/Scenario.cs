@@ -57,8 +57,8 @@ public static class Scenario
         var client = connection.Client;
         const string stream = "orders-1";
 
-        await client.AppendToStreamAsync(stream, StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [Event("order_placed")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync(stream, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         var before = await CountAsync(client, "$ce-orders", cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"3. Appended two events to {stream} and one to orders-2; $ce-orders holds {before}.").ConfigureAwait(false);
 
@@ -78,11 +78,11 @@ public static class Scenario
         string readAfterDelete;
         await using (var read = client.ReadStreamAsync(Direction.Forwards, stream, StreamPosition.Start, cancellationToken: cancellationToken))
         {
-            readAfterDelete = await Failure(async () => await read.ReadState.ConfigureAwait(false)).ConfigureAwait(false);
+            readAfterDelete = await CaptureFailureAsync(async () => await read.ReadState.ConfigureAwait(false)).ConfigureAwait(false);
         }
 
         var after = await CountAsync(client, "$ce-orders", cancellationToken).ConfigureAwait(false);
-        var appendAfterDelete = await Failure(() => client.AppendToStreamAsync(stream, StreamState.Any, [Event("order_shipped")], cancellationToken)).ConfigureAwait(false);
+        var appendAfterDelete = await CaptureFailureAsync(() => client.AppendToStreamAsync(stream, StreamState.Any, [CreateEvent("order_shipped")], cancellationToken)).ConfigureAwait(false);
         await output.WriteLineAsync($"5. Deleted {stream}: a read fails with {readAfterDelete}, $ce-orders holds {after}, an append fails with {appendAfterDelete}.").ConfigureAwait(false);
 
         await client.TombstoneStreamAsync(stream, StreamState.Any, cancellationToken).ConfigureAwait(false);
@@ -94,13 +94,13 @@ public static class Scenario
 
         await output.WriteLineAsync($"6. Tombstoned {stream}: a read now reports {afterTombstone}, as for a stream that never existed.").ConfigureAwait(false);
 
-        var revived = await client.AppendToStreamAsync(stream, StreamState.NoStream, [Event("order_placed")], cancellationToken).ConfigureAwait(false);
+        var revived = await client.AppendToStreamAsync(stream, StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"7. Appended to {stream} again as a new stream; revision {revived.Revision}.").ConfigureAwait(false);
 
         await using var defaultServer = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
         await using var defaultConnection = defaultServer.Connect();
         var defaultClient = defaultConnection.Client;
-        var refusal = await Failure(() => defaultClient.DeleteStreamAsync(stream, StreamState.Any, cancellationToken)).ConfigureAwait(false);
+        var refusal = await CaptureFailureAsync(() => defaultClient.DeleteStreamAsync(stream, StreamState.Any, cancellationToken)).ConfigureAwait(false);
         await output.WriteLineAsync($"8. A second server with the default settings refused to delete {stream}: {refusal}.").ConfigureAwait(false);
         await output.WriteLineAsync("9. Dropping the database.").ConfigureAwait(false);
 
@@ -120,7 +120,7 @@ public static class Scenario
     }
 
     /// <summary>Runs a call that is expected to fail and names the exception it failed with.</summary>
-    private static async Task<string> Failure(Func<Task> call)
+    private static async Task<string> CaptureFailureAsync(Func<Task> call)
     {
         try
         {
@@ -134,6 +134,6 @@ public static class Scenario
         throw new InvalidOperationException("The call was expected to fail and did not.");
     }
 
-    private static EventData Event(string type) =>
+    private static EventData CreateEvent(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }
