@@ -14,7 +14,7 @@ public sealed class ContiguousPrefixTests
     {
         // Act: a missing position is a transaction still in flight, or one that never committed;
         // either way nothing above it is safe to read yet.
-        var reached = ContiguousPrefix.After(mark, following);
+        var reached = ContiguousPrefix.Extend(mark, following);
 
         // Assert
         reached.ShouldBe(expected);

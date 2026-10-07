@@ -25,7 +25,7 @@ public sealed class ReadStreamResult : IAsyncEnumerable<EventRecord>, IAsyncDisp
     {
         Stream = stream;
         _call = call;
-        _pump = Pump(cancellationToken);
+        _pump = PumpAsync(cancellationToken);
     }
 
     /// <summary>Gets the stream name.</summary>
@@ -66,7 +66,7 @@ public sealed class ReadStreamResult : IAsyncEnumerable<EventRecord>, IAsyncDisp
         }
     }
 
-    private async Task Pump(CancellationToken cancellationToken)
+    private async Task PumpAsync(CancellationToken cancellationToken)
     {
         try
         {

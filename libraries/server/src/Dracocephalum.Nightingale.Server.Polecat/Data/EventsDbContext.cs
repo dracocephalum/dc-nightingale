@@ -49,10 +49,10 @@ internal class EventsDbContext : DbContext, ISchemaScoped
     public string Schema { get; }
 
     /// <inheritdoc/>
-    public override int SaveChanges(bool acceptAllChangesOnSuccess) => throw ReadOnly();
+    public override int SaveChanges(bool acceptAllChangesOnSuccess) => throw CreateReadOnlyException();
 
     /// <inheritdoc/>
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) => throw ReadOnly();
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) => throw CreateReadOnlyException();
 
     /// <inheritdoc/>
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
@@ -95,6 +95,6 @@ internal class EventsDbContext : DbContext, ISchemaScoped
         });
     }
 
-    private static InvalidOperationException ReadOnly() =>
+    private static InvalidOperationException CreateReadOnlyException() =>
         new("The mirror of the store's events table only reads: the store appends events and the sequencer numbers them.");
 }

@@ -45,9 +45,9 @@ public static class Scenario
         await using var connection = server.Connect();
         var client = connection.Client;
 
-        await client.AppendToStreamAsync("orders-1", StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("shipments-1", StreamState.NoStream, [Event("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [Event("order_placed")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-1", StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("shipments-1", StreamState.NoStream, [CreateEvent("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync("3. Appended to orders-1, shipments-1 and orders-2: four events, two categories, three types.").ConfigureAwait(false);
 
         var category = new List<string>();
@@ -79,8 +79,8 @@ public static class Scenario
         var confirmed = await subscription.Confirmed.ConfigureAwait(false);
         await output.WriteLineAsync($"6. Subscribed to $ce-orders from the end: confirmed at the category's head, position {confirmed.Head}.").ConfigureAwait(false);
 
-        await client.AppendToStreamAsync("shipments-1", StreamState.StreamRevision(0), [Event("shipment_delivered")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("orders-3", StreamState.NoStream, [Event("order_placed")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("shipments-1", StreamState.StreamRevision(0), [CreateEvent("shipment_delivered")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-3", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync("7. Appended to shipments-1, which the subscription must not see, then to orders-3, which it must.").ConfigureAwait(false);
 
         var live = new List<string>();
@@ -109,6 +109,6 @@ public static class Scenario
             live);
     }
 
-    private static EventData Event(string type) =>
+    private static EventData CreateEvent(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }

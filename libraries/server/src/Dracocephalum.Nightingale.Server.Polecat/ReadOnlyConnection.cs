@@ -14,11 +14,11 @@ internal static class ReadOnlyConnection
     /// <summary>Resolves the read-only connection string.</summary>
     /// <param name="connectionString">The main connection string.</param>
     /// <param name="options">The options.</param>
-    /// <param name="named">Looks a connection string up by name; <see langword="null"/> when the host gave none to look in.</param>
+    /// <param name="namedConnectionStrings">Looks a connection string up by name; <see langword="null"/> when the host gave none to look in.</param>
     /// <param name="explicitConnectionString">A read-only connection string the host passed directly, which wins over the name.</param>
     /// <returns>The connection string, or <see langword="null"/> when the read-only connection is off.</returns>
     /// <exception cref="InvalidOperationException">A name is configured and no connection string goes by it.</exception>
-    public static string? Resolve(string connectionString, NightingaleOptions options, Func<string, string?>? named, string? explicitConnectionString = null)
+    public static string? Resolve(string connectionString, NightingaleOptions options, Func<string, string?>? namedConnectionStrings, string? explicitConnectionString = null)
     {
         if (!options.UseReadOnlyConnection)
         {
@@ -32,7 +32,7 @@ internal static class ReadOnlyConnection
 
         if (!string.IsNullOrWhiteSpace(options.ReadOnlyConnectionStringName))
         {
-            var found = named?.Invoke(options.ReadOnlyConnectionStringName);
+            var found = namedConnectionStrings?.Invoke(options.ReadOnlyConnectionStringName);
             return string.IsNullOrWhiteSpace(found)
                 ? throw new InvalidOperationException($"No connection string named '{options.ReadOnlyConnectionStringName}' is configured under ConnectionStrings; {NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.ReadOnlyConnectionStringName)} names it.")
                 : found;

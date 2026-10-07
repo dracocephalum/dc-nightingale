@@ -35,7 +35,7 @@ internal static class ClientChannels
 
         // Every instance serves every call, so the instances are used in rotation and one that is
         // down is passed over; a group that runs elsewhere is the server's to point at.
-        var options = OptionsFor(settings, settings.Tls);
+        var options = BuildChannelOptions(settings, settings.Tls);
         options.Credentials = settings.Tls ? ChannelCredentials.SecureSsl : ChannelCredentials.Insecure;
         options.ServiceConfig = new ServiceConfig { LoadBalancingConfigs = { new RoundRobinConfig() } };
         if (settings.Discover)
@@ -53,9 +53,9 @@ internal static class ClientChannels
     /// <param name="address">The instance's address.</param>
     /// <returns>The channel, which owns its handler.</returns>
     public static GrpcChannel OpenTo(NightingaleClientSettings settings, Uri address) =>
-        GrpcChannel.ForAddress(address, OptionsFor(settings, address.Scheme == Uri.UriSchemeHttps));
+        GrpcChannel.ForAddress(address, BuildChannelOptions(settings, address.Scheme == Uri.UriSchemeHttps));
 
-    private static GrpcChannelOptions OptionsFor(NightingaleClientSettings settings, bool encrypted)
+    private static GrpcChannelOptions BuildChannelOptions(NightingaleClientSettings settings, bool encrypted)
     {
         // Many subscriptions share a client, and one HTTP/2 connection carries a limited number of
         // streams at once, so the handler opens another connection when one is full.

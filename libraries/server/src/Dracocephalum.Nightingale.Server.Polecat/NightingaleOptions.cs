@@ -157,13 +157,13 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
                     "Nightingale:Store:AssignOrdinals cannot be combined with Nightingale:Store:Partitioning Tenant yet: the sequencer follows one high-water mark, and a sequence per tenant has one per tenant.");
             }
 
-            if (Collation is not null && !CollationName().IsMatch(Collation))
+            if (Collation is not null && !CollationNameRegex().IsMatch(Collation))
             {
                 throw new InvalidOperationException(
                     $"Nightingale:Store:Collation '{Collation}' is not a collation name; a name has letters, digits and underscores only.");
             }
 
-            if (Schema is null || !SchemaName().IsMatch(Schema))
+            if (Schema is null || !SchemaNameRegex().IsMatch(Schema))
             {
                 throw new InvalidOperationException(
                     $"Nightingale:Store:Schema '{Schema}' is not a schema name; a name starts with a letter or underscore and has letters, digits and underscores only.");
@@ -171,9 +171,9 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
         }
 
         [GeneratedRegex("^[A-Za-z0-9_]{1,128}$")]
-        private static partial Regex CollationName();
+        private static partial Regex CollationNameRegex();
 
         [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-        private static partial Regex SchemaName();
+        private static partial Regex SchemaNameRegex();
     }
 }

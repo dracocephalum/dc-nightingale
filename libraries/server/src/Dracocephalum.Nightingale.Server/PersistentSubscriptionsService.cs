@@ -40,8 +40,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = ReadableStreamName(request.Stream);
-        var group = GroupName(request.Group);
+        var stream = RequireReadableStreamName(request.Stream);
+        var group = RequireGroupName(request.Group);
         GroupSettings settings;
         try
         {
@@ -94,7 +94,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         // A running group has its settings in memory and a consumer delivered to under them, so
         // the change is made where it runs: refused with the owner's address, and the client
         // repeats it there, where the consumer's call can be ended.
-        var holder = await groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
+        var holder = await groups.LeaseHolderAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
         if (holder is not null && !string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal))
         {
             throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, holder);
@@ -158,8 +158,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = ReadableStreamName(request.Stream);
-        var group = GroupName(request.Group);
+        var stream = RequireReadableStreamName(request.Stream);
+        var group = RequireGroupName(request.Group);
         if (!await groups.DeleteAsync(stream, group, context.CancellationToken).ConfigureAwait(false))
         {
             throw NightingaleErrors.GroupNotFound(stream, group);
@@ -174,8 +174,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = ReadableStreamName(request.Stream);
-        var group = GroupName(request.Group);
+        var stream = RequireReadableStreamName(request.Stream);
+        var group = RequireGroupName(request.Group);
         var summary = await groups.DescribeAsync(stream, group, context.CancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
         var definition = summary.Definition;
@@ -190,7 +190,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, elsewhere);
         }
 
-        var info = Info(summary);
+        var info = ToInfo(summary);
         if (await LastKnownAsync(definition, context.CancellationToken).ConfigureAwait(false) is { } last)
         {
             info.LastKnownPosition = last;
@@ -200,7 +200,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         // send the client, what it last wrote to its row is the answer, already in the info.
         if (here && registry.Describe(definition.Id) is { } live)
         {
-            info.Live = Live(live, fromOwner: true);
+            info.Live = ToLiveInfo(live, fromOwner: true);
         }
 
         return new GetInfoResponse { Info = info };
@@ -212,18 +212,18 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = request.Stream.Length == 0 ? null : ReadableStreamName(request.Stream);
+        var stream = request.Stream.Length == 0 ? null : RequireReadableStreamName(request.Stream);
         var response = new ListResponse();
         foreach (var summary in await groups.ListAsync(stream, context.CancellationToken).ConfigureAwait(false))
         {
             // A group this instance runs is asked directly, which costs nothing and is as of
             // now; the others are as their rows have them.
-            var info = Info(summary);
+            var info = ToInfo(summary);
             if (summary.Holder is { } holder
                 && string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal)
                 && registry.Describe(summary.Definition.Id) is { } live)
             {
-                info.Live = Live(live, fromOwner: true);
+                info.Live = ToLiveInfo(live, fromOwner: true);
             }
 
             response.Groups.Add(info);
@@ -238,8 +238,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
 
-        var stream = ReadableStreamName(request.Stream);
-        var group = GroupName(request.Group);
+        var stream = RequireReadableStreamName(request.Stream);
+        var group = RequireGroupName(request.Group);
         var definition = await groups.GetAsync(stream, group, context.CancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
 
@@ -253,13 +253,13 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         // A running group's consumer is woken by the instance that runs it, so a replay goes
         // there: refused with the owner's address, and the client repeats it there. With no
         // consumer anywhere, the move is done here and delivered at the next connection.
-        var holder = await groups.LeaseHolderAsync(SubscriptionGroupRegistry.LeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
+        var holder = await groups.LeaseHolderAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), context.CancellationToken).ConfigureAwait(false);
         if (holder is not null && !string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal))
         {
             throw NightingaleErrors.GroupOwnedElsewhere(stream, group, holder);
         }
 
-        var by = NumberOf(definition);
+        var by = GetNumberKind(definition);
         long? position = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Position ? request.Position : null;
         var replayed = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Before
             ? await groups.ReplayBeforeAsync(definition.Id, request.Before, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false)
@@ -282,13 +282,13 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(context);
 
         var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
-        var by = NumberOf(definition);
+        var by = GetNumberKind(definition);
         var response = new ListParkedResponse();
-        foreach (var message in await groups.ListParkedAsync(definition.Id, by, request.HasAfter ? request.After : null, Limit(request.Limit), context.CancellationToken).ConfigureAwait(false))
+        foreach (var message in await groups.ListParkedAsync(definition.Id, by, request.HasAfter ? request.After : null, ClampLimit(request.Limit), context.CancellationToken).ConfigureAwait(false))
         {
             response.Messages.Add(new ParkedMessage
             {
-                Number = Number(by, message.Position, message.Revision, message.Ordinal),
+                Number = PickNumber(by, message.Position, message.Revision, message.Ordinal),
                 EventId = message.EventId.ToString("D"),
                 Reason = message.Reason,
                 RetryCount = message.Attempts,
@@ -308,13 +308,13 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(context);
 
         var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
-        var by = NumberOf(definition);
+        var by = GetNumberKind(definition);
         var response = new ListOutboxResponse();
-        foreach (var message in await groups.ListOutboxAsync(definition.Id, by, request.HasAfter ? request.After : null, Limit(request.Limit), context.CancellationToken).ConfigureAwait(false))
+        foreach (var message in await groups.ListOutboxAsync(definition.Id, by, request.HasAfter ? request.After : null, ClampLimit(request.Limit), context.CancellationToken).ConfigureAwait(false))
         {
             response.Messages.Add(new OutboxMessage
             {
-                Number = Number(by, message.Position, message.Revision, message.Ordinal),
+                Number = PickNumber(by, message.Position, message.Revision, message.Ordinal),
                 EventId = message.EventId.ToString("D"),
                 Reason = message.Reason,
                 RetryCount = message.Attempts,
@@ -338,7 +338,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         long? position = request.WhichCase == SkipParkedRequest.WhichOneofCase.Position ? request.Position : null;
         long? before = request.WhichCase == SkipParkedRequest.WhichOneofCase.Before ? request.Before : null;
-        var skipped = await groups.SkipAsync(definition.Id, position, before, NumberOf(definition), context.CancellationToken).ConfigureAwait(false);
+        var skipped = await groups.SkipAsync(definition.Id, position, before, GetNumberKind(definition), context.CancellationToken).ConfigureAwait(false);
         if (position is { } wanted && skipped == 0)
         {
             throw NightingaleErrors.ParkedMessageNotFound(definition.Stream, definition.Group, wanted);
@@ -362,8 +362,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         }
 
         var options = requestStream.Current.Options;
-        var stream = ReadableStreamName(options.Stream);
-        var group = GroupName(options.Group);
+        var stream = RequireReadableStreamName(options.Stream);
+        var group = RequireGroupName(options.Group);
         var buffer = options.BufferSize > 0 ? options.BufferSize : 10;
         var definition = await groups.GetAsync(stream, group, cancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
@@ -427,7 +427,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         // Refused with the owner's address: the client goes there itself, the way the reference
         // client follows a not-leader answer.
-        var lease = SubscriptionGroupRegistry.LeaseName(definition.Id);
+        var lease = SubscriptionGroupRegistry.GetLeaseName(definition.Id);
         var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
         if (owner is not null)
         {
@@ -450,7 +450,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             // Cleared before the lease goes, so the row never says a consumer is connected under
             // no lease; an instance that dies first leaves it, and readers go by the lease.
             await groups.SaveLiveAsync(host.Definition.Id, null, CancellationToken.None).ConfigureAwait(false);
-            await groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.LeaseName(host.Definition.Id), registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
+            await groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(host.Definition.Id), registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -459,19 +459,19 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     /// stream, a position over <c>$all</c> or a virtual stream, an ordinal for a group created
     /// under ordinal numbering.
     /// </summary>
-    private static SubscriptionParkedNumber NumberOf(SubscriptionGroupDefinition definition) =>
+    private static SubscriptionParkedNumber GetNumberKind(SubscriptionGroupDefinition definition) =>
         definition.Settings.Numbering == Numbering.Ordinal ? SubscriptionParkedNumber.Ordinal
         : StreamNames.IsReserved(definition.Stream) ? SubscriptionParkedNumber.Position
         : SubscriptionParkedNumber.Revision;
 
-    private static long Number(SubscriptionParkedNumber by, long position, long revision, long? ordinal) => by switch
+    private static long PickNumber(SubscriptionParkedNumber by, long position, long revision, long? ordinal) => by switch
     {
         SubscriptionParkedNumber.Revision => revision,
         SubscriptionParkedNumber.Ordinal => ordinal ?? -1,
         _ => position,
     };
 
-    private static int Limit(int asked) => asked switch
+    private static int ClampLimit(int asked) => asked switch
     {
         <= 0 => DefaultPageSize,
         > MaxPageSize => throw NightingaleErrors.InvalidArgument($"A page holds at most {MaxPageSize} messages."),
@@ -481,14 +481,14 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     /// <summary>The group two names find, known from here on by the names in its own row.</summary>
     private async Task<SubscriptionGroupDefinition> GroupAsync(string streamName, string groupName, CancellationToken cancellationToken)
     {
-        var stream = ReadableStreamName(streamName);
-        var group = GroupName(groupName);
+        var stream = RequireReadableStreamName(streamName);
+        var group = RequireGroupName(groupName);
         return await groups.GetAsync(stream, group, cancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
     }
 
     /// <summary>What the store holds about a group, in its wire form.</summary>
-    private static GroupInfo Info(SubscriptionGroupSummary summary)
+    private static GroupInfo ToInfo(SubscriptionGroupSummary summary)
     {
         var definition = summary.Definition;
         var info = new GroupInfo
@@ -501,7 +501,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             OutboxCount = summary.OutboxCount,
             Running = summary.Holder is not null,
             OwnerAddress = summary.Holder?.Address?.ToString() ?? string.Empty,
-            Live = summary.Live is null ? null : Live(summary.Live, fromOwner: false),
+            Live = summary.Live is null ? null : ToLiveInfo(summary.Live, fromOwner: false),
         };
         if (definition.Checkpoint >= 0)
         {
@@ -512,7 +512,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     }
 
     /// <summary>How a running group stands, in its wire form.</summary>
-    private static GroupLiveInfo Live(SubscriptionGroupLive live, bool fromOwner)
+    private static GroupLiveInfo ToLiveInfo(SubscriptionGroupLive live, bool fromOwner)
     {
         var info = new GroupLiveInfo
         {
@@ -579,7 +579,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         }
     }
 
-    private static string ReadableStreamName(string stream)
+    private static string RequireReadableStreamName(string stream)
     {
         if (string.IsNullOrEmpty(stream))
         {
@@ -599,7 +599,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         return stream;
     }
 
-    private static string GroupName(string group)
+    private static string RequireGroupName(string group)
     {
         if (string.IsNullOrWhiteSpace(group) || group.Length > 250)
         {
@@ -609,7 +609,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         return group;
     }
 
-    private static List<Guid> Ids(IEnumerable<string> ids)
+    private static List<Guid> ParseIds(IEnumerable<string> ids)
     {
         var parsed = new List<Guid>();
         foreach (var id in ids)
@@ -697,7 +697,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             switch (requestStream.Current.ContentCase)
             {
                 case PersistentReadRequest.ContentOneofCase.Ack:
-                    await live.AcknowledgeAsync(Ids(requestStream.Current.Ack.Ids)).ConfigureAwait(false);
+                    await live.AcknowledgeAsync(ParseIds(requestStream.Current.Ack.Ids)).ConfigureAwait(false);
                     break;
                 case PersistentReadRequest.ContentOneofCase.Nack:
                     var nack = requestStream.Current.Nack;
@@ -707,7 +707,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
                         Protocol.V1.NackAction.Skip => Nightingale.NackAction.Skip,
                         _ => Nightingale.NackAction.Retry,
                     };
-                    await live.RefuseAsync(Ids(nack.Ids), action, nack.Reason).ConfigureAwait(false);
+                    await live.RefuseAsync(ParseIds(nack.Ids), action, nack.Reason).ConfigureAwait(false);
                     break;
                 default:
                     throw NightingaleErrors.InvalidArgument("After the options, every message of a persistent read acknowledges or refuses events.");

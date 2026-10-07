@@ -42,8 +42,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     {
         // Two aggregates, each one row off its end of the index; asked for together under one
         // grouping they would read every row between.
-        await using var context = Context();
-        var live = Live(context, stream).Where(e => e.SeqId <= head);
+        await using var context = OpenContext();
+        var live = QueryLive(context, stream).Where(e => e.SeqId <= head);
         var first = await live.MinAsync(e => (long?)e.SeqId, cancellationToken).ConfigureAwait(false);
         if (first is null)
         {
@@ -64,8 +64,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadAsync(VirtualStreamName stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
-        await using var context = Context();
-        return await PageAsync(ByPosition(Live(context, stream), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
+        await using var context = OpenContext();
+        return await PageAsync(FilterByPosition(QueryLive(context, stream), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -85,7 +85,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <returns>The mark and the events.</returns>
     public async Task<(long Mark, IReadOnlyList<EventRecord> Events)> ReadBelowMarkAsync(VirtualStreamName? stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
-        await using var context = Context();
+        await using var context = OpenContext();
         if (context.Database.IsRelational())
         {
             // Held open for both queries: a pooled connection handed back between them could come
@@ -104,7 +104,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             return (mark, []);
         }
 
-        var events = await PageAsync(ByPosition(Live(context, stream), direction, from, bound), count, Plain, cancellationToken).ConfigureAwait(false);
+        var events = await PageAsync(FilterByPosition(QueryLive(context, stream), direction, from, bound), count, Plain, cancellationToken).ConfigureAwait(false);
         return (mark, events);
     }
 
@@ -116,8 +116,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <returns>The count.</returns>
     public async Task<long> CountAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken)
     {
-        await using var context = Context();
-        return await Live(context, stream).LongCountAsync(e => e.SeqId > after && e.SeqId <= head, cancellationToken).ConfigureAwait(false);
+        await using var context = OpenContext();
+        return await QueryLive(context, stream).LongCountAsync(e => e.SeqId > after && e.SeqId <= head, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -129,8 +129,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <returns>The bounds, or <see langword="null"/> when nothing is numbered.</returns>
     public async Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
     {
-        await using var context = Context();
-        var all = Keyed(context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId), stream);
+        await using var context = OpenContext();
+        var all = FilterByKey(context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId), stream);
         var ordinals = stream.Kind == VirtualStreamKind.Category
             ? all.Where(e => e.CategoryOrdinal != null).Select(e => e.CategoryOrdinal)
             : all.Where(e => e.TypeOrdinal != null).Select(e => e.TypeOrdinal);
@@ -153,8 +153,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken)
     {
-        await using var context = Context();
-        var live = Live(context, stream);
+        await using var context = OpenContext();
+        var live = QueryLive(context, stream);
         var forwards = direction == Direction.Forwards;
         if (stream.Kind == VirtualStreamKind.Category)
         {
@@ -172,12 +172,12 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         }
     }
 
-    private static IQueryable<EventRow> ByPosition(IQueryable<EventRow> events, Direction direction, long from, long head) =>
+    private static IQueryable<EventRow> FilterByPosition(IQueryable<EventRow> events, Direction direction, long from, long head) =>
         direction == Direction.Forwards
             ? events.Where(e => e.SeqId >= from && e.SeqId <= head).OrderBy(e => e.SeqId)
             : events.Where(e => e.SeqId <= from).OrderByDescending(e => e.SeqId);
 
-    private static IQueryable<EventRow> Keyed(IQueryable<EventRow> events, VirtualStreamName stream)
+    private static IQueryable<EventRow> FilterByKey(IQueryable<EventRow> events, VirtualStreamName stream)
     {
         var key = stream.Key;
         return stream.Kind == VirtualStreamKind.Category
@@ -225,13 +225,13 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             row.Ordinal);
     }
 
-    private EventsDbContext Context() => contexts();
+    private EventsDbContext OpenContext() => contexts();
 
     /// <summary>The live events of the tenant, of one virtual stream or of all.</summary>
-    private IQueryable<EventRow> Live(EventsDbContext context, VirtualStreamName? stream)
+    private IQueryable<EventRow> QueryLive(EventsDbContext context, VirtualStreamName? stream)
     {
         var live = context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId && !e.IsArchived);
-        return stream is { } named ? Keyed(live, named) : live;
+        return stream is { } named ? FilterByKey(live, named) : live;
     }
 
     /// <summary>The columns a read selects: never the whole row, since a store without ordinals has no ordinal columns.</summary>

@@ -83,7 +83,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             return null;
         }
 
-        return Definition(row);
+        return ToDefinition(row);
     }
 
     /// <inheritdoc/>
@@ -165,17 +165,17 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             return null;
         }
 
-        var lease = SubscriptionGroupRegistry.LeaseName(row.Id);
+        var lease = SubscriptionGroupRegistry.GetLeaseName(row.Id);
         var now = timeProvider.GetUtcNow();
         var held = await context.Leases.AsNoTracking().SingleOrDefaultAsync(held => held.Name == lease, cancellationToken).ConfigureAwait(false);
-        var holder = held is null || held.ExpiresAt <= now ? null : Holder(held);
+        var holder = held is null || held.ExpiresAt <= now ? null : ToHolder(held);
         return new SubscriptionGroupSummary(
-            Definition(row),
+            ToDefinition(row),
             row.CreatedAt,
-            await ParkedOf(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
-            await OutboxOf(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
+            await GetParked(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
+            await GetOutbox(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
             holder,
-            Live(row, holder));
+            ToLive(row, holder));
     }
 
     /// <inheritdoc/>
@@ -209,20 +209,20 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             .Select(counted => new { counted.Key, Count = counted.LongCount() })
             .ToDictionaryAsync(counted => counted.Key, counted => counted.Count, cancellationToken)
             .ConfigureAwait(false);
-        var names = ids.Select(SubscriptionGroupRegistry.LeaseName).ToList();
+        var names = ids.Select(SubscriptionGroupRegistry.GetLeaseName).ToList();
         var now = timeProvider.GetUtcNow();
         var leases = (await context.Leases.AsNoTracking()
                 .Where(held => names.Contains(held.Name))
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false))
             .Where(held => held.ExpiresAt > now)
-            .ToDictionary(held => held.Name, Holder, StringComparer.Ordinal);
+            .ToDictionary(held => held.Name, ToHolder, StringComparer.Ordinal);
 
         return rows
             .Select(row =>
             {
-                var holder = leases.GetValueOrDefault(SubscriptionGroupRegistry.LeaseName(row.Id));
-                return new SubscriptionGroupSummary(Definition(row), row.CreatedAt, parked.GetValueOrDefault(row.Id), outbox.GetValueOrDefault(row.Id), holder, Live(row, holder));
+                var holder = leases.GetValueOrDefault(SubscriptionGroupRegistry.GetLeaseName(row.Id));
+                return new SubscriptionGroupSummary(ToDefinition(row), row.CreatedAt, parked.GetValueOrDefault(row.Id), outbox.GetValueOrDefault(row.Id), holder, ToLive(row, holder));
             })
             .ToList();
     }
@@ -247,8 +247,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
                 return attempt > 1;
             }
 
-            context.SubscriptionParkedEvents.RemoveRange(await ParkedOf(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
-            context.SubscriptionOutboxEntries.RemoveRange(await OutboxOf(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
+            context.SubscriptionParkedEvents.RemoveRange(await GetParked(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
+            context.SubscriptionOutboxEntries.RemoveRange(await GetOutbox(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
             context.SubscriptionGroups.Remove(row);
             try
             {
@@ -342,7 +342,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<int> SkipAsync(Guid groupId, long? number, long? before, SubscriptionParkedNumber by, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var toSkip = await Selected(ParkedOf(context, groupId), number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
+        var toSkip = await FilterByNumber(GetParked(context, groupId), number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
         context.SubscriptionParkedEvents.RemoveRange(toSkip);
         try
         {
@@ -353,7 +353,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             // A replay or another skip took some of them first; what is left to count is what
             // this call can still remove, and the caller's rows are gone either way.
             await using var again = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-            var left = await Selected(ParkedOf(again, groupId), number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
+            var left = await FilterByNumber(GetParked(again, groupId), number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
             again.SubscriptionParkedEvents.RemoveRange(left);
             await again.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             return left.Count;
@@ -366,7 +366,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<IReadOnlyList<SubscriptionParkedMessage>> ListParkedAsync(Guid groupId, SubscriptionParkedNumber by, long? after, int limit, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = ParkedOf(context, groupId).AsNoTracking();
+        var rows = GetParked(context, groupId).AsNoTracking();
         rows = by switch
         {
             SubscriptionParkedNumber.Revision => rows.Where(row => after == null || row.Revision > after).OrderBy(row => row.Revision),
@@ -381,7 +381,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<IReadOnlyList<SubscriptionOutboxMessage>> ListOutboxAsync(Guid groupId, SubscriptionParkedNumber by, long? after, int limit, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = OutboxOf(context, groupId).AsNoTracking();
+        var rows = GetOutbox(context, groupId).AsNoTracking();
         rows = by switch
         {
             SubscriptionParkedNumber.Revision => rows.Where(row => after == null || row.Revision > after).OrderBy(row => row.Revision),
@@ -392,7 +392,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         return page.Select(row => new SubscriptionOutboxMessage(groupId, row.Position, row.Revision, row.Ordinal, row.EventId, row.Reason, row.Attempts, row.DueAt)).ToList();
     }
 
-    private static IQueryable<SubscriptionParkedEvent> Selected(IQueryable<SubscriptionParkedEvent> parked, long? number, long? before, SubscriptionParkedNumber by)
+    private static IQueryable<SubscriptionParkedEvent> FilterByNumber(IQueryable<SubscriptionParkedEvent> parked, long? number, long? before, SubscriptionParkedNumber by)
     {
         if (number is { } wanted)
         {
@@ -417,7 +417,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         return parked;
     }
 
-    private static IQueryable<SubscriptionOutboxEntry> Selected(IQueryable<SubscriptionOutboxEntry> queued, long? number, long? before, SubscriptionParkedNumber by)
+    private static IQueryable<SubscriptionOutboxEntry> FilterByNumber(IQueryable<SubscriptionOutboxEntry> queued, long? number, long? before, SubscriptionParkedNumber by)
     {
         if (number is { } wanted)
         {
@@ -445,8 +445,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     private async Task<int> MoveToOutboxAsync(Guid groupId, long? number, long? before, SubscriptionParkedNumber by, DateTimeOffset dueAt, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var parked = Selected(ParkedOf(context, groupId), number, before, by);
-        var queued = Selected(OutboxOf(context, groupId), number, before, by);
+        var parked = FilterByNumber(GetParked(context, groupId), number, before, by);
+        var queued = FilterByNumber(GetOutbox(context, groupId), number, before, by);
 
         var toMove = await parked.ToListAsync(cancellationToken).ConfigureAwait(false);
         var already = await queued.CountAsync(cancellationToken).ConfigureAwait(false);
@@ -476,7 +476,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<IReadOnlyList<SubscriptionOutboxMessage>> DueAsync(Guid groupId, DateTimeOffset now, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = await OutboxOf(context, groupId).AsNoTracking()
+        var rows = await GetOutbox(context, groupId).AsNoTracking()
             .Where(row => row.DueAt <= now)
             .OrderBy(row => row.DueAt).ThenBy(row => row.Position)
             .ToListAsync(cancellationToken)
@@ -519,7 +519,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             }
             else if (lease.Owner != owner && lease.ExpiresAt > now)
             {
-                return Holder(lease);
+                return ToHolder(lease);
             }
             else
             {
@@ -541,7 +541,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             {
                 context.ChangeTracker.Clear();
                 var holder = await context.Leases.AsNoTracking().SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
-                return holder is null || holder.Owner == owner ? null : Holder(holder);
+                return holder is null || holder.Owner == owner ? null : ToHolder(holder);
             }
         }
     }
@@ -551,10 +551,10 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var lease = await context.Leases.AsNoTracking().SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
-        return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : Holder(lease);
+        return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : ToHolder(lease);
     }
 
-    private static SubscriptionGroupDefinition Definition(SubscriptionGroup row)
+    private static SubscriptionGroupDefinition ToDefinition(SubscriptionGroup row)
     {
         var settings = new GroupSettings(
             row.StartPosition is { } start ? StreamPosition.From(start) : StreamPosition.End,
@@ -577,7 +577,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     /// The row's snapshot, while the group's lease is held. Without a holder the columns are
     /// what an instance that stopped without clearing them left behind, and say nothing.
     /// </summary>
-    private static SubscriptionGroupLive? Live(SubscriptionGroup row, LeaseHolder? holder) =>
+    private static SubscriptionGroupLive? ToLive(SubscriptionGroup row, LeaseHolder? holder) =>
         holder is null || row.LiveSnapshotAt is not { } asOf
             ? null
             : new SubscriptionGroupLive(
@@ -591,7 +591,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
                 asOf,
                 row.LiveConsumerCount ?? 1);
 
-    private static LeaseHolder Holder(Lease lease) =>
+    private static LeaseHolder ToHolder(Lease lease) =>
         new(lease.Owner, lease.OwnerAddress is null ? null : new Uri(lease.OwnerAddress, UriKind.Absolute));
 
     /// <inheritdoc/>
@@ -621,9 +621,9 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         return await context.SubscriptionGroups.AnyAsync(row => row.Id == groupId, cancellationToken).ConfigureAwait(false);
     }
 
-    private static IQueryable<SubscriptionParkedEvent> ParkedOf(NightingaleDbContext context, Guid groupId) =>
+    private static IQueryable<SubscriptionParkedEvent> GetParked(NightingaleDbContext context, Guid groupId) =>
         context.SubscriptionParkedEvents.Where(row => row.SubscriptionGroupId == groupId);
 
-    private static IQueryable<SubscriptionOutboxEntry> OutboxOf(NightingaleDbContext context, Guid groupId) =>
+    private static IQueryable<SubscriptionOutboxEntry> GetOutbox(NightingaleDbContext context, Guid groupId) =>
         context.SubscriptionOutboxEntries.Where(row => row.SubscriptionGroupId == groupId);
 }

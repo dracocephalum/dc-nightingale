@@ -51,7 +51,7 @@ public static class Scenario
         await using var toFirst = first.Connect();
         await using var toSecond = second.Connect();
 
-        await toSecond.Client.AppendToStreamAsync(Stream, StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
+        await toSecond.Client.AppendToStreamAsync(Stream, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
         await toSecond.Client.CreatePersistentSubscriptionAsync(Stream, Group, GroupSettings.Default with { Start = StreamPosition.Start, MaxSubscriberCount = 1 }, cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync("3. Through the second instance: appended two events and created the group with room for one consumer, which any instance serves.").ConfigureAwait(false);
 
@@ -108,7 +108,7 @@ public static class Scenario
         return new Report(delivered, refusal, replayed, replayedType, readInRotation);
     }
 
-    private static EventData Event(string type) =>
+    private static EventData CreateEvent(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>

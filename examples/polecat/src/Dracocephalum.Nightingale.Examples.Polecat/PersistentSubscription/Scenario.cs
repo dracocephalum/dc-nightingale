@@ -52,7 +52,7 @@ public static class Scenario
         const string stream = "orders-1";
         const string group = "billing";
 
-        await client.AppendToStreamAsync(stream, StreamState.NoStream, [Event("order_placed"), Event("order_paid"), Event("order_shipped")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync(stream, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid"), CreateEvent("order_shipped")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"3. Appended three events to {stream}.").ConfigureAwait(false);
 
         var settings = GroupSettings.Default with { Start = StreamPosition.Start, MaxRetryCount = 1, CheckpointUpperBound = 1, CheckpointLowerBound = 1 };
@@ -128,6 +128,6 @@ public static class Scenario
         return new Report(delivered, retryOnRedelivery, replayed, replayedType, checkpointOnReturn, info, listed, parked);
     }
 
-    private static EventData Event(string type) =>
+    private static EventData CreateEvent(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }

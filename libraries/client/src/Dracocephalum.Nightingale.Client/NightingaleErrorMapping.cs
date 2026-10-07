@@ -31,18 +31,18 @@ public static class NightingaleErrorMapping
         {
             ErrorReason.RevisionConflict => new RevisionConflictException(
                 stream,
-                StreamState.FromInt64(Number(info, "expected", (long)ExpectedRevision.Any)),
-                Number(info, "actual", -1)),
+                StreamState.FromInt64(GetNumber(info, "expected", (long)ExpectedRevision.Any)),
+                GetNumber(info, "actual", -1)),
             ErrorReason.StreamDeleted => new StreamDeletedException(stream),
             ErrorReason.StreamNotFound => new StreamNotFoundException(stream),
             ErrorReason.DeletionDisabled => new DeletionDisabledException(exception.Status.Detail),
-            ErrorReason.GroupExists => new GroupExistsException(stream, Text(info, "group")),
-            ErrorReason.GroupNotFound => new GroupNotFoundException(stream, Text(info, "group")),
-            ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, Text(info, "group"), Text(info, "owner"), Address(info)),
-            ErrorReason.ConsumerLimitReached => new ConsumerLimitReachedException(stream, Text(info, "group")),
-            ErrorReason.AppendSizeExceeded => new AppendSizeExceededException(stream, (int)Number(info, "limit", 0)),
-            ErrorReason.GroupUpdated => new GroupUpdatedException(stream, Text(info, "group")),
-            ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, Text(info, "group")),
+            ErrorReason.GroupExists => new GroupExistsException(stream, GetText(info, "group")),
+            ErrorReason.GroupNotFound => new GroupNotFoundException(stream, GetText(info, "group")),
+            ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, GetText(info, "group"), GetText(info, "owner"), GetAddress(info)),
+            ErrorReason.ConsumerLimitReached => new ConsumerLimitReachedException(stream, GetText(info, "group")),
+            ErrorReason.AppendSizeExceeded => new AppendSizeExceededException(stream, (int)GetNumber(info, "limit", 0)),
+            ErrorReason.GroupUpdated => new GroupUpdatedException(stream, GetText(info, "group")),
+            ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, GetText(info, "group")),
             ErrorReason.OrdinalsNotEnabled => new OrdinalsNotEnabledException(stream),
             ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument =>
                 new ArgumentException(exception.Status.Detail),
@@ -50,13 +50,13 @@ public static class NightingaleErrorMapping
         };
     }
 
-    private static string Text(ErrorInfo info, string key) =>
+    private static string GetText(ErrorInfo info, string key) =>
         info.Metadata.TryGetValue(key, out var text) ? text : string.Empty;
 
-    private static Uri? Address(ErrorInfo info) =>
+    private static Uri? GetAddress(ErrorInfo info) =>
         info.Metadata.TryGetValue("address", out var text) && Uri.TryCreate(text, UriKind.Absolute, out var address) ? address : null;
 
-    private static long Number(ErrorInfo info, string key, long fallback) =>
+    private static long GetNumber(ErrorInfo info, string key, long fallback) =>
         info.Metadata.TryGetValue(key, out var text) && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
             ? value
             : fallback;

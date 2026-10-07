@@ -43,10 +43,10 @@ public sealed class NightingaleClient : IAsyncDisposable
         _settings = settings;
         var channel = ClientChannels.Open(settings);
         _ownedChannels.Add(channel);
-        var invoker = Invoker(channel);
+        var invoker = CreateInvoker(channel);
         _streams = new Streams.StreamsClient(invoker);
         _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(invoker);
-        _redirects = OwnedChannelFor;
+        _redirects = OpenOwnedChannel;
     }
 
     /// <summary>
@@ -60,7 +60,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(invoker);
         _streams = new Streams.StreamsClient(invoker);
         _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(invoker);
-        _redirects = redirects ?? OwnedChannelFor;
+        _redirects = redirects ?? OpenOwnedChannel;
     }
 
     /// <summary>Appends events to a stream atomically under an expected state.</summary>
@@ -128,7 +128,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         return new ReadStreamResult(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
 
-    private static async Task Unary(Func<Task> call)
+    private static async Task CallUnaryAsync(Func<Task> call)
     {
         try
         {
@@ -215,7 +215,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     public Task DeleteStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return Unary(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallUnaryAsync(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -232,7 +232,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     public Task TombstoneStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return Unary(async () => await _streams.TombstoneAsync(new TombstoneRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallUnaryAsync(async () => await _streams.TombstoneAsync(new TombstoneRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Creates a persistent-subscription group over a stream, <c>$all</c> or a virtual stream.</summary>
@@ -246,7 +246,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
-        return Unary(async () => await _persistent.CreateAsync(new CreateRequest { Stream = stream, Group = group, Settings = (settings ?? GroupSettings.Default).ToWire() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallUnaryAsync(async () => await _persistent.CreateAsync(new CreateRequest { Stream = stream, Group = group, Settings = (settings ?? GroupSettings.Default).ToWire() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Deletes a persistent-subscription group, its checkpoint and its parked messages.</summary>
@@ -259,7 +259,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
-        return Unary(async () => await _persistent.DeleteAsync(new DeleteGroupRequest { Stream = stream, Group = group }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallUnaryAsync(async () => await _persistent.DeleteAsync(new DeleteGroupRequest { Stream = stream, Group = group }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Puts parked messages back in front of a group: all of them, or the one at a position.</summary>
@@ -290,7 +290,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
         catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
         {
-            return await ReplayAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+            return await ReplayAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -324,7 +324,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
         catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
         {
-            return await UpdateAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+            return await UpdateAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -349,7 +349,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
         catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
         {
-            return await ReplayAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+            return await ReplayAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -410,7 +410,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         try
         {
-            var response = await _persistent.ListParkedAsync(Page(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
+            var response = await _persistent.ListParkedAsync(BuildPageRequest(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Messages.Select(message => message.ToParkedMessageInfo()).ToList();
         }
         catch (RpcException exception)
@@ -434,7 +434,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         try
         {
-            var response = await _persistent.ListOutboxAsync(Page(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
+            var response = await _persistent.ListOutboxAsync(BuildPageRequest(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Messages.Select(message => message.ToOutboxMessageInfo()).ToList();
         }
         catch (RpcException exception)
@@ -465,7 +465,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
         catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
         {
-            return await InfoAsync(OwnerAt(address), request, cancellationToken).ConfigureAwait(false);
+            return await InfoAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -516,7 +516,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
         catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
         {
-            return await OpenAsync(OwnerAt(address), stream, group, bufferSize, cancellationToken).ConfigureAwait(false);
+            return await OpenAsync(GetOwnerClient(address), stream, group, bufferSize, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -561,7 +561,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
     }
 
-    private static ListMessagesRequest Page(string stream, string group, long? after, int limit)
+    private static ListMessagesRequest BuildPageRequest(string stream, string group, long? after, int limit)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
@@ -615,17 +615,17 @@ public sealed class NightingaleClient : IAsyncDisposable
     }
 
     /// <summary>The persistent-subscriptions client for the instance at an address, opened once and kept.</summary>
-    private PersistentSubscriptions.PersistentSubscriptionsClient OwnerAt(Uri address) =>
+    private PersistentSubscriptions.PersistentSubscriptionsClient GetOwnerClient(Uri address) =>
         _owners.GetOrAdd(address, target => new PersistentSubscriptions.PersistentSubscriptionsClient(_redirects(target)));
 
-    private CallInvoker OwnedChannelFor(Uri address)
+    private CallInvoker OpenOwnedChannel(Uri address)
     {
         var channel = _settings is null ? GrpcChannel.ForAddress(address) : ClientChannels.OpenTo(_settings, address);
         _ownedChannels.Add(channel);
-        return Invoker(channel);
+        return CreateInvoker(channel);
     }
 
-    private CallInvoker Invoker(GrpcChannel channel) =>
+    private CallInvoker CreateInvoker(GrpcChannel channel) =>
         _settings?.DefaultDeadline is { } deadline
             ? channel.Intercept(new DefaultDeadlineInterceptor(deadline, TimeProvider.System))
             : channel.CreateCallInvoker();

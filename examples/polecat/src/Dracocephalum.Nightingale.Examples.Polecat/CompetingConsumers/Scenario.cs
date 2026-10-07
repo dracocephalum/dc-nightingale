@@ -67,7 +67,7 @@ public static class Scenario
 
         for (var order = 1; order <= 4; order++)
         {
-            await client.AppendToStreamAsync($"orders-{order}", StreamState.NoStream, [Event("order_placed"), Event("order_paid")], cancellationToken).ConfigureAwait(false);
+            await client.AppendToStreamAsync($"orders-{order}", StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
         }
 
         await UntilAsync(() => received.Sum(list => list.Count) == 8, cancellationToken).ConfigureAwait(false);
@@ -88,7 +88,7 @@ public static class Scenario
         await using var quick = await client.SubscribeToPersistentSubscriptionAsync(Category, Group, bufferSize: 1, cancellationToken).ConfigureAwait(false);
         var quickReceived = new List<PersistentSubscriptionMessage.Recorded>();
         var consumingQuickly = ConsumeAsync(quick, quickReceived, cancellationToken);
-        await client.AppendToStreamAsync("orders-5", StreamState.NoStream, [Event("order_placed"), Event("order_paid"), Event("order_shipped")], cancellationToken).ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-5", StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid"), CreateEvent("order_shipped")], cancellationToken).ConfigureAwait(false);
         var held = await slow.Messages.OfType<PersistentSubscriptionMessage.Recorded>().FirstAsync(cancellationToken).ConfigureAwait(false);
         await UntilAsync(() => quickReceived.Count == 2, cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"8. Connected a slow and a quick consumer, each holding one event, and appended three to orders-5: the slow one holds revision {held.Record.Revision} unacknowledged, and the quick one received and acknowledged revisions {string.Join(" and ", quickReceived.Select(message => message.Record.Revision))}.").ConfigureAwait(false);
@@ -113,7 +113,7 @@ public static class Scenario
             handedOver);
     }
 
-    private static EventData Event(string type) =>
+    private static EventData CreateEvent(string type) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     private static string Describe(IReadOnlyList<string> streams) =>

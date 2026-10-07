@@ -83,7 +83,7 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
             .Take(RefreshWindow)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        Publish(ContiguousPrefix.After(mark, following));
+        Publish(ContiguousPrefix.Extend(mark, following));
         return Head;
     }
 
@@ -183,11 +183,11 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
     /// waits on the head: the head would never move again, and a subscription that went on
     /// waiting for it would look alive and deliver nothing.
     /// </summary>
-    /// <param name="waitBeyond">Completes when the mark is beyond a position.</param>
+    /// <param name="waiter">Completes when the mark is beyond a position.</param>
     /// <param name="mark">Reads the mark.</param>
     /// <param name="stopping">Cancelled when the tail is stopped.</param>
     /// <returns>A task that completes when the tail has stopped following.</returns>
-    internal async Task FollowAsync(Func<long, CancellationToken, Task> waitBeyond, Func<long> mark, CancellationToken stopping)
+    internal async Task FollowAsync(Func<long, CancellationToken, Task> waiter, Func<long> mark, CancellationToken stopping)
     {
         try
         {
@@ -195,7 +195,7 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
             {
                 try
                 {
-                    await waitBeyond(Head, stopping).ConfigureAwait(false);
+                    await waiter(Head, stopping).ConfigureAwait(false);
                 }
                 catch (TimeoutException)
                 {

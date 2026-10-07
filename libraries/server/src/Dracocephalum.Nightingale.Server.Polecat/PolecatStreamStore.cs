@@ -132,7 +132,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
         {
             // The store's columns hold so many bytes of the encoded text, and the database is what
             // measures: it refuses the write, names the column, and nothing is stored cut short.
-            throw new ValueTooLongException(WhatIsIn(exception), exception);
+            throw new ValueTooLongException(DescribeColumn(exception), exception);
         }
 
         var last = (IEvent)wrapped[^1];
@@ -293,9 +293,9 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
     }
 
     /// <summary>What the column the database named holds, as a caller would call it.</summary>
-    private static string WhatIsIn(SqlException exception)
+    private static string DescribeColumn(SqlException exception)
     {
-        var column = ColumnOf().Match(exception.Message) is { Success: true } match ? match.Groups[1].Value : string.Empty;
+        var column = ColumnRegex().Match(exception.Message) is { Success: true } match ? match.Groups[1].Value : string.Empty;
         return column switch
         {
             "id" or "stream_id" => ValueTooLongException.StreamName,
@@ -307,7 +307,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
     }
 
     [GeneratedRegex("column '([^']+)'")]
-    private static partial Regex ColumnOf();
+    private static partial Regex ColumnRegex();
 
     private void RequireOrdinals(string stream)
     {
@@ -376,7 +376,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
             stored.EventTypeName,
             stored.Timestamp,
             stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, NightingaleJson.Default) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, NightingaleJson.Default),
-            JsonEvent.MetadataOf(stored));
+            JsonEvent.GetMetadata(stored));
 
     /// <summary>
     /// After the store refused the append: either the same events are already there, from the

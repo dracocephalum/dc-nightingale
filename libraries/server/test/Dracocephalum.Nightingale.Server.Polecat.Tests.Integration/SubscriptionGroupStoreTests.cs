@@ -64,7 +64,7 @@ public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)
         await sut.ParkAsync(new SubscriptionParkedMessage(first, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
         await sut.ParkAsync(new SubscriptionParkedMessage(first, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
         await sut.ReplayAsync(first, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
-        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.LeaseName(first), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(first), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         var live = new SubscriptionGroupLive(Now.AddMinutes(-5), 4, 1, 10, 41, Now.AddSeconds(-20), "ipv4:10.0.0.7:51234", Now);
         await sut.SaveLiveAsync(first, live, TestContext.Current.CancellationToken);
         await sut.SaveLiveAsync(second, live, TestContext.Current.CancellationToken);

@@ -27,7 +27,7 @@ public static class ErrorReasons
     /// <summary>The wire name of a reason.</summary>
     /// <param name="reason">The reason.</param>
     /// <returns>The name, such as <c>REVISION_CONFLICT</c>.</returns>
-    public static string NameOf(ErrorReason reason) => Names[reason];
+    public static string GetName(ErrorReason reason) => Names[reason];
 
     /// <summary>Parses a wire name back to a reason.</summary>
     /// <param name="name">The name as received.</param>

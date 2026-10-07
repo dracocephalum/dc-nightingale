@@ -61,7 +61,7 @@ public static class ServiceCollectionExtensions
 
         var options = new NightingaleOptions();
         configure?.Invoke(options);
-        return Register(services, connectionString, options, ReadOnlyConnection.Resolve(connectionString, options, named: null, readOnlyConnectionString));
+        return Register(services, connectionString, options, ReadOnlyConnection.Resolve(connectionString, options, namedConnectionStrings: null, readOnlyConnectionString));
     }
 
     /// <summary>

@@ -54,9 +54,9 @@ public static class Scenario
         var client = connection.Client;
         var stream = "orders-" + Guid.NewGuid().ToString("N")[..8];
 
-        var placed = Event("order_placed", "{\"orderId\":1,\"total\":42.5}", new JsonObject { ["$correlationId"] = "checkout-1" });
-        var paid = Event("order_paid", "{\"orderId\":1,\"amount\":42.5}");
-        var shipped = Event("order_shipped", "{\"orderId\":1,\"carrier\":\"sample\"}");
+        var placed = CreateEvent("order_placed", "{\"orderId\":1,\"total\":42.5}", new JsonObject { ["$correlationId"] = "checkout-1" });
+        var paid = CreateEvent("order_paid", "{\"orderId\":1,\"amount\":42.5}");
+        var shipped = CreateEvent("order_shipped", "{\"orderId\":1,\"carrier\":\"sample\"}");
         var appended = await client.AppendToStreamAsync(stream, StreamState.NoStream, [placed, paid, shipped], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"3. Appended three events to {stream}; last revision {appended.Revision}, position {appended.Position}.").ConfigureAwait(false);
 
@@ -89,7 +89,7 @@ public static class Scenario
         long conflictActual;
         try
         {
-            await client.AppendToStreamAsync(stream, StreamState.StreamRevision(0), [Event("order_cancelled", "{}")], cancellationToken).ConfigureAwait(false);
+            await client.AppendToStreamAsync(stream, StreamState.StreamRevision(0), [CreateEvent("order_cancelled", "{}")], cancellationToken).ConfigureAwait(false);
             throw new InvalidOperationException("A stale append was accepted.");
         }
         catch (RevisionConflictException conflict)
@@ -122,6 +122,6 @@ public static class Scenario
             missing);
     }
 
-    private static EventData Event(string type, string json, JsonObject? metadata = null) =>
+    private static EventData CreateEvent(string type, string json, JsonObject? metadata = null) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes(json), metadata);
 }

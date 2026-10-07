@@ -26,7 +26,7 @@ public sealed class StreamSubscription : IAsyncEnumerable<EventRecord>, IAsyncDi
     {
         Stream = stream;
         _call = call;
-        _pump = Pump(cancellationToken);
+        _pump = PumpAsync(cancellationToken);
     }
 
     /// <summary>Gets the stream name, or <c>$all</c>.</summary>
@@ -83,7 +83,7 @@ public sealed class StreamSubscription : IAsyncEnumerable<EventRecord>, IAsyncDi
         }
     }
 
-    private async Task Pump(CancellationToken cancellationToken)
+    private async Task PumpAsync(CancellationToken cancellationToken)
     {
         try
         {

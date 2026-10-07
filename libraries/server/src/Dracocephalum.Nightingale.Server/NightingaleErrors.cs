@@ -143,7 +143,7 @@ public static class NightingaleErrors
 
     private static RpcException Build(StatusCode code, ErrorReason reason, string message, params (string Key, string Value)[] metadata)
     {
-        var info = new ErrorInfo { Domain = ErrorReasons.Domain, Reason = ErrorReasons.NameOf(reason) };
+        var info = new ErrorInfo { Domain = ErrorReasons.Domain, Reason = ErrorReasons.GetName(reason) };
         foreach (var (key, value) in metadata)
         {
             info.Metadata[key] = value;
