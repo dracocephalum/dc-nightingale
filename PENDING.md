@@ -64,8 +64,8 @@ registry entry and credentials, all the gateway's own documents. The store
 runs in conjoined mode
 with the default tenant from day one, so enabling tenants later adds
 credentials, not a schema migration; the category and type indexes lead with
-the tenant column. Database-per-tenant is not planned: there is no coherent
-cross-tenant position across databases.
+the tenant column. Database-per-tenant is not planned; what it would take is
+under its own heading below.
 
 The samples would use it. Each scenario under `examples/` creates and
 initializes a database of its own, because several of them append to the same
@@ -75,6 +75,54 @@ and ordinals are per tenant, so the scenarios keep their names and their
 dense numbering. Positions are the exception while the sequence is shared: a
 scenario would assert them relative to where it started, or run on a
 tenant-partitioned store.
+
+## Database per tenant
+
+Not planned, and recorded so that the cost is known if it is ever wanted.
+The store supports it through a master table that maps each tenant to a
+connection string, with tenants added, disabled and removed at runtime; each
+tenant's database is then a single-tenant store of its own, migrated like
+the one store is today. The store registers connection strings only: the
+database behind one must already exist, which on a self-hosted server is a
+`CREATE DATABASE` under a login that may, and on a managed cloud database is
+a control-plane operation outside the gateway. There is no coherent position
+across databases, so the wildcard tenant, cross-tenant ordinals and any
+cross-tenant subscription are gone in this mode, and the server says so
+through its features call.
+
+What enabling it would mean, each a design of its own:
+
+- **No default tenant**; a credential is bound to a registered tenant, and
+  a tenant is registered with one or two connection strings, the read-only
+  one the gateway's to keep beside the store's registry, resolved per tenant
+  where today it is resolved once.
+- **A tenant per composition root**: one database, one tail, one sequencer
+  lease, one set of gateway tables and one registry of running groups per
+  tenant, activated on first use and evicted when idle, so that startup,
+  migration and the catalog comparison, seconds per fresh database, are not
+  paid for every tenant on every instance at once.
+- **A database that knows its tenant**: the tenant id stamped in the
+  store's marker row at provisioning, and a registration refused when the
+  database says another, since the registry row is otherwise the only link
+  and removing it leaves the database behind.
+- **Connection pools per tenant**, primary and replica, per instance, with a
+  budget and eviction against the server's connection ceiling.
+- **Registry changes seen by every instance**: a tenant disabled or
+  re-pointed on one instance ends the consumers and stops the tail on the
+  others, on a refresh cadence or a signal.
+- **Placement of per-tenant leases**, so every tenant's sequencer does not
+  land on the instance that woke first.
+- **Operator tooling per database**: the schema report and apply, the
+  collation rule and the initialization-fixed settings checked and reported
+  per tenant; tenant partitioning refused as meaningless in this mode.
+- **Management calls that name a tenant**, since groups are per database:
+  a listing across tenants is a fan-out, and an admin credential sends the
+  tenant header on management calls too.
+- **Failure isolation**: one unreachable tenant database fails neither the
+  instance's health nor the other tenants.
+- **Credentials in the control plane**, since a caller is authenticated
+  before its tenant is known; which is the model the authentication design
+  takes from the start, so that it does not move later.
 
 ## Ordinals on a store initialized without them
 
