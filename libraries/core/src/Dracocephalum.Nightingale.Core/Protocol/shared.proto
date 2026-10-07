@@ -129,6 +129,10 @@ enum ConsumerStrategy {
   // Every event to the consumer that connected first; the others wait, and
   // the next takes over when it leaves.
   CONSUMER_STRATEGY_DISPATCH_TO_SINGLE = 3;
+  // Like PINNED, but by the event's $correlationId metadata, so every event
+  // of one workflow goes to the same consumer whatever stream it is in; an
+  // event without one is pinned by its stream name.
+  CONSUMER_STRATEGY_PINNED_BY_CORRELATION = 4;
 }
 
 // How a read or subscription of a virtual stream is numbered; see

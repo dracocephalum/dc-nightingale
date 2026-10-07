@@ -205,12 +205,12 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         var metadata = row.Headers is null ? [] : JsonNode.Parse(row.Headers) as JsonObject ?? [];
         if (row.CorrelationId is not null)
         {
-            metadata["$correlationId"] = row.CorrelationId;
+            metadata[MetadataKeys.CorrelationId] = row.CorrelationId;
         }
 
         if (row.CausationId is not null)
         {
-            metadata["$causationId"] = row.CausationId;
+            metadata[MetadataKeys.CausationId] = row.CausationId;
         }
 
         return new EventRecord(

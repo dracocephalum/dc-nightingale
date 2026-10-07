@@ -354,6 +354,34 @@ public sealed class SubscriptionGroupRuntimeTests
     }
 
     [Fact]
+    public async Task PinnedByCorrelation_ShouldKeepAWorkflowWithOneConsumerAcrossStreamsAndFallBackToTheStream()
+    {
+        // Arrange: twelve events over three streams, four workflows crossing them, and three
+        // events with no correlation id at all, on a stream of their own.
+        var records = Enumerable.Range(0, 12).Select(index => Record("orders-" + (index % 3), index, 10 + index, "checkout-" + (index % 4)))
+            .Concat(Enumerable.Range(12, 3).Select(index => Record("audit-1", index, 10 + index)))
+            .ToList();
+        _tail.Advance(24);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 24, 500, A<CancellationToken>._)).Returns(records);
+        await using var sut = Group(StreamNames.All, -1, 15, settings => settings with { Start = StreamPosition.Start, ConsumerStrategy = ConsumerStrategy.PinnedByCorrelation });
+        var second = sut.Join(15, "two");
+        var third = sut.Join(15, "three");
+        var consumers = new[] { _consumer!, second, third };
+        await WaitUntilAsync(() => sut.Describe().InFlightCount == 15);
+
+        // Act
+        var delivered = consumers.Select(Drain).ToList();
+
+        // Assert: a workflow is with exactly one consumer whatever streams it spans, and so is
+        // the uncorrelated stream.
+        var workflowsPerConsumer = delivered.Select(messages => messages.Select(message => message.Record.Metadata[MetadataKeys.CorrelationId]?.GetValue<string>()).Where(id => id is not null).Distinct().ToList()).ToList();
+        workflowsPerConsumer.SelectMany(ids => ids).Count().ShouldBe(4, "each workflow is with exactly one consumer");
+        workflowsPerConsumer.SelectMany(ids => ids).Distinct().Count().ShouldBe(4);
+        delivered.Count(messages => messages.Any(message => message.Record.Stream == "audit-1")).ShouldBe(1, "events without a correlation id are pinned by their stream");
+        delivered.Sum(messages => messages.Count).ShouldBe(15);
+    }
+
+    [Fact]
     public async Task DispatchToSingle_ShouldSendEverythingToTheFirstConsumerUntilItLeaves()
     {
         // Arrange
@@ -426,8 +454,8 @@ public sealed class SubscriptionGroupRuntimeTests
         }
     }
 
-    private static EventRecord Record(string stream, long revision, long position) =>
-        new(Guid.NewGuid(), stream, revision, position, "order_placed", Now, Encoding.UTF8.GetBytes("{}"), new JsonObject());
+    private static EventRecord Record(string stream, long revision, long position, string? correlationId = null) =>
+        new(Guid.NewGuid(), stream, revision, position, "order_placed", Now, Encoding.UTF8.GetBytes("{}"), correlationId is null ? new JsonObject() : new JsonObject { [MetadataKeys.CorrelationId] = correlationId });
 
     private static async Task<PersistentSubscriptionMessage.Recorded> Next(SubscriptionConsumer consumer) =>
         await consumer.Outgoing.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(Wait);

@@ -384,13 +384,19 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         _draining.Dispose();
     }
 
-    /// <summary>The number of a stream's consumer under the pinned strategy: the same name, the same consumer, while the consumers are the same.</summary>
-    private static int Hash(string stream)
+    /// <summary>What an event is pinned by under correlation pinning: its correlation id, or its stream name when it has none.</summary>
+    private static string GetPinKey(EventRecord record) =>
+        record.Metadata[MetadataKeys.CorrelationId] is { } node && node.GetValueKind() == System.Text.Json.JsonValueKind.String && node.GetValue<string>() is { Length: > 0 } correlation
+            ? correlation
+            : record.Stream;
+
+    /// <summary>The number of a key's consumer under the pinned strategies: the same key, the same consumer, while the consumers are the same.</summary>
+    private static int Hash(string key)
     {
-        // FNV-1a over the name's bytes: the same in every process, which string hashing is not,
-        // so two instances in turn pin a stream the same way.
+        // FNV-1a over the key's bytes: the same in every process, which string hashing is not,
+        // so two instances in turn pin a key the same way.
         var hash = 2166136261u;
-        foreach (var b in Encoding.UTF8.GetBytes(stream))
+        foreach (var b in Encoding.UTF8.GetBytes(key))
         {
             hash = (hash ^ b) * 16777619u;
         }
@@ -671,6 +677,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                     {
                         ConsumerStrategy.DispatchToSingle => _consumers[0].HasRoom ? _consumers[0] : null,
                         ConsumerStrategy.Pinned => _consumers[Hash(record.Stream) % _consumers.Count] is { HasRoom: true } pinned ? pinned : null,
+                        ConsumerStrategy.PinnedByCorrelation => _consumers[Hash(GetPinKey(record)) % _consumers.Count] is { HasRoom: true } pinned ? pinned : null,
                         _ => NextWithRoom(),
                     };
                     if (chosen is not null)
