@@ -16,8 +16,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 internal sealed class JsonEvent : Event<JsonElement>, IEvent
 {
-    private const string CorrelationKey = "$correlationId";
-    private const string CausationKey = "$causationId";
+    private const string CorrelationKey = MetadataKeys.CorrelationId;
+    private const string CausationKey = MetadataKeys.CausationId;
 
     private readonly string _typeName;
 

@@ -141,10 +141,11 @@ parked messages, its outbox and what is in flight; that is parked in
 
 **Reference:** a group dispatches to several consumers at once, by a
 strategy: round robin, pinned, where a hash of the stream keeps each stream
-with one consumer, or dispatch to a single consumer with the others standing
+with one consumer, pinned by correlation, where the hash is of the event's
+`$correlationId`, or dispatch to a single consumer with the others standing
 by. A limit on consumers, zero for none, is part of the settings.
 
-**Nightingale:** the same three strategies under the same names,
+**Nightingale:** the same four strategies under the same names,
 `RoundRobin` the default, settable when the group is created and changed by
 an update, and the same limit, zero for none and the default. The group runs
 once per instance, in the instance that holds its lease, and its consumers
@@ -163,9 +164,11 @@ instance, which is what the lease says. Four things are worth knowing.
   which does count.
 - **Pinned goes by a hash of the stream name over the consumers connected**,
   the same in every process, and streams are shared out again whenever a
-  consumer joins or leaves; the reference's pinning is by its own hash over
-  its own buckets, so which consumer a stream lands on differs, and nothing
-  depends on it. A pinned consumer that is full holds up its streams rather
+  consumer joins or leaves; pinned by correlation hashes the event's
+  `$correlationId` instead, and the stream name when the event has none.
+  The reference's pinning is by its own hash over its own buckets, so which
+  consumer a key lands on differs, and nothing depends on it. A pinned
+  consumer that is full holds up its keys rather
   than lending an event to another consumer; so does the single consumer
   under dispatch to single, whose stand-ins take over only when it leaves.
 - **A retry goes before the stream, whoever is to receive it**, and no event

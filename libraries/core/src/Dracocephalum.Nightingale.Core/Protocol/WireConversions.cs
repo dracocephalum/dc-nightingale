@@ -109,6 +109,7 @@ public static class WireConversions
     {
         ConsumerStrategy.Pinned => Protocol.V1.ConsumerStrategy.Pinned,
         ConsumerStrategy.DispatchToSingle => Protocol.V1.ConsumerStrategy.DispatchToSingle,
+        ConsumerStrategy.PinnedByCorrelation => Protocol.V1.ConsumerStrategy.PinnedByCorrelation,
         _ => Protocol.V1.ConsumerStrategy.RoundRobin,
     };
 
@@ -119,6 +120,7 @@ public static class WireConversions
     {
         Protocol.V1.ConsumerStrategy.Pinned => ConsumerStrategy.Pinned,
         Protocol.V1.ConsumerStrategy.DispatchToSingle => ConsumerStrategy.DispatchToSingle,
+        Protocol.V1.ConsumerStrategy.PinnedByCorrelation => ConsumerStrategy.PinnedByCorrelation,
         _ => ConsumerStrategy.RoundRobin,
     };
 

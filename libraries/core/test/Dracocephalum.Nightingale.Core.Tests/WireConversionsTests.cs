@@ -82,6 +82,19 @@ public sealed class WireConversionsTests
         Protocol.V1.Numbering.Unspecified.ToNumbering().ShouldBe(Numbering.Global);
     }
 
+    [Theory]
+    [InlineData(ConsumerStrategy.RoundRobin, Protocol.V1.ConsumerStrategy.RoundRobin)]
+    [InlineData(ConsumerStrategy.Pinned, Protocol.V1.ConsumerStrategy.Pinned)]
+    [InlineData(ConsumerStrategy.DispatchToSingle, Protocol.V1.ConsumerStrategy.DispatchToSingle)]
+    [InlineData(ConsumerStrategy.PinnedByCorrelation, Protocol.V1.ConsumerStrategy.PinnedByCorrelation)]
+    public void ConsumerStrategy_ShouldRoundTripAndTreatUnspecifiedAsRoundRobin(ConsumerStrategy strategy, Protocol.V1.ConsumerStrategy wire)
+    {
+        // Act & Assert
+        strategy.ToWire().ShouldBe(wire);
+        wire.ToConsumerStrategy().ShouldBe(strategy);
+        Protocol.V1.ConsumerStrategy.Unspecified.ToConsumerStrategy().ShouldBe(ConsumerStrategy.RoundRobin);
+    }
+
     [Fact]
     public void RecordedEvent_ShouldRoundTripThroughTheDomainTypeUnchanged()
     {

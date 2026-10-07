@@ -27,4 +27,11 @@ public enum ConsumerStrategy
     /// takes over when it leaves. The whole group's order is kept by one consumer at a time.
     /// </summary>
     DispatchToSingle = 2,
+
+    /// <summary>
+    /// Like <see cref="Pinned"/>, but by the event's <see cref="MetadataKeys.CorrelationId"/>
+    /// metadata, so every event of one workflow goes to the same consumer whatever stream it
+    /// is in; an event without one is pinned by its stream name.
+    /// </summary>
+    PinnedByCorrelation = 3,
 }
