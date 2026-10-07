@@ -149,8 +149,10 @@ Metrics and spans:
   readable: a verb is a method being called, a noun is a stored delegate
   being invoked. No analyzer checks it; review does. Two shapes are allowed
   as they are: factories of results or errors under a class that supplies
-  the verb (`Results.NotFound()`, `Errors.GroupNotFound(stream, group)`), and
-  test-data builders in test projects (`Record(stream, 3)`, `Event("paid")`).
+  the verb (`Results.NotFound()`, `Errors.GroupNotFound(stream, group)`),
+  test-data builders in test projects (`Record(stream, 3)`, `Event("paid")`),
+  and the accessor a `[GeneratedRegex]` generates, named for its pattern with
+  a `Regex` suffix as the BCL samples do (`CollationNameRegex()`).
 
 ## One type per file, and the feature file
 
