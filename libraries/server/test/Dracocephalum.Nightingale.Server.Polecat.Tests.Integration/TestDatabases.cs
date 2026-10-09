@@ -87,7 +87,7 @@ internal static class TestDatabases
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Logging.ClearProviders();
-        builder.Services.AddNightingalePolecat(ConnectionStringFor(name), configure);
+        builder.Services.AddNightingalePolecat(ConnectionStringFor(name), TestAuth.Off(configure));
         var host = builder.Build();
         try
         {
@@ -122,7 +122,7 @@ internal static class TestDatabases
         await CreateEmptyAsync(name, collation);
 
         var services = new ServiceCollection();
-        services.AddNightingalePolecat(ConnectionStringFor(name), configure);
+        services.AddNightingalePolecat(ConnectionStringFor(name), TestAuth.Off(configure));
         await using var provider = services.BuildServiceProvider();
         var store = provider.GetRequiredService<global::Polecat.IDocumentStore>();
         foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync())

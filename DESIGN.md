@@ -423,6 +423,29 @@ revision is always checked on the main connection. Subscriptions, heads,
 ordinal reads, every write, the leases and the sequencer use the main
 connection whatever is configured.
 
+### 9. A call is authenticated by scheme and authorized by role and tenant
+
+`AuthenticationInterceptor` runs before every service method, reads the
+`authorization` header and hands its parameter to the handler for the
+scheme: `BasicAuthenticator` today, a token validator when the Bearer
+scheme comes. Whatever the handler, the result is one
+`NightingalePrincipal`, a name, a role and the tenant the credential is
+bound to or none, left on the call; the services never learn how the caller
+was authenticated. Each service method then asks `Authorization` for a
+role and a kind of access, and gets back the `TenantScope` the call works
+in: the credential's own tenant, or the one a global credential named in
+`nightingale-tenant`, resolved through `TenantDirectory`. The directory
+maps a tenant's id to the id the store keeps on its rows, which never
+changes and is kept on first use, and whether it is disabled, which is read
+again on a cadence by `TenantRefresher`; a tenant found disabled has its
+running groups failed here. Credentials are rows with a salted, peppered
+PBKDF2 hash in PHC form (`PasswordHasher`), the built-in administrator is
+configuration, and a verified name and password are remembered per
+instance for a short while, keyed by a digest of what was presented. The
+stores still take the one tenant the instance serves; the scope is checked
+against it, and the stores taking a tenant per call is the multi-tenancy
+slice.
+
 ## Conventions the code relies on
 
 - **Expected states** are the reference client's: any, no stream, stream

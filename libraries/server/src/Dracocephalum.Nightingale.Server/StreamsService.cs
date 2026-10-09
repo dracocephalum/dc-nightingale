@@ -1,5 +1,6 @@
 using Dracocephalum.Nightingale.Protocol;
 using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Server.Auth;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 
@@ -35,6 +36,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(responseStream);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Read).ConfigureAwait(false);
 
         var stream = RequireValidStreamName(request.Stream);
         var all = stream == StreamNames.All;
@@ -117,6 +119,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     {
         ArgumentNullException.ThrowIfNull(requestStream);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false);
 
         if (!await requestStream.MoveNext(context.CancellationToken).ConfigureAwait(false)
             || requestStream.Current.ContentCase != AppendRequest.ContentOneofCase.Options)
@@ -202,6 +205,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var stream = RequirePlainStreamName(request.Stream);
         if (!options.Deletion.AllowDelete)
@@ -218,6 +222,7 @@ public sealed class StreamsService(IStreamStore store, IStoreTail tail, TimeProv
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var stream = RequirePlainStreamName(request.Stream);
         if (!options.Deletion.AllowTombstone)

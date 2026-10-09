@@ -23,7 +23,7 @@ public sealed class EventsDbContextTests
     {
         // Arrange: the store as a host registers it, with ordinals, so every mapped column exists.
         var services = new ServiceCollection();
-        services.AddNightingalePolecat(DesignTime, options => options.Store.AssignOrdinals = true);
+        services.AddNightingalePolecat(DesignTime, TestAuth.Off(options => options.Store.AssignOrdinals = true));
         await using var provider = services.BuildServiceProvider();
         var databases = await provider.GetRequiredService<IDocumentStore>().Options.Tenancy!.BuildDatabasesAsync(TestContext.Current.CancellationToken);
         var declared = databases[0].BuildFeatureSchemas().SelectMany(feature => feature.Objects).OfType<Table>().ToList();

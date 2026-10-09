@@ -118,5 +118,10 @@ undecided adds it here rather than mentioning it once in a conversation.
   it needs inside its one transaction, since one command stops at the
   database's 2100 parameters, 190 events. Close by: issues filed, links
   recorded here.
-- **No authentication until the first beta.** See `PENDING.md`. Close by:
-  username and password per call, before beta.
+- **Credentials and tenants have no management calls yet.** The rows are
+  written by hand; see `PENDING.md`. Close by: the `Credentials` and `Tenants`
+  services.
+- **A runtime test is intermittent under a full run.** `Wake_ShouldDeliverTheOutboxAheadOfTheNextLiveEvent`
+  and `Delivery_ShouldDeliverTheOutboxFirstAndDequeueOnAcknowledgement` fail
+  once in several full runs of the server tests and never alone. Close by: the
+  cause found in the dispatcher's ordering, no wait added.

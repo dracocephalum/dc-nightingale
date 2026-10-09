@@ -3,6 +3,7 @@ using System.Threading.Channels;
 
 using Dracocephalum.Nightingale.Protocol;
 using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Server.Auth;
 using Grpc.Core;
 
 namespace Dracocephalum.Nightingale.Server;
@@ -39,6 +40,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -88,6 +90,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
 
@@ -157,6 +160,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -173,6 +177,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -211,6 +216,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var stream = request.Stream.Length == 0 ? null : RequireReadableStreamName(request.Stream);
         var response = new ListResponse();
@@ -237,6 +243,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -280,6 +287,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         var by = GetNumberKind(definition);
@@ -306,6 +314,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         var by = GetNumberKind(definition);
@@ -332,6 +341,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
 
         // Parked messages are rows and no running group holds them in memory, so any instance
         // removes them; there is no consumer to wake and nowhere to send the caller.
@@ -353,6 +363,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(requestStream);
         ArgumentNullException.ThrowIfNull(responseStream);
         ArgumentNullException.ThrowIfNull(context);
+        await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false);
 
         var cancellationToken = context.CancellationToken;
         if (!await requestStream.MoveNext(cancellationToken).ConfigureAwait(false)

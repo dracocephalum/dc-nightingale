@@ -1,3 +1,4 @@
+using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
@@ -19,7 +20,7 @@ public static class NightingaleServerExtensions
     public static IServiceCollection AddNightingaleServer(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddGrpc();
+        services.AddGrpc(grpc => grpc.Interceptors.Add<AuthenticationInterceptor>());
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<SubscriptionGroupRegistry>();
         services.TryAddSingleton<InstanceAddress>();
@@ -40,6 +41,8 @@ public static class NightingaleServerExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
         options.Cluster.Validate();
+        options.Auth.Validate();
+        options.Tenants.Validate();
         if (options.MaxEventsPerAppend < 1)
         {
             throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.MaxEventsPerAppend)} must be at least 1. It was {options.MaxEventsPerAppend}.");
@@ -72,7 +75,20 @@ public static class NightingaleServerExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentNullException.ThrowIfNull(configure);
         services.AddSingleton(new NightingaleSchema(schema));
+        services.AddSingleton(new StoreTenant(tenantId));
         services.AddDbContextFactory<NightingaleDbContext>(configure);
+        services.TryAddSingleton<ICredentialStore, CredentialStore>();
+        services.TryAddSingleton(provider => new PasswordHasher(provider.GetRequiredService<NightingaleOptionsBase>().Auth));
+        services.TryAddSingleton(provider => new BasicAuthenticator(
+            provider.GetRequiredService<NightingaleOptionsBase>().Auth,
+            provider.GetRequiredService<PasswordHasher>(),
+            provider.GetRequiredService<ICredentialStore>(),
+            provider.GetService<TimeProvider>() ?? TimeProvider.System,
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BasicAuthenticator>>()));
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<SubscriptionGroupRegistry>();
+        services.TryAddSingleton<TenantDirectory>();
+        services.AddHostedService<TenantRefresher>();
         services.AddSingleton<ISubscriptionGroupStore>(provider => new SubscriptionGroupStore(
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             tenantId,

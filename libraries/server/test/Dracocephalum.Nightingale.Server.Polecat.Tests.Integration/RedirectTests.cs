@@ -213,7 +213,7 @@ public sealed class RedirectTests : IAsyncLifetime
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
         builder.Services.AddNightingaleServer();
-        builder.Services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name), TestDatabases.FastBoot());
+        builder.Services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name), TestAuth.Off(TestDatabases.FastBoot()));
         var instance = builder.Build();
         instance.MapNightingaleServer();
         await instance.StartAsync(TestContext.Current.CancellationToken);

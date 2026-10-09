@@ -11,8 +11,8 @@ namespace Dracocephalum.Nightingale.Client;
 /// one cluster, used in rotation; <c>nightingale+discover://</c> names one host whose DNS record
 /// lists them. The keys, case-insensitive: <c>tls</c>, <c>tlsVerifyCert</c>,
 /// <c>keepAliveInterval</c>, <c>keepAliveTimeout</c> and <c>defaultDeadline</c>, the last three in
-/// milliseconds. A key the client does not know is refused, so a misspelt setting never passes
-/// for a default.
+/// milliseconds, and <c>tenant</c>, the tenant a global credential works in, a UUID or <c>*</c>.
+/// A key the client does not know is refused, so a misspelt setting never passes for a default.
 /// </summary>
 public sealed record NightingaleClientSettings
 {
@@ -48,11 +48,14 @@ public sealed record NightingaleClientSettings
     /// <summary>Gets the deadline given to a call that is not a read or a subscription and carries none of its own, or <see langword="null"/> for none.</summary>
     public TimeSpan? DefaultDeadline { get; init; }
 
-    /// <summary>Gets the user name in the string, if any. Held for when the server authenticates; not sent today.</summary>
+    /// <summary>Gets the user name in the string, if any; sent with every call, with the password, in the <c>authorization</c> header.</summary>
     public string? UserName { get; init; }
 
-    /// <summary>Gets the password in the string, if any. Held for when the server authenticates; not sent today.</summary>
+    /// <summary>Gets the password in the string, if any.</summary>
     public string? Password { get; init; }
+
+    /// <summary>Gets the tenant sent with every call in the <c>nightingale-tenant</c> header, a UUID or <c>*</c>; <see langword="null"/> to send none, which a tenant-bound credential needs not.</summary>
+    public string? Tenant { get; init; }
 
     /// <summary>Reads a connection string.</summary>
     /// <param name="connectionString">The connection string.</param>
@@ -143,8 +146,14 @@ public sealed record NightingaleClientSettings
             "KEEPALIVEINTERVAL" => settings with { KeepAliveInterval = ParseMilliseconds(key, value, allowNever: true) },
             "KEEPALIVETIMEOUT" => settings with { KeepAliveTimeout = ParseMilliseconds(key, value, allowNever: true) },
             "DEFAULTDEADLINE" => settings with { DefaultDeadline = ParseMilliseconds(key, value, allowNever: false) },
-            _ => throw new FormatException($"The setting '{key}' is not known; the settings are tls, tlsVerifyCert, keepAliveInterval, keepAliveTimeout and defaultDeadline."),
+            "TENANT" => settings with { Tenant = ParseTenant(key, value) },
+            _ => throw new FormatException($"The setting '{key}' is not known; the settings are tls, tlsVerifyCert, keepAliveInterval, keepAliveTimeout, defaultDeadline and tenant."),
         };
+
+    private static string ParseTenant(string key, string value) =>
+        value == "*" || Guid.TryParseExact(value, "D", out _)
+            ? value
+            : throw new FormatException($"The setting '{key}' must be a UUID in its canonical form or '*'.");
 
     private static (string UserName, string? Password) ParseCredentials(string text)
     {

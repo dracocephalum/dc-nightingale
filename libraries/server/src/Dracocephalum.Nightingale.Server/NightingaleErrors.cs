@@ -135,6 +135,36 @@ public static class NightingaleErrors
     public static RpcException OrdinalsNotEnabled(string stream) =>
         Build(StatusCode.FailedPrecondition, ErrorReason.OrdinalsNotEnabled, $"Stream '{stream}' cannot be read by ordinal: the store was not initialized with ordinals.", ("stream", stream));
 
+    /// <summary>The call's credentials were not accepted; which part was wrong is not said.</summary>
+    /// <param name="message">What the client is told, which names no name and no tenant.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException AuthenticationFailed(string message) =>
+        Build(StatusCode.Unauthenticated, ErrorReason.AuthenticationFailed, message);
+
+    /// <summary>The credential's role is below what the call needs.</summary>
+    /// <param name="required">The role the call needs.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException AccessDenied(CredentialRole required) =>
+        Build(StatusCode.PermissionDenied, ErrorReason.AccessDenied, $"The call needs the {required.ToString().ToLowerInvariant()} role.", ("required", required.ToString().ToLowerInvariant()));
+
+    /// <summary>The credential may not do this, for a reason other than its role.</summary>
+    /// <param name="message">Why.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException AccessDenied(string message) =>
+        Build(StatusCode.PermissionDenied, ErrorReason.AccessDenied, message);
+
+    /// <summary>No tenant with that id, or none named where one is needed, or one the credential is not bound to.</summary>
+    /// <param name="tenant">The tenant as named, or empty when none was.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException TenantNotFound(string tenant) =>
+        Build(StatusCode.NotFound, ErrorReason.TenantNotFound, tenant.Length == 0 ? "The call names no tenant, and its credential is not bound to one; send the nightingale-tenant header." : $"Tenant '{tenant}' was not found.", ("tenant", tenant));
+
+    /// <summary>The tenant is disabled.</summary>
+    /// <param name="tenantId">The tenant.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException TenantDisabled(Guid tenantId) =>
+        Build(StatusCode.FailedPrecondition, ErrorReason.TenantDisabled, $"Tenant '{tenantId:D}' is disabled.", ("tenant", tenantId.ToString("D")));
+
     /// <summary>A part of the contract this server does not implement yet. Not a reason: the status code says it all.</summary>
     /// <param name="feature">What was asked for.</param>
     /// <returns>The exception to throw.</returns>

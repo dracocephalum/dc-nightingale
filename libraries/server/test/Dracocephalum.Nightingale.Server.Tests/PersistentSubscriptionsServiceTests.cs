@@ -37,7 +37,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
-        builder.Services.AddNightingaleOptions(new TestOptions());
+        builder.Services.AddNightingaleOptions(new TestOptions { Auth = { Enabled = false } });
         builder.Services.AddSingleton(_store);
         builder.Services.AddSingleton(_groups);
         builder.Services.AddSingleton<IStoreTail>(_tail);

@@ -58,6 +58,23 @@ public sealed class SubscriptionGroupRegistry
         return true;
     }
 
+    /// <summary>Ends the calls of every consumer of every group running here, with the cause: the tenant was disabled.</summary>
+    /// <param name="cause">What each consumer's call ends with.</param>
+    public void StopAll(Exception cause)
+    {
+        ArgumentNullException.ThrowIfNull(cause);
+        List<SubscriptionGroupHost> hosts;
+        lock (_gate)
+        {
+            hosts = _groups.Values.Where(entry => !entry.Closing && entry.Ready.Task.IsCompletedSuccessfully).Select(entry => entry.Ready.Task.Result).ToList();
+        }
+
+        foreach (var host in hosts)
+        {
+            host.Runtime.Fail(cause);
+        }
+    }
+
     /// <summary>
     /// Seats a consumer at a group in this instance. The first seat starts the group: its holder
     /// sets <see cref="SubscriptionGroupSeat.Host"/> once it runs, or fails it, and the others

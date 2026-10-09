@@ -112,7 +112,8 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IDocumentStore>(),
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             provider.GetRequiredService<IStoreDatabase>(),
-            options));
+            options,
+            provider.GetService<TimeProvider>() ?? TimeProvider.System));
         services.AddSingleton(provider => new StoreInitializer(
             provider.GetRequiredService<IStoreDatabase>(),
             provider.GetRequiredService<StoreSchema>(),

@@ -6,16 +6,28 @@ to a ticket when work starts and is deleted when it ships. Items owed soon are
 in [`TODO.md`](TODO.md); deliberate behavioural differences from the reference event store are
 in [`VARIANCES.md`](VARIANCES.md).
 
-## Authentication
+## Authentication: what is left
 
-Nothing yet, like the reference event store's insecure mode. Username and password per call,
-carried in the standard `authorization` header with the Basic scheme, before
-the first beta; Bearer later. The client already reads credentials from its
-connection string and holds them unsent until then. A credential is bound to exactly one tenant or carries the admin
-role; admin is a role, not a tenant. Management operations — create and list
-tenants, manage credentials, administer persistent-subscription groups —
-form a fourth service area and take no tenant. Stream ACLs after that,
-together with stream metadata below.
+Basic authentication is in: a user name and password on every call, the
+built-in administrator from configuration, credentials in the gateway's
+tables, roles, and the tenant header; see `VARIANCES.md`. What is left, in
+order:
+
+- **Managing credentials and tenants through the API.** A `Credentials`
+  service: create, set a password, set the role and tenant, disable, delete,
+  list, and change one's own password; and a `Tenants` service: create,
+  rename, disable, enable, list. Admin only, a tenant-bound admin within its
+  tenant. Until then the rows are written by hand, and the built-in
+  administrator is the one credential.
+- **The Bearer scheme.** External tokens first, validated against an identity
+  provider's published keys with a claim mapping onto the same principal;
+  tokens the gateway issues itself only if an application needs them without
+  a provider, and then opaque and revocable, never a design of their own.
+- **Rate limiting per peer** on refused credentials, beside the lockout per
+  credential that is there.
+- **A pepper that never leaves a key vault**, an implementation of the pepper
+  step that asks the vault to HMAC, behind the same seam.
+- **Stream ACLs**, with stream metadata below.
 
 ## Stream metadata
 

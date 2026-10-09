@@ -21,7 +21,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
     private readonly IStreamStore _store = A.Fake<IStreamStore>(options => options.Strict());
     private readonly FakeTail _tail = new();
-    private readonly TestOptions _serverOptions = new();
+    private readonly TestOptions _serverOptions = new() { Auth = { Enabled = false } };
     private WebApplication? _app;
     private GrpcChannel? _channel;
 

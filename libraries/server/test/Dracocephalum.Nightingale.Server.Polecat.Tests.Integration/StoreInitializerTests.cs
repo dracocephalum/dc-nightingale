@@ -211,7 +211,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         await TestDatabases.ExecuteAsync(_name, "DROP INDEX ix_pc_events_category_seq ON dbo.pc_events");
         var services = new ServiceCollection();
-        services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name));
+        services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name), TestAuth.Off());
         await using var provider = services.BuildServiceProvider();
 
         // Act: the report and the apply a host calls without starting the server.
@@ -234,7 +234,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name));
+        services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name), TestAuth.Off());
         await using var provider = services.BuildServiceProvider();
 
         // Act
