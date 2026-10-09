@@ -159,6 +159,24 @@ public static class NightingaleErrors
     public static RpcException TenantNotFound(string tenant) =>
         Build(StatusCode.NotFound, ErrorReason.TenantNotFound, tenant.Length == 0 ? "The call names no tenant, and its credential is not bound to one; send the nightingale-tenant header." : $"Tenant '{tenant}' was not found.", ("tenant", tenant));
 
+    /// <summary>A credential of that name exists.</summary>
+    /// <param name="name">The name.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException CredentialExists(string name) =>
+        Build(StatusCode.AlreadyExists, ErrorReason.CredentialExists, $"A credential named '{name}' exists.", ("name", name));
+
+    /// <summary>No credential of that name among those the caller may manage.</summary>
+    /// <param name="name">The name.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException CredentialNotFound(string name) =>
+        Build(StatusCode.NotFound, ErrorReason.CredentialNotFound, $"No credential named '{name}'.", ("name", name));
+
+    /// <summary>A tenant of that name exists.</summary>
+    /// <param name="name">The name.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException TenantExists(string name) =>
+        Build(StatusCode.AlreadyExists, ErrorReason.TenantExists, $"A tenant named '{name}' exists.", ("name", name));
+
     /// <summary>The tenant is disabled.</summary>
     /// <param name="tenantId">The tenant.</param>
     /// <returns>The exception to throw.</returns>

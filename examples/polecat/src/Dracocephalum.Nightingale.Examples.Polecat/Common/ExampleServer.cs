@@ -74,6 +74,14 @@ public sealed class ExampleServer : IAsyncDisposable
     /// <returns>The connection; dispose it to close the channel.</returns>
     public ExampleConnection Connect() => new(ConnectionString);
 
+    /// <summary>Opens a connection as a credential made during a run: a tenant-bound one sends no tenant, unless the scenario names one on purpose.</summary>
+    /// <param name="name">The user name.</param>
+    /// <param name="password">The password.</param>
+    /// <param name="tenant">The tenant to name on every call, or none.</param>
+    /// <returns>The connection; dispose it when done.</returns>
+    public ExampleConnection ConnectAs(string name, string password, Guid? tenant = null) =>
+        new($"nightingale://{Uri.EscapeDataString(name)}:{Uri.EscapeDataString(password)}@{Address.Authority}?tls=false{(tenant is { } id ? "&tenant=" + id.ToString("D") : string.Empty)}");
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {

@@ -1,3 +1,4 @@
+using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
 using JasperFx;
@@ -107,6 +108,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddNightingaleSubscriptionGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
+        services.Replace(ServiceDescriptor.Singleton<ITenantProvisioner, PolecatTenantProvisioner>());
         services.AddSingleton<IStoreDatabase>(new StoreDatabase(connectionString));
         services.AddSingleton(provider => new StoreSchema(
             provider.GetRequiredService<IDocumentStore>(),
@@ -121,6 +123,9 @@ public static class ServiceCollectionExtensions
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<StoreInitializer>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StoreInitializer>.Instance));
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<StoreInitializer>());
+
+        // After the initializer, so the first refresh reads tables that are there.
+        services.AddHostedService<TenantRefresher>();
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
         if (options.Store.AssignOrdinals)
         {

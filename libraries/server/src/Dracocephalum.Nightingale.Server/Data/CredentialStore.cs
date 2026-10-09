@@ -57,4 +57,93 @@ public sealed class CredentialStore(IDbContextFactory<NightingaleDbContext> cont
         row.UpdatedAt = time.GetUtcNow();
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    /// <inheritdoc/>
+    public async Task CreateAsync(Credential credential, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(credential);
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        if (await context.Credentials.AnyAsync(row => row.Name == credential.Name, cancellationToken).ConfigureAwait(false))
+        {
+            throw new CredentialExistsException($"A credential named '{credential.Name}' exists.");
+        }
+
+        context.Credentials.Add(credential);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateException exception)
+        {
+            throw new CredentialExistsException($"A credential named '{credential.Name}' exists.", exception);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<Credential?> UpdateAsync(Guid id, CredentialRole? role, Guid? tenantId, bool? disabled, string? passwordHash, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await context.Credentials.SingleOrDefaultAsync(candidate => candidate.Id == id, cancellationToken).ConfigureAwait(false);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var now = time.GetUtcNow();
+        if (role is { } newRole)
+        {
+            row.Role = newRole;
+        }
+
+        if (tenantId is { } tenant)
+        {
+            row.TenantId = tenant == Guid.Empty ? null : tenant;
+        }
+
+        if (disabled is { } flag)
+        {
+            row.IsDisabled = flag;
+        }
+
+        if (passwordHash is not null)
+        {
+            row.PasswordHash = passwordHash;
+            row.PasswordChangedAt = now;
+            row.FailedAttempts = 0;
+            row.LockedUntil = null;
+        }
+
+        row.SecurityStamp = Guid.NewGuid();
+        row.UpdatedAt = now;
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return row;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await context.Credentials.SingleOrDefaultAsync(candidate => candidate.Id == id, cancellationToken).ConfigureAwait(false);
+        if (row is null)
+        {
+            return false;
+        }
+
+        context.Credentials.Remove(row);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<Credential>> ListAsync(Guid? tenantId, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var query = context.Credentials.AsNoTracking();
+        if (tenantId is { } tenant)
+        {
+            query = query.Where(row => row.TenantId == tenant);
+        }
+
+        return await query.OrderBy(row => row.Name).ToListAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

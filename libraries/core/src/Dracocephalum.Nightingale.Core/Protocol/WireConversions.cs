@@ -102,6 +102,52 @@ public static class WireConversions
     public static Numbering ToNumbering(this Protocol.V1.Numbering numbering) =>
         numbering == Protocol.V1.Numbering.Ordinal ? Numbering.Ordinal : Numbering.Global;
 
+    /// <summary>Maps a credential role to its wire form.</summary>
+    /// <param name="role">The role.</param>
+    /// <returns>The wire value.</returns>
+    public static Protocol.V1.CredentialRole ToWire(this CredentialRole role) => role switch
+    {
+        CredentialRole.Ops => Protocol.V1.CredentialRole.Ops,
+        CredentialRole.Admin => Protocol.V1.CredentialRole.Admin,
+        _ => Protocol.V1.CredentialRole.User,
+    };
+
+    /// <summary>Maps a credential role from its wire form; unspecified is <see langword="null"/>, for a caller to default or keep.</summary>
+    /// <param name="role">The wire value.</param>
+    /// <returns>The role, or <see langword="null"/> when unspecified.</returns>
+    public static CredentialRole? ToCredentialRole(this Protocol.V1.CredentialRole role) => role switch
+    {
+        Protocol.V1.CredentialRole.User => CredentialRole.User,
+        Protocol.V1.CredentialRole.Ops => CredentialRole.Ops,
+        Protocol.V1.CredentialRole.Admin => CredentialRole.Admin,
+        _ => null,
+    };
+
+    /// <summary>Maps a credential from its wire form.</summary>
+    /// <param name="info">The wire credential.</param>
+    /// <returns>The credential.</returns>
+    public static CredentialInfo ToCredentialInfo(this Protocol.V1.CredentialInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        return new CredentialInfo(
+            info.Name,
+            info.Role.ToCredentialRole() ?? CredentialRole.User,
+            info.Tenant.Length == 0 ? null : Guid.Parse(info.Tenant),
+            info.Disabled,
+            info.CreatedAt?.ToDateTimeOffset() ?? default,
+            info.PasswordChangedAt?.ToDateTimeOffset() ?? default,
+            info.LockedUntil?.ToDateTimeOffset());
+    }
+
+    /// <summary>Maps a tenant from its wire form.</summary>
+    /// <param name="info">The wire tenant.</param>
+    /// <returns>The tenant.</returns>
+    public static TenantInfo ToTenantInfo(this Protocol.V1.TenantInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        return new TenantInfo(Guid.Parse(info.Id), info.Name, info.Disabled, info.CreatedAt?.ToDateTimeOffset() ?? default);
+    }
+
     /// <summary>Maps a consumer strategy to its wire form.</summary>
     /// <param name="strategy">The strategy.</param>
     /// <returns>The wire value.</returns>

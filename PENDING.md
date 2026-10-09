@@ -9,16 +9,11 @@ in [`VARIANCES.md`](VARIANCES.md).
 ## Authentication: what is left
 
 Basic authentication is in: a user name and password on every call, the
-built-in administrator from configuration, credentials in the gateway's
-tables, roles, and the tenant header; see `VARIANCES.md`. What is left, in
-order:
+built-in administrator from configuration, credentials and tenants in the
+gateway's tables and managed through the `Credentials` and `Tenants`
+services, roles, and the tenant header; see `VARIANCES.md`. What is left,
+in order:
 
-- **Managing credentials and tenants through the API.** A `Credentials`
-  service: create, set a password, set the role and tenant, disable, delete,
-  list, and change one's own password; and a `Tenants` service: create,
-  rename, disable, enable, list. Admin only, a tenant-bound admin within its
-  tenant. Until then the rows are written by hand, and the built-in
-  administrator is the one credential.
 - **The Bearer scheme.** External tokens first, validated against an identity
   provider's published keys with a claim mapping onto the same principal;
   tokens the gateway issues itself only if an application needs them without
