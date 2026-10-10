@@ -87,6 +87,17 @@ by saying so in the document — *Precedence* in
 
 <!-- /agentics:guidelines -->
 
+## This repository's own documents
+
+Two root documents the toolkit's table does not know, in its columns; they sit
+outside the generated block, where a sync never reaches, because they are
+documents of the repository and not rules.
+
+| When you are | Read |
+|---|---|
+| Making the API behave differently from the reference event store on purpose, or asked why it differs | [`VARIANCES.md`](VARIANCES.md) — record the difference and the reason there |
+| Deferring a product feature with its approach already decided | [`PENDING.md`](PENDING.md) — record it there; `TODO.md` is for what is owed soon |
+
 ## Conventions
 
 | Thing | Convention | Example |
