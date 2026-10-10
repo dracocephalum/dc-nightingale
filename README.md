@@ -25,15 +25,20 @@ map of categories.
 
 - One solution per component; **no root solution** — build the component you
   are changing.
+- `agentics/` and the toolkit's shims under `.claude/skills/` are managed by
+  the toolkit and replaced whole by a sync, a shim of the same name included;
+  this repository's own rules live in `docs/rules/`.
 - Build configuration is inherited from the root by every component.
 - Every component has its own `README.md`: what it is, how to run it, how to
   test it.
 
 ## Conventions and rules
 
-`AGENTS.md` is the index. The rules under `agentics/rules/` are the standard for
-code, tests, dependencies, pull requests, and review — for people as much as
-for agents.
+`AGENTS.md` is the index. The rules under `agentics/rules/` are the toolkit's
+standard for code, tests, dependencies, pull requests, and review — for people
+as much as for agents — and a sync replaces that folder whole, so an edit
+there is lost. The rules this repository adds are under `docs/rules/`, with
+their own index there.
 
 ## Licence
 

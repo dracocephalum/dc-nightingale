@@ -5,7 +5,7 @@
 
 toolkit:
   url: https://github.com/dracocephalum/dc-agentics
-  commit: "04bac016a200"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
+  commit: "81322e0cb39a"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
   payload-path: "repo/payload"         # where the payload lived AT that commit - the toolkit restructures, and an upgrade diffing the wrong root sees every file as new. Fixed value, not a placeholder
   initialized: "2026-09-14"            # yyyy-mm-dd
   by: "Claude Code / claude-fable-5-1" # e.g. Claude Code / claude-fable-5-1
@@ -57,3 +57,13 @@ guidelines:
   # Fixed values, not placeholders - they describe the toolkit, not this repo.
   model-baseline: "claude-opus-5, claude-fable-5-1"
   verified: "2026-09-07"               # last end-to-end initialization trial on that line
+rules:
+  # What the toolkit owns and what this repository adds - agentics/rules/layout.md,
+  # "The toolkit's rules and the repository's". agentics/ and the toolkit's shims under
+  # .claude/skills/ are the toolkit's: a sync replaces them whole, and an edit there is lost.
+  local:                              # folders holding this repository's own rules, once it has any; each has an
+    - docs/rules                      # AGENTS.md index (from agentics/templates/rules-AGENTS.md) the sync reads
+  excluded: []                        # toolkit rules opted out of, as paths under agentics/rules/
+                                      # (coding/csharp/csharp-ef-core-rules.md); the sync removes the file and its
+                                      # row. Excluding and writing a local replacement is the one override that
+                                      # holds; a local rule beside a toolkit rule it contradicts has no referee
