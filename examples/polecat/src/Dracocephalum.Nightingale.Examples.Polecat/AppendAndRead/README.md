@@ -5,14 +5,13 @@ that narrates each step and as a test that asserts the same run.
 
 ## What it does
 
-Reserves a random database name on the local SQL Server, hosts the
-Polecat-backed server in its own process on a loopback port, which creates and
-initializes that database, and drives it through the client: append three
-events to a new stream, read them forwards with the head and the metadata,
-read the last two backwards, have a stale append refused with the stream's
-actual revision, retry the first append with the same ids and see it succeed
-without writing again, read a stream that never existed, then drop the
-database.
+Creates a tenant of its own in the run's database and drives the run's
+server, hosted in the program's own process on a loopback port, through the
+client working in that tenant: append three events to a new stream, read them
+forwards with the head and the metadata, read the last two backwards, have a
+stale append refused with the stream's actual revision, retry the first
+append with the same ids and see it succeed without writing again, and read a
+stream that never existed.
 The scenario's test runs exactly the same code and asserts the report it
 returns.
 

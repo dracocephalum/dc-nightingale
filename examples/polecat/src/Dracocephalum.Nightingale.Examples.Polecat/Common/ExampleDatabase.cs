@@ -6,10 +6,10 @@ using Microsoft.Data.SqlClient;
 namespace Dracocephalum.Nightingale.Examples.Polecat.Common;
 
 /// <summary>
-/// A throwaway database name on the local server. The server creates and initializes the database
-/// itself when it starts, so the sample only picks a name no other run uses and drops the
-/// database on disposal, leaving the server as it was found. The sample assumes nothing about the
-/// server beyond the master connection string it was given.
+/// A throwaway database name on the local server, one per run. The run's server creates and
+/// initializes the database itself when it starts, so the run only picks a name no other run uses
+/// and drops the database on disposal, leaving the server as it was found. The samples assume
+/// nothing about the server beyond the master connection string they were given.
 /// </summary>
 public sealed class ExampleDatabase : IAsyncDisposable
 {

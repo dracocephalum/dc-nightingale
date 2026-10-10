@@ -1,5 +1,4 @@
 using Dracocephalum.Nightingale.Client;
-using Dracocephalum.Nightingale.Server.Data;
 
 namespace Dracocephalum.Nightingale.Examples.Polecat.Common;
 
@@ -23,14 +22,25 @@ public sealed class ExampleConnection : IAsyncDisposable
     /// <summary>Gets the client.</summary>
     public NightingaleClient Client { get; }
 
-    /// <summary>Connects one client to several servers of one cluster, named together in one connection string.</summary>
+    /// <summary>Connects one client to several servers of one cluster, named together in one connection string, working in the given tenant.</summary>
+    /// <param name="tenant">The tenant every call names.</param>
     /// <param name="servers">The servers.</param>
     /// <returns>The connection; dispose it to close its channels.</returns>
-    public static ExampleConnection ToCluster(params ExampleServer[] servers)
+    public static ExampleConnection ToCluster(TenantInfo tenant, params ExampleServer[] servers)
     {
+        ArgumentNullException.ThrowIfNull(tenant);
         ArgumentNullException.ThrowIfNull(servers);
-        return new($"nightingale://{UserCredentials.AdminUserName}:{ExampleServer.AdminPassword}@{string.Join(',', servers.Select(server => server.Address.Authority))}?tls=false&tenant={Tenant.DefaultId:D}");
+        return new(ToConnectionString(UserCredentials.AdminUserName, ExampleServer.AdminPassword, string.Join(',', servers.Select(server => server.Address.Authority)), tenant.Id));
     }
+
+    /// <summary>Builds the connection string the samples open their clients from.</summary>
+    /// <param name="name">The user name.</param>
+    /// <param name="password">The password.</param>
+    /// <param name="authority">The server, or the servers of one cluster separated by commas, as host and port.</param>
+    /// <param name="tenant">The tenant to name on every call, or none.</param>
+    /// <returns>The connection string.</returns>
+    internal static string ToConnectionString(string name, string password, string authority, Guid? tenant) =>
+        $"nightingale://{Uri.EscapeDataString(name)}:{Uri.EscapeDataString(password)}@{authority}?tls=false{(tenant is { } id ? "&tenant=" + id.ToString("D") : string.Empty)}";
 
     /// <inheritdoc/>
     public ValueTask DisposeAsync() => Client.DisposeAsync();

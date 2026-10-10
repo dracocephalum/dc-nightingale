@@ -4,10 +4,11 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Examples.Polecat.Tests;
 
 /// <summary>
-/// The program around the scenarios and the environment, with no server involved: the scenarios
-/// here are delegates.
+/// The program around the scenarios and the environment: the scenarios here are delegates that
+/// touch no server, and the run they are given is the collection's.
 /// </summary>
-public sealed class ExampleProgramTests
+[Collection(SharedRun.Name)]
+public sealed class ExampleProgramTests(SharedRun.Fixture fixture)
 {
     [Fact]
     public async Task RunAsync_WithoutArguments_ShouldListTheScenariosAndRunNone()
@@ -37,7 +38,7 @@ public sealed class ExampleProgramTests
         var ran = new List<string>();
 
         // Act
-        var exit = await ExampleProgram.RunAsync(["second"], [Completing("first", ran), Completing("second", ran)], output, error);
+        var exit = await ExampleProgram.RunAsync(["second"], [Completing("first", ran), Completing("second", ran)], output, error, fixture.Run);
 
         // Assert
         exit.ShouldBe(0);
@@ -56,7 +57,7 @@ public sealed class ExampleProgramTests
         var failing = new ExampleScenario("broken", "breaks", (_, _, _) => throw new InvalidOperationException("step 3 broke"));
 
         // Act
-        var exit = await ExampleProgram.RunAsync(["all"], [Completing("first", ran), failing, Completing("last", ran)], output, error);
+        var exit = await ExampleProgram.RunAsync(["all"], [Completing("first", ran), failing, Completing("last", ran)], output, error, fixture.Run);
 
         // Assert
         exit.ShouldBe(1);
@@ -116,7 +117,7 @@ public sealed class ExampleProgramTests
         var first = ExampleDatabase.Reserve(ExampleEnvironment.DefaultMasterConnectionString);
         var second = ExampleDatabase.Reserve(ExampleEnvironment.DefaultMasterConnectionString);
 
-        // Assert: nothing was created, so nothing needs dropping; the names are what the sweep looks for.
+        // Assert: nothing was created, so nothing needs dropping; the names are what a sweep looks for.
         first.Name.ShouldStartWith("nightingale_example_");
         first.Name.ShouldNotBe(second.Name);
         first.ConnectionString.ShouldContain($"Initial Catalog={first.Name}");
@@ -125,9 +126,9 @@ public sealed class ExampleProgramTests
     private static ExampleScenario Completing(string name, List<string> ran) => ExampleScenario.Create(
         name,
         $"shows {name}",
-        async (master, output, _) =>
+        async (run, output, _) =>
         {
-            master.ShouldNotBeNullOrWhiteSpace();
+            run.ShouldNotBeNull();
             ran.Add(name);
             await output.WriteLineAsync($"1. A step of {name}.");
             return name;

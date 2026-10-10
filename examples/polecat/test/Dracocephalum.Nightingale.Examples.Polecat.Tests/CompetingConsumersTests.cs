@@ -8,18 +8,18 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.Tests;
 /// The scenario as an integration test: the same code the program runs, against the local SQL
 /// Server named by <c>NIGHTINGALE_SQLSERVER</c> or the local default, asserting the report.
 /// </summary>
-[Collection(OwnDatabase.Name)]
+[Collection(SharedRun.Name)]
 [Trait("Category", "Integration")]
-public sealed class CompetingConsumersTests
+public sealed class CompetingConsumersTests(SharedRun.Fixture fixture)
 {
     [Fact]
     public async Task RunAsync_ShouldPinStreamsEndBothOnUpdateAndHandOverWhatALeaverHeld()
     {
         // Arrange
-        var master = ExampleEnvironment.ResolveMasterConnectionString();
+        var run = fixture.Run;
 
         // Act
-        var report = await Scenario.RunAsync(master, TextWriter.Null, TestContext.Current.CancellationToken);
+        var report = await Scenario.RunAsync(run, TextWriter.Null, TestContext.Current.CancellationToken);
 
         // Assert: pinned, every stream's events went to one consumer, and all eight arrived.
         report.PinnedDelivered.ShouldBe(8);

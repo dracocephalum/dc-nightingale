@@ -22,7 +22,7 @@ public static class Scenario
     /// <param name="StateAfterTombstone">What a read reported after the tombstone.</param>
     /// <param name="RevivedRevision">The revision the first append to the freed name reported.</param>
     /// <param name="ConflictActualRevision">The actual revision reported when a stale delete was refused.</param>
-    /// <param name="DefaultServerRefusal">The exception a server with the default settings threw on delete.</param>
+    /// <param name="DefaultServerRefusal">The exception the run's server, with the default settings, threw on delete.</param>
     public sealed record Report(
         string Stream,
         int CategoryBefore,
@@ -35,32 +35,34 @@ public static class Scenario
         string DefaultServerRefusal);
 
     /// <summary>Runs the scenario.</summary>
-    /// <param name="masterConnectionString">A connection string to the server's master database.</param>
+    /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
     /// <param name="output">Where the steps are narrated.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
-    public static async Task<Report> RunAsync(string masterConnectionString, TextWriter output, CancellationToken cancellationToken)
+    public static async Task<Report> RunAsync(ExampleRun run, TextWriter output, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(output);
 
-        await using var database = ExampleDatabase.Reserve(masterConnectionString);
-        await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the server creates it.").ConfigureAwait(false);
+        var tenant = await run.CreateTenantAsync("delete-and-tombstone", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; its streams live there and nowhere else.").ConfigureAwait(false);
 
-        await using var server = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken, options =>
+        await using var server = await run.StartServerAsync(cancellationToken, options =>
         {
             options.Deletion.AllowDelete = true;
             options.Deletion.AllowTombstone = true;
         }).ConfigureAwait(false);
-        await output.WriteLineAsync($"2. Server listening at {server.Address} with delete and tombstone allowed, which the default host does not.").ConfigureAwait(false);
+        await output.WriteLineAsync($"2. Started a server at {server.Address} with delete and tombstone allowed, which the run's server, with the default settings, does not.").ConfigureAwait(false);
 
-        await using var connection = server.Connect();
+        await using var connection = server.Connect(tenant);
         var client = connection.Client;
         const string stream = "orders-1";
 
         await client.AppendToStreamAsync(stream, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
-        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
+        var appended = await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
+        await ExampleMark.WaitUntilCoversAsync(client, appended.Position, cancellationToken).ConfigureAwait(false);
         var before = await CountAsync(client, "$ce-orders", cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"3. Appended two events to {stream} and one to orders-2; $ce-orders holds {before}.").ConfigureAwait(false);
+        await output.WriteLineAsync($"3. Appended two events to {stream} and one to orders-2; once the store's mark covered them, $ce-orders holds {before}.").ConfigureAwait(false);
 
         long conflictActual;
         try
@@ -97,12 +99,10 @@ public static class Scenario
         var revived = await client.AppendToStreamAsync(stream, StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"7. Appended to {stream} again as a new stream; revision {revived.Revision}.").ConfigureAwait(false);
 
-        await using var defaultServer = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
-        await using var defaultConnection = defaultServer.Connect();
+        await using var defaultConnection = run.Server.Connect(tenant);
         var defaultClient = defaultConnection.Client;
         var refusal = await CaptureFailureAsync(() => defaultClient.DeleteStreamAsync(stream, StreamState.Any, cancellationToken)).ConfigureAwait(false);
-        await output.WriteLineAsync($"8. A second server with the default settings refused to delete {stream}: {refusal}.").ConfigureAwait(false);
-        await output.WriteLineAsync("9. Dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync($"8. The run's server, with the default settings, refused to delete {stream}: {refusal}.").ConfigureAwait(false);
 
         return new Report(stream, before, readAfterDelete, after, appendAfterDelete, afterTombstone, revived.Revision, conflictActual, refusal);
     }

@@ -1,7 +1,6 @@
 using System.Net;
 
 using Dracocephalum.Nightingale.Server;
-using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -54,6 +53,11 @@ public sealed class ExampleServer : IAsyncDisposable
             // setting off. The password is the sample's, not a secret.
             options.Auth.AdminPassword = AdminPassword;
             options.Auth.AllowInsecureTransport = true;
+
+            // A store setting fixed when the database is initialized is every server's over that
+            // database afterwards: the run's store numbers the virtual streams, since one scenario
+            // shows the ordinals, so every sample server says so.
+            options.Store.AssignOrdinals = true;
             configure?.Invoke(options);
         });
 
@@ -67,12 +71,19 @@ public sealed class ExampleServer : IAsyncDisposable
         return new ExampleServer(app, new Uri(address));
     }
 
-    /// <summary>Gets the connection string a client of this server is opened from.</summary>
-    public string ConnectionString => $"nightingale://{UserCredentials.AdminUserName}:{AdminPassword}@{Address.Authority}?tls=false&tenant={Tenant.DefaultId:D}";
-
-    /// <summary>Connects a client to this server, from its connection string.</summary>
+    /// <summary>Connects a client to this server as the built-in administrator, working in the given tenant: the scenario's.</summary>
+    /// <param name="tenant">The tenant every call names.</param>
     /// <returns>The connection; dispose it to close the channel.</returns>
-    public ExampleConnection Connect() => new(ConnectionString);
+    public ExampleConnection Connect(TenantInfo tenant)
+    {
+        ArgumentNullException.ThrowIfNull(tenant);
+        return new(ExampleConnection.ToConnectionString(UserCredentials.AdminUserName, AdminPassword, Address.Authority, tenant.Id));
+    }
+
+    /// <summary>Connects a client as the built-in administrator naming no tenant: for the management calls, which are above any tenant.</summary>
+    /// <returns>The connection; dispose it to close the channel.</returns>
+    public ExampleConnection ConnectAsAdministrator() =>
+        new(ExampleConnection.ToConnectionString(UserCredentials.AdminUserName, AdminPassword, Address.Authority, tenant: null));
 
     /// <summary>Opens a connection as a credential made during a run: a tenant-bound one sends no tenant, unless the scenario names one on purpose.</summary>
     /// <param name="name">The user name.</param>
@@ -80,7 +91,7 @@ public sealed class ExampleServer : IAsyncDisposable
     /// <param name="tenant">The tenant to name on every call, or none.</param>
     /// <returns>The connection; dispose it when done.</returns>
     public ExampleConnection ConnectAs(string name, string password, Guid? tenant = null) =>
-        new($"nightingale://{Uri.EscapeDataString(name)}:{Uri.EscapeDataString(password)}@{Address.Authority}?tls=false{(tenant is { } id ? "&tenant=" + id.ToString("D") : string.Empty)}");
+        new(ExampleConnection.ToConnectionString(name, password, Address.Authority, tenant));
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
