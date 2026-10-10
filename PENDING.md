@@ -171,6 +171,42 @@ What enabling it would mean, each a design of its own:
   before its tenant is known; which is the model the authentication design
   takes from the start, so that it does not move later.
 
+### A registry of stores
+
+The shape that holds database-per-tenant and today's layout as its two
+corners is a registry of **stores**, with tenants placed into them: one store
+with many conjoined tenants is what runs today, one store per tenant is the
+heading above, and several stores with several tenants each is the mix. A
+store is exactly the unit the composition root serves now — one database and
+its read-only secondary, one tail, one sequencer lease, one set of gateway
+tables, one registry of running groups, one marker row — so the work is to
+instantiate that unit per store, keyed by a store id and activated on first
+use, and to give the tenant registry a store column. Positions, `$all`, the
+wildcard, ordinals and persistent groups are coherent within a store and
+meaningless across stores, which the features call says per tenant. A store
+carries a backend kind, so stores on SQL Server and on PostgreSQL mix behind
+one gateway once the Marten backend exists; a backend is admitted by what the
+store port demands — an append-only total order per store, atomic
+multi-event appends with the per-stream revision check, a high-water mark the
+tail can follow, the category and type projections, and a lease — and a
+database without a sequence of its own brings one, as the ordinal sequencer
+already does.
+
+Three decisions are settled now so that they do not move later. The registry
+is **driven by `appsettings` first**: stores are declared in configuration,
+not registered at runtime, until the dynamic design above is wanted and
+mature; the registry row then exists already, with the same columns. A store
+row holds a **reference to its connection strings, never the secret**: a name
+the host resolves through its configuration or a vault provider at
+activation, as the pepper is resolved, so the table holds nothing worth
+stealing and rotation is a configuration change. And the gateway's own tables
+are a **control plane with a connection string of their own, defaulting to
+the store's**, so a single-store deployment keeps today's layout and a
+multi-store one points the control plane elsewhere without a change of shape;
+the tenant and store refresh is the cadence `TenantRefresher` already runs. A
+tenant moving between stores is an export and an import with positions
+renumbered, never a transparent feature.
+
 ## Ordinals on a store initialized without them
 
 Ordinal numbering of the virtual streams (`DESIGN.md`, seam 6) is a store
