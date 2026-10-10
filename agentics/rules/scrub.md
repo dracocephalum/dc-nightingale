@@ -155,10 +155,18 @@ pointing at nothing teaches an agent to distrust the table.
     find agentics/rules -name '*.md' | sort
     grep -oE '\(agentics/rules/[^)]*\.md\)' AGENTS.md | tr -d '()' | sort -u
 
-**And no row twice.** A table row that appears more than once is an upgrade
-that applied the same template change twice; nothing else flags it:
+**And no row twice.** A table row that appears more than once is a local index
+repeating a toolkit row; nothing else flags it:
 
     grep '^| ' AGENTS.md | sort | uniq -d
+
+**The block between the `agentics:guidelines` comments is generated.** A
+finding inside it is fixed at its source — the toolkit's template, or the
+index under `docs/rules/` — and by re-running the sync, never by editing the
+block; a row the repository typed into it by hand is itself a finding, because
+the next sync removes it. [`layout.md`](layout.md), *The toolkit's rules and
+the repository's*. A local index links relative to the repository root, where
+its rows land, so check 2 resolves its links from there.
 
 **Reachable, not listed.** Several documents are deliberately reached through
 another — the C# and markdown checklists via `coding/code-review.md`, each host

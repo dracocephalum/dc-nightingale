@@ -18,6 +18,11 @@
   Every link below is relative to the REPOSITORY ROOT, where the output lands -
   so they do not resolve from this directory. That is correct; do not "fix"
   them to climb out of agentics/templates/.
+
+  The block between the two agentics:guidelines comments is regenerated in the
+  generated copy by every sync, from this file and from the repository's own
+  rule indexes: nothing inside it may carry a placeholder, and nothing outside
+  it is the toolkit's to change afterwards.
 -->
 
 # {{REPO_NAME}}
@@ -34,7 +39,9 @@ Primary framework: .NET. Namespace prefix: `{{PREFIX}}`.
 |---|---|
 | `src/` | production code |
 | `test/` | test projects, one per project under test |
-| `agentics/` | what agents follow — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/` |
+| `agentics/` | the toolkit's — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/`; replaced whole by a sync, never edited in place |
+| `docs/rules/` | this repository's own rules, once it has any, and `AGENTS.md` there is their index — started from `agentics/templates/rules-AGENTS.md`; the sync copies its rows into the table below |
+| `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync, a shim of the same name included |
 | `{{SOLUTION_NAME}}.slnx` | the solution — this repository is a single component |
 
 <!-- ==== MONOREPO variant - delete if this is standalone ==== -->
@@ -55,7 +62,9 @@ exist.
 | `examples/` | runnable samples of this repository's own libraries, never shipped |
 | `infrastructure/` | provisioning (Terraform and similar) |
 | `ui/` | front-end applications |
-| `agentics/` | what agents follow — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/` |
+| `agentics/` | the toolkit's — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/`; replaced whole by a sync, never edited in place |
+| `docs/rules/` | this repository's own rules, once it has any, and `AGENTS.md` there is their index — started from `agentics/templates/rules-AGENTS.md`; the sync copies its rows into the table below |
+| `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync, a shim of the same name included |
 | `build/` | CI/CD pipeline definitions |
 
 <!-- ==== end variants ==== -->
@@ -78,6 +87,8 @@ Read the linked file **before** acting on a matching request, rather than
 working from memory. Each row states *when* it applies; that trigger is what
 makes it selectable from a plain-language request.
 
+<!-- agentics:guidelines -->
+
 | When you are | Read |
 |---|---|
 | Writing, reviewing or refactoring C# in this repository | [`agentics/rules/coding/csharp/csharp-coding-rules.md`](agentics/rules/coding/csharp/csharp-coding-rules.md) |
@@ -92,13 +103,11 @@ makes it selectable from a plain-language request.
 | Reviewing a pull request, a diff, or a set of changes | [`agentics/rules/coding/code-review.md`](agentics/rules/coding/code-review.md) — then the C# or markdown checklist it names |
 | Scrubbing, sweeping or auditing this repository for drift or inconsistency — or after any move, rename or restructure | [`agentics/rules/scrub.md`](agentics/rules/scrub.md) |
 | Measuring what this repository's documents cost an agent to read, or compacting them | [`agentics/rules/optimize.md`](agentics/rules/optimize.md) — measures unless asked for more |
-| Bringing this repository up to a newer version of the toolkit it was initialized with | the toolkit's own `repo/upgrade.md` — it diffs two commits of dc-agentics, so a checkout of it must be present; `.agentics.yaml` records which commit this repository came from |
+| Bringing this repository up to a newer version of the toolkit it was initialized with | the toolkit's own `repo/upgrade.md`, operation 2 — its script replaces `agentics/` and the toolkit's shims whole and regenerates this block, so a checkout of dc-agentics must be present; `.agentics.yaml` records which commit this repository came from |
 | Finding what exists — which component does what, where something lives | `README.md` here; in a monorepo, each category's `README.md` is the map of its components, and each component's `README.md` says how to run it |
 | Understanding how the pieces fit, or why the code is shaped the way it is | `DESIGN.md` at the root — the seams and the reasons; type comments say what, it says why. Written the day a reader could not infer it; see *Root documents* in [`agentics/rules/layout.md`](agentics/rules/layout.md) |
 | Starting any source-control action, or asked what this repository's settings and defaults are | [`.agentics.yaml`](.agentics.yaml) — the mode the agent works in (`auto`, `local`, `manual`) and every choice made at initialization |
 | Leaving something unfinished, blocked, or undecided — or asked what is still open | [`TODO.md`](TODO.md) — add it there; a remark in a conversation is lost |
-
-{{ADDITIONAL_GUIDELINE_ROWS}}
 
 The documents above are the substance, for every tool. In Claude Code some
 are also invocable through a shim in `.claude/skills/` -
@@ -111,8 +120,17 @@ following the same document. `/review` is the rules pass; the built-in
 than fixing. `/optimize` is about what the documents cost to read, and only
 measures unless asked for more.
 
-Add a row whenever a rules document is added under `agentics/rules/`. A document
-nobody is pointed at will not be read.
+This block is generated: the toolkit's rows, then the rows of every index the
+`rules.local` folders in `.agentics.yaml` hold (`docs/rules/AGENTS.md`), and a
+sync rewrites it. A rule of this repository's own is a file under `docs/rules/`
+and a row in that index, never a row typed here — one typed here is gone at
+the next sync. Everything outside the block is this repository's and no sync
+touches it. A document nobody is pointed at will not be read. A local rule
+that disagrees with a toolkit rule has no referee: replace by excluding, amend
+by saying so in the document — *Precedence* in
+[`agentics/rules/layout.md`](agentics/rules/layout.md).
+
+<!-- /agentics:guidelines -->
 
 ## Conventions
 

@@ -36,7 +36,9 @@
 |---|---|
 | `src/` | production code |
 | `test/` | tests |
-| `agentics/rules/` | the rules this repository is held to — see `AGENTS.md` |
+| `agentics/` | the toolkit's rules and templates — managed by the toolkit and replaced whole by a sync; see `AGENTS.md` |
+| `docs/rules/` | this repository's own rules; `AGENTS.md` there is their index |
+| `.claude/skills/` | Claude Code shims; the toolkit's are replaced by a sync, a shim of the same name included |
 
 <!-- ==== MONOREPO variant - delete if this is standalone ==== -->
 
@@ -65,14 +67,19 @@ map of categories.
 - Build configuration is inherited from the root by every component.
 - Every component has its own `README.md`: what it is, how to run it, how to
   test it.
+- `agentics/` and the toolkit's shims under `.claude/skills/` are managed by
+  the toolkit and replaced whole by a sync, a shim of the same name included;
+  this repository's own rules live in `docs/rules/`.
 
 <!-- ==== end variants ==== -->
 
 ## Conventions and rules
 
-`AGENTS.md` is the index. The rules under `agentics/rules/` are the standard for
-code, tests, dependencies, pull requests, and review — for people as much as
-for agents.
+`AGENTS.md` is the index. The rules under `agentics/rules/` are the toolkit's
+standard for code, tests, dependencies, pull requests, and review — for people
+as much as for agents — and a sync replaces that folder whole, so an edit
+there is lost. The rules this repository adds are under `docs/rules/`, with
+their own index there.
 
 ## Licence
 
