@@ -8,18 +8,18 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.Tests;
 /// The scenario as an integration test: the same code the program runs, against the local SQL
 /// Server named by <c>NIGHTINGALE_SQLSERVER</c> or the local default, asserting the report.
 /// </summary>
-[Collection(OwnDatabase.Name)]
+[Collection(SharedRun.Name)]
 [Trait("Category", "Integration")]
-public sealed class ClusterRedirectTests
+public sealed class ClusterRedirectTests(SharedRun.Fixture fixture)
 {
     [Fact]
     public async Task RunAsync_ShouldSendTheClientToTheInstanceThatRunsTheGroup()
     {
         // Arrange
-        var master = ExampleEnvironment.ResolveMasterConnectionString();
+        var run = fixture.Run;
 
         // Act
-        var report = await Scenario.RunAsync(master, TextWriter.Null, TestContext.Current.CancellationToken);
+        var report = await Scenario.RunAsync(run, TextWriter.Null, TestContext.Current.CancellationToken);
 
         // Assert: the second consumer was refused by the owner, not told to go elsewhere, and
         // the replay asked of the other instance reached the consumer.

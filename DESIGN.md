@@ -528,5 +528,6 @@ transports at once and of a client that can fall back between them.
   `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
   path, and the two guards above. Each creates its databases and drops them.
 - `examples/` holds one program per backend that narrates each of its scenarios
-  end to end, and a test per scenario that asserts the same run, against a
-  database the server creates and the scenario drops.
+  end to end, and a test per scenario that asserts the same run, against one
+  database per run that the run's server creates and the run drops, with a
+  tenant per scenario.

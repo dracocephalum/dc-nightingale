@@ -8,18 +8,18 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.Tests;
 /// The scenario as an integration test: the same code the program runs, against the local SQL
 /// Server named by <c>NIGHTINGALE_SQLSERVER</c> or the local default, asserting the report.
 /// </summary>
-[Collection(OwnDatabase.Name)]
+[Collection(SharedRun.Name)]
 [Trait("Category", "Integration")]
-public sealed class PersistentSubscriptionTests
+public sealed class PersistentSubscriptionTests(SharedRun.Fixture fixture)
 {
     [Fact]
     public async Task RunAsync_ShouldConsumeRetryParkReplayAndResume()
     {
         // Arrange
-        var master = ExampleEnvironment.ResolveMasterConnectionString();
+        var run = fixture.Run;
 
         // Act
-        var report = await Scenario.RunAsync(master, TextWriter.Null, TestContext.Current.CancellationToken);
+        var report = await Scenario.RunAsync(run, TextWriter.Null, TestContext.Current.CancellationToken);
 
         // Assert: all three were in flight before the payment was refused, so its redelivery follows the
         // shipment; the payment event was delivered twice, then parked; the checkpoint covers all three

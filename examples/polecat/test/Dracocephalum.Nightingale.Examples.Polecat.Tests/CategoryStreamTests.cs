@@ -8,25 +8,27 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.Tests;
 /// The scenario as an integration test: the same code the program runs, against the local SQL
 /// Server named by <c>NIGHTINGALE_SQLSERVER</c> or the local default, asserting the report.
 /// </summary>
-[Collection(OwnDatabase.Name)]
+[Collection(SharedRun.Name)]
 [Trait("Category", "Integration")]
-public sealed class CategoryStreamTests
+public sealed class CategoryStreamTests(SharedRun.Fixture fixture)
 {
     [Fact]
     public async Task RunAsync_ShouldReadAndFollowTheCategoryAcrossItsStreams()
     {
         // Arrange
-        var master = ExampleEnvironment.ResolveMasterConnectionString();
+        var run = fixture.Run;
 
         // Act
-        var report = await Scenario.RunAsync(master, TextWriter.Null, TestContext.Current.CancellationToken);
+        var report = await Scenario.RunAsync(run, TextWriter.Null, TestContext.Current.CancellationToken);
 
-        // Assert: positions in a fresh database are 1 to 4; the category's own bounds are 1 and 4,
-        // and the subscription confirmed at 4 sees only the event at 6, never shipments' 5.
+        // Assert: the four events take four positions in a row, and the category's own bounds are
+        // the first and the fourth; positions are the store's, shared by every tenant of the run,
+        // so they are asserted from one another. The subscription confirmed at the category's
+        // head sees only orders-3's event, never the one shipments-1 took before it.
         report.Category.ShouldBe(["orders-1:order_placed", "orders-1:order_paid", "orders-2:order_placed"]);
-        report.CategoryHead.ShouldBe(new StreamHead(1, 4));
+        (report.CategoryHead.Last - report.CategoryHead.First).ShouldBe(3);
         report.ByType.ShouldBe(["orders-1", "orders-2"]);
-        report.ConfirmedHead.ShouldBe(4);
+        report.ConfirmedHead.ShouldBe(report.CategoryHead.Last);
         report.Live.ShouldBe(["orders-3:order_placed"]);
     }
 }

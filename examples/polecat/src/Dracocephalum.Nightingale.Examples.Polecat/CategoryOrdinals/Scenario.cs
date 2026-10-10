@@ -39,34 +39,28 @@ public static class Scenario
         long GroupCheckpoint);
 
     /// <summary>Runs the scenario.</summary>
-    /// <param name="masterConnectionString">A connection string to the server's master database.</param>
+    /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
     /// <param name="output">Where the steps are narrated.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
-    public static async Task<Report> RunAsync(string masterConnectionString, TextWriter output, CancellationToken cancellationToken)
+    public static async Task<Report> RunAsync(ExampleRun run, TextWriter output, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(output);
 
-        await using var database = ExampleDatabase.Reserve(masterConnectionString);
-        await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the server creates it.").ConfigureAwait(false);
+        var tenant = await run.CreateTenantAsync("category-ordinals", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; its ordinals are numbered within it, from 0.").ConfigureAwait(false);
 
-        await using var server = await ExampleServer.StartAsync(
-            database.ConnectionString,
-            cancellationToken,
-            options =>
-            {
-                options.Store.AssignOrdinals = true;
-                options.Deletion.AllowDelete = true;
-            }).ConfigureAwait(false);
-        await output.WriteLineAsync($"2. Server listening at {server.Address}; store initialized with ordinals, and deletion allowed for step 8.").ConfigureAwait(false);
+        await using var server = await run.StartServerAsync(cancellationToken, options => options.Deletion.AllowDelete = true).ConfigureAwait(false);
+        await output.WriteLineAsync($"2. Started a server at {server.Address} with deletion allowed for step 7, over the run's store, which was initialized with ordinals.").ConfigureAwait(false);
 
-        await using var connection = server.Connect();
+        await using var connection = server.Connect(tenant);
         var client = connection.Client;
 
         await client.AppendToStreamAsync("orders-1", StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
         await client.AppendToStreamAsync("shipments-1", StreamState.NoStream, [CreateEvent("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
         await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync("3. Appended to orders-1, shipments-1 and orders-2: four events at positions 1 to 4, three of them orders.").ConfigureAwait(false);
+        await output.WriteLineAsync("3. Appended to orders-1, shipments-1 and orders-2: four events at four positions in a row, three of them orders.").ConfigureAwait(false);
 
         var (ordinals, ordinalHead) = await ReadNumberedAsync(client, Category, expectedLast: 2, cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"4. Read {Category} by ordinal: {string.Join(", ", ordinals.Select(pair => $"{pair.Ordinal} at position {pair.Position}"))}; bounds {ordinalHead.First}..{ordinalHead.Last}, dense, so the count is {ordinalHead.Last - ordinalHead.First + 1} by subtraction.").ConfigureAwait(false);
@@ -126,7 +120,7 @@ public static class Scenario
             groupCheckpoint = (await group.Confirmed.ConfigureAwait(false)).Checkpoint;
         }
 
-        await output.WriteLineAsync($"12. Reconnected to the group: confirmed at checkpoint {groupCheckpoint}, an ordinal, never a position; dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync($"12. Reconnected to the group: confirmed at checkpoint {groupCheckpoint}, an ordinal, never a position.").ConfigureAwait(false);
 
         return new Report(
             ordinals,

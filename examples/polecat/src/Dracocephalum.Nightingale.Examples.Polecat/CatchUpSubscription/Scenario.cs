@@ -15,6 +15,7 @@ public static class Scenario
 {
     /// <summary>What the run observed, in the order the steps happened.</summary>
     /// <param name="Stream">The stream the run subscribed to.</param>
+    /// <param name="AppendedPosition">The position of the last event appended before anyone subscribed.</param>
     /// <param name="ConfirmedHead">The head the stream subscription was confirmed with.</param>
     /// <param name="CaughtUp">Event types delivered before the subscription reported it had caught up.</param>
     /// <param name="CaughtUpHead">The head the caught-up note carried.</param>
@@ -23,6 +24,7 @@ public static class Scenario
     /// <param name="AllLive">Stream and type of every event the <c>$all</c> subscription delivered live, in position order.</param>
     public sealed record Report(
         string Stream,
+        long AppendedPosition,
         long ConfirmedHead,
         IReadOnlyList<string> CaughtUp,
         long CaughtUpHead,
@@ -31,28 +33,28 @@ public static class Scenario
         IReadOnlyList<string> AllLive);
 
     /// <summary>Runs the scenario.</summary>
-    /// <param name="masterConnectionString">A connection string to the server's master database.</param>
+    /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
     /// <param name="output">Where the steps are narrated.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
-    public static async Task<Report> RunAsync(string masterConnectionString, TextWriter output, CancellationToken cancellationToken)
+    public static async Task<Report> RunAsync(ExampleRun run, TextWriter output, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(output);
 
-        await using var database = ExampleDatabase.Reserve(masterConnectionString);
-        await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the server creates it.").ConfigureAwait(false);
+        var tenant = await run.CreateTenantAsync("catch-up-subscription", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; its streams and its $all live there and nowhere else.").ConfigureAwait(false);
 
-        await using var server = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"2. Server listening at {server.Address}; database created, store initialized.").ConfigureAwait(false);
+        await using var connection = run.Server.Connect(tenant);
+        await output.WriteLineAsync($"2. Connected to the run's server at {run.Server.Address} as the administrator, working in the tenant.").ConfigureAwait(false);
 
-        await using var connection = server.Connect();
         var client = connection.Client;
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var orders = "orders-" + suffix;
         var shipments = "shipments-" + suffix;
 
-        await client.AppendToStreamAsync(orders, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"3. Appended two events to {orders} before anyone subscribed.").ConfigureAwait(false);
+        var appended = await client.AppendToStreamAsync(orders, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"3. Appended two events to {orders} before anyone subscribed; the last sits at position {appended.Position}.").ConfigureAwait(false);
 
         await using var streamSubscription = client.SubscribeToStreamAsync(orders, StreamPosition.Start, cancellationToken: cancellationToken);
         var streamMessages = streamSubscription.Messages.GetAsyncEnumerator(cancellationToken);
@@ -61,11 +63,12 @@ public static class Scenario
         var caughtUpNote = await ReadUntil<SubscriptionMessage.CaughtUp>(streamMessages, caughtUp).ConfigureAwait(false);
         await output.WriteLineAsync($"4. Subscribed to {orders} from the start: confirmed at head {confirmed.Head}; caught up after {string.Join(", ", caughtUp)}; head {caughtUpNote.Head}.").ConfigureAwait(false);
 
+        await ExampleMark.WaitUntilCoversAsync(client, appended.Position, cancellationToken).ConfigureAwait(false);
         await using var allSubscription = client.SubscribeToAllAsync(StreamPosition.End, cancellationToken);
         var allMessages = allSubscription.Messages.GetAsyncEnumerator(cancellationToken);
         var allConfirmed = await allSubscription.Confirmed.ConfigureAwait(false);
         await ReadUntil<SubscriptionMessage.CaughtUp>(allMessages, []).ConfigureAwait(false);
-        await output.WriteLineAsync($"5. Subscribed to $all from the end: confirmed at position {allConfirmed.Head}; nothing to catch up on.").ConfigureAwait(false);
+        await output.WriteLineAsync($"5. Once the store's mark covered position {appended.Position}, subscribed to $all from the end: confirmed at position {allConfirmed.Head}; nothing to catch up on.").ConfigureAwait(false);
 
         await client.AppendToStreamAsync(orders, StreamState.StreamRevision(1), [CreateEvent("order_shipped")], cancellationToken).ConfigureAwait(false);
         await client.AppendToStreamAsync(shipments, StreamState.NoStream, [CreateEvent("shipment_dispatched")], cancellationToken).ConfigureAwait(false);
@@ -85,9 +88,9 @@ public static class Scenario
 
         await streamMessages.DisposeAsync().ConfigureAwait(false);
         await allMessages.DisposeAsync().ConfigureAwait(false);
-        await output.WriteLineAsync("9. Disposed both subscriptions; dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync("9. Disposed both subscriptions.").ConfigureAwait(false);
 
-        return new Report(orders, confirmed.Head, caughtUp, caughtUpNote.Head, allConfirmed.Head, live, allLive);
+        return new Report(orders, appended.Position, confirmed.Head, caughtUp, caughtUpNote.Head, allConfirmed.Head, live, allLive);
     }
 
     /// <summary>Reads messages, collecting the events, until a message of the given kind arrives.</summary>

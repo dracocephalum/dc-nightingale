@@ -8,24 +8,24 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.Tests;
 /// The scenario as an integration test: the same code the program runs, against the local SQL
 /// Server named by <c>NIGHTINGALE_SQLSERVER</c> or the local default, asserting the report.
 /// </summary>
-[Collection(OwnDatabase.Name)]
+[Collection(SharedRun.Name)]
 [Trait("Category", "Integration")]
-public sealed class CatchUpSubscriptionTests
+public sealed class CatchUpSubscriptionTests(SharedRun.Fixture fixture)
 {
     [Fact]
     public async Task RunAsync_ShouldCatchUpThenDeliverLiveOnBothSubscriptions()
     {
         // Arrange
-        var master = ExampleEnvironment.ResolveMasterConnectionString();
+        var run = fixture.Run;
 
         // Act
-        var report = await Scenario.RunAsync(master, TextWriter.Null, TestContext.Current.CancellationToken);
+        var report = await Scenario.RunAsync(run, TextWriter.Null, TestContext.Current.CancellationToken);
 
         // Assert
         report.ConfirmedHead.ShouldBe(1);
         report.CaughtUp.ShouldBe(["order_placed", "order_paid"]);
         report.CaughtUpHead.ShouldBe(1);
-        report.AllConfirmedHead.ShouldBe(2);
+        report.AllConfirmedHead.ShouldBe(report.AppendedPosition);
         report.Live.ShouldBe(["order_shipped"]);
         report.AllLive.ShouldBe([report.Stream + ":order_shipped", "shipments-" + report.Stream["orders-".Length..] + ":shipment_dispatched"]);
     }

@@ -87,8 +87,8 @@ contract is stable.
 
 Tenants share one database and one sequence, every data call works in the
 tenant it was authorized for, and the wildcard spans tenants on reads of
-`$all` and the virtual streams by position; `DESIGN.md` has the shape. Two
-things remain.
+`$all` and the virtual streams by position; `DESIGN.md` has the shape, and the
+samples run on one database with a tenant per scenario. One thing remains.
 
 **Tenant partitioning.** With the store's per-tenant partitioning
 (`Nightingale:Store:Partitioning` = `Tenant`, fixed when the store is
@@ -99,15 +99,6 @@ follow one high-water mark and would need one per tenant, so
 `Nightingale:Store:AssignOrdinals` is refused with it and subscriptions under
 it follow the wrong mark (`TODO.md`). Range partitioning by sequence, the
 gateway's own if ever added, keeps the shared sequence and the wildcard.
-
-**The samples on one database.** Each scenario under `examples/` creates and
-initializes a database of its own, because several of them append to the same
-stream names and read the same category. With tenants, one database
-initialized once serves every scenario of a run, a tenant each: names, groups
-and ordinals are per tenant, so the scenarios keep their names and their
-dense numbering. Positions are the exception while the sequence is shared: a
-scenario would assert them relative to where it started, or run on a
-tenant-partitioned store.
 
 ## Database per tenant
 

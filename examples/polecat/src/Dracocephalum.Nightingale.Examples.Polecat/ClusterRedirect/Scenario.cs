@@ -33,23 +33,24 @@ public static class Scenario
         int ReadInRotation);
 
     /// <summary>Runs the scenario.</summary>
-    /// <param name="masterConnectionString">A connection string to the server's master database.</param>
+    /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
     /// <param name="output">Where the steps are narrated.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
-    public static async Task<Report> RunAsync(string masterConnectionString, TextWriter output, CancellationToken cancellationToken)
+    public static async Task<Report> RunAsync(ExampleRun run, TextWriter output, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(output);
 
-        await using var database = ExampleDatabase.Reserve(masterConnectionString);
-        await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the first server creates it.").ConfigureAwait(false);
+        var tenant = await run.CreateTenantAsync("cluster-redirect", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; its stream and its group live there and nowhere else.").ConfigureAwait(false);
 
-        await using var first = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
-        await using var second = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"2. Two instances over one store: {first.Address} and {second.Address}, each advertising the address it listens on.").ConfigureAwait(false);
+        var first = run.Server;
+        await using var second = await run.StartServerAsync(cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"2. Two instances over one store: the run's server at {first.Address} and a second at {second.Address}, each advertising the address it listens on.").ConfigureAwait(false);
 
-        await using var toFirst = first.Connect();
-        await using var toSecond = second.Connect();
+        await using var toFirst = first.Connect(tenant);
+        await using var toSecond = second.Connect(tenant);
 
         await toSecond.Client.AppendToStreamAsync(Stream, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid")], cancellationToken).ConfigureAwait(false);
         await toSecond.Client.CreatePersistentSubscriptionAsync(Stream, Group, GroupSettings.Default with { Start = StreamPosition.Start, MaxSubscriberCount = 1 }, cancellationToken).ConfigureAwait(false);
@@ -81,14 +82,14 @@ public static class Scenario
 
         await output.WriteLineAsync($"5. A second consumer asked the second instance, was sent to the first, and was refused there, where the group's limit is kept: {refusal}.").ConfigureAwait(false);
 
-        var replayed = await ReplayWhenParkedAsync(toSecond.Client, cancellationToken).ConfigureAwait(false);
+        var replayed = await ReplayWhenParkedAsync(toSecond.Client, placed.Revision, cancellationToken).ConfigureAwait(false);
         await messages.MoveNextAsync().ConfigureAwait(false);
         var replayedType = messages.Current.Record.Type;
         await consumer.AckAsync(messages.Current.Record.Id).ConfigureAwait(false);
         await output.WriteLineAsync($"6. Replayed the parked message through the second instance: sent to the first, {replayed} put back, and the consumer received the {replayedType} at once.").ConfigureAwait(false);
 
         var readInRotation = 0;
-        await using (var toBoth = ExampleConnection.ToCluster(first, second))
+        await using (var toBoth = ExampleConnection.ToCluster(tenant, first, second))
         {
             for (var read = 0; read < 2; read++)
             {
@@ -103,7 +104,7 @@ public static class Scenario
         }
 
         await messages.DisposeAsync().ConfigureAwait(false);
-        await output.WriteLineAsync("8. Disposed the consumer; dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync("8. Disposed the consumer.").ConfigureAwait(false);
 
         return new Report(delivered, refusal, replayed, replayedType, readInRotation);
     }
@@ -112,16 +113,17 @@ public static class Scenario
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>
-    /// Replays the parked message. A refusal is one-way, so the park may not have landed when the
+    /// Replays the parked message by its number in the group's numbering, the revision for a
+    /// group over a plain stream. A refusal is one-way, so the park may not have landed when the
     /// replay is asked for; it is asked again shortly, as an operator's tool would.
     /// </summary>
-    private static async Task<int> ReplayWhenParkedAsync(NightingaleClient client, CancellationToken cancellationToken)
+    private static async Task<int> ReplayWhenParkedAsync(NightingaleClient client, long revision, CancellationToken cancellationToken)
     {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                return await client.ReplayParkedMessagesAsync(Stream, Group, position: 0, cancellationToken).ConfigureAwait(false);
+                return await client.ReplayParkedMessagesAsync(Stream, Group, revision, cancellationToken).ConfigureAwait(false);
             }
             catch (ParkedMessageNotFoundException) when (attempt < 50)
             {

@@ -6,10 +6,10 @@ same run.
 
 ## What it does
 
-Reserves a random database name on the local SQL Server, hosts the
-Polecat-backed server in its own process on a loopback port, which creates and
-initializes that database, and drives it through the client: create a group
-over the `$ce-orders` category from its start, pinned, connect two consumers,
+Creates a tenant of its own in the run's database and drives the run's
+server, hosted in the program's own process on a loopback port, through the
+client working in that tenant: create a group over the `$ce-orders` category
+from its start, pinned, connect two consumers,
 append two events to each of four streams and see every stream's events
 arrive at one consumer, ask the server about the group and see both consumers
 with what each holds, change the group to round robin and see both consumers'
@@ -17,7 +17,7 @@ calls end with `GroupUpdatedException`, connect a slow consumer and a quick one
 holding one event each, append three events to one stream and see the quick
 one take what the slow one cannot, have the slow one leave while it holds an
 event and see the quick one receive that event at once with a retry count of
-zero, and delete the group. Then it drops the database.
+zero, and delete the group.
 The scenario's test runs exactly the same code and asserts the report it
 returns.
 

@@ -36,21 +36,21 @@ public static class Scenario
         bool HandedOver);
 
     /// <summary>Runs the scenario.</summary>
-    /// <param name="masterConnectionString">A connection string to the server's master database.</param>
+    /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
     /// <param name="output">Where the steps are narrated.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
-    public static async Task<Report> RunAsync(string masterConnectionString, TextWriter output, CancellationToken cancellationToken)
+    public static async Task<Report> RunAsync(ExampleRun run, TextWriter output, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(output);
 
-        await using var database = ExampleDatabase.Reserve(masterConnectionString);
-        await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the server creates it.").ConfigureAwait(false);
+        var tenant = await run.CreateTenantAsync("competing-consumers", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; its streams and its group live there and nowhere else.").ConfigureAwait(false);
 
-        await using var server = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"2. Server listening at {server.Address}; database created, store initialized.").ConfigureAwait(false);
+        await using var connection = run.Server.Connect(tenant);
+        await output.WriteLineAsync($"2. Connected to the run's server at {run.Server.Address} as the administrator, working in the tenant.").ConfigureAwait(false);
 
-        await using var connection = server.Connect();
         var client = connection.Client;
 
         var settings = GroupSettings.Default with { Start = StreamPosition.Start, ConsumerStrategy = ConsumerStrategy.Pinned };
@@ -101,7 +101,7 @@ public static class Scenario
         await quick.DisposeAsync().ConfigureAwait(false);
         await consumingQuickly.ConfigureAwait(false);
         await client.DeletePersistentSubscriptionAsync(Category, Group, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync("10. The quick consumer left; deleted the group; dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync("10. The quick consumer left; deleted the group.").ConfigureAwait(false);
 
         return new Report(
             pinnedStreams,

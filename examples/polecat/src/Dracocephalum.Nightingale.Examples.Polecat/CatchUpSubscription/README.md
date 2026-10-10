@@ -5,14 +5,14 @@ narrates each step and as a test that asserts the same run.
 
 ## What it does
 
-Reserves a random database name on the local SQL Server, hosts the
-Polecat-backed server in its own process on a loopback port, which creates and
-initializes that database, and drives it through the client: append two
-events to a stream, subscribe to that stream from its start and watch it catch
-up and say so, subscribe to `$all` from its end, append to two streams while
-both subscriptions are live, and see the stream subscription deliver its one
-new event and the `$all` subscription deliver both in position order. Then it
-disposes the subscriptions and drops the database.
+Creates a tenant of its own in the run's database and drives the run's
+server, hosted in the program's own process on a loopback port, through the
+client working in that tenant: append two events to a stream, subscribe to
+that stream from its start and watch it catch up and say so, subscribe to
+`$all` from its end, which in a tenant is the tenant's own, append to two
+streams while both subscriptions are live, and see the stream subscription
+deliver its one new event and the `$all` subscription deliver both in
+position order. Then it disposes the subscriptions.
 The scenario's test runs exactly the same code and asserts the report it
 returns.
 

@@ -7,10 +7,10 @@ using Dracocephalum.Nightingale.Examples.Polecat.Common;
 namespace Dracocephalum.Nightingale.Examples.Polecat.AppendAndRead;
 
 /// <summary>
-/// The whole round trip a client makes against a Nightingale server, step by step, against a
-/// database created for the run and dropped afterwards. The program prints the steps; the test
-/// project asserts the report. Both run the same code, so the sample can never drift from what
-/// is verified.
+/// The whole round trip a client makes against a Nightingale server, step by step, in a tenant of
+/// the run's database made for the scenario. The program prints the steps; the test project
+/// asserts the report. Both run the same code, so the sample can never drift from what is
+/// verified.
 /// </summary>
 public static class Scenario
 {
@@ -36,21 +36,21 @@ public static class Scenario
         ReadState MissingStreamState);
 
     /// <summary>Runs the scenario.</summary>
-    /// <param name="masterConnectionString">A connection string to the server's master database.</param>
+    /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
     /// <param name="output">Where the steps are narrated.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
-    public static async Task<Report> RunAsync(string masterConnectionString, TextWriter output, CancellationToken cancellationToken)
+    public static async Task<Report> RunAsync(ExampleRun run, TextWriter output, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(output);
 
-        await using var database = ExampleDatabase.Reserve(masterConnectionString);
-        await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the server creates it.").ConfigureAwait(false);
+        var tenant = await run.CreateTenantAsync("append-and-read", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; its streams live there and nowhere else.").ConfigureAwait(false);
 
-        await using var server = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"2. Server listening at {server.Address}; database created, store initialized.").ConfigureAwait(false);
+        await using var connection = run.Server.Connect(tenant);
+        await output.WriteLineAsync($"2. Connected to the run's server at {run.Server.Address} as the administrator, working in the tenant.").ConfigureAwait(false);
 
-        await using var connection = server.Connect();
         var client = connection.Client;
         var stream = "orders-" + Guid.NewGuid().ToString("N")[..8];
 
@@ -108,7 +108,6 @@ public static class Scenario
         }
 
         await output.WriteLineAsync($"8. A read of a stream that never existed reports {missing}.").ConfigureAwait(false);
-        await output.WriteLineAsync("9. Dropping the database.").ConfigureAwait(false);
 
         return new Report(
             stream,

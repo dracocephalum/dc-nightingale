@@ -1,15 +1,14 @@
 using Dracocephalum.Nightingale.Client;
 using Dracocephalum.Nightingale.Examples.Polecat.Common;
-using Dracocephalum.Nightingale.Server.Data;
 
 namespace Dracocephalum.Nightingale.Examples.Polecat.CredentialsAndTenants;
 
 /// <summary>
 /// Credentials and tenants against a Nightingale server, step by step: as the built-in
-/// administrator, create an ops credential and a user bound to the default tenant, see what
+/// administrator, create an ops credential and a user bound to this scenario's tenant, see what
 /// each may and may not do, have the user change its own password, create a second tenant and
 /// a credential bound to it, see that credential kept to its tenant and its appends invisible to
-/// the default tenant's user under the same stream name, disable the tenant and see its
+/// the first tenant's user under the same stream name, disable the tenant and see its
 /// credential refused, and delete what was made. The program prints the steps; the test project
 /// asserts the report.
 /// </summary>
@@ -20,11 +19,11 @@ public static class Scenario
     /// <param name="ReaderRefusal">How the user's attempt to create a group ended.</param>
     /// <param name="OperatorCreated">Whether the ops credential created the group.</param>
     /// <param name="ReaderReadAfterPasswordChange">Whether the user read the stream under its new password.</param>
-    /// <param name="Tenant">The second tenant.</param>
-    /// <param name="BoundRefusal">How the bound credential's read of the default tenant ended.</param>
+    /// <param name="Tenant">The second tenant, made during the run.</param>
+    /// <param name="BoundRefusal">How the bound credential's read of the scenario's own tenant ended.</param>
     /// <param name="TenantRevision">The revision the bound credential's append reached in its own tenant.</param>
     /// <param name="TenantEvents">How many events the bound credential read back from its tenant's stream.</param>
-    /// <param name="DefaultTenantEvents">How many events the default tenant's user saw under the same stream name.</param>
+    /// <param name="ReaderEvents">How many events the first tenant's user saw under the same stream name.</param>
     /// <param name="DisabledRefusal">How the bound credential's call ended once its tenant was disabled.</param>
     /// <param name="Remaining">The credentials left when the run is done.</param>
     public sealed record Report(
@@ -36,34 +35,35 @@ public static class Scenario
         string BoundRefusal,
         long TenantRevision,
         int TenantEvents,
-        int DefaultTenantEvents,
+        int ReaderEvents,
         string DisabledRefusal,
         IReadOnlyList<string> Remaining);
 
     /// <summary>Runs the scenario.</summary>
-    /// <param name="masterConnectionString">A connection string to the server's master database.</param>
+    /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
     /// <param name="output">Where the steps are narrated.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
-    public static async Task<Report> RunAsync(string masterConnectionString, TextWriter output, CancellationToken cancellationToken)
+    public static async Task<Report> RunAsync(ExampleRun run, TextWriter output, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(output);
 
-        await using var database = ExampleDatabase.Reserve(masterConnectionString);
-        await output.WriteLineAsync($"1. Reserved the database name {database.Name}; the server creates it.").ConfigureAwait(false);
+        var tenant = await run.CreateTenantAsync("credentials-and-tenants", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; the credentials made here are bound to it or to a second tenant.").ConfigureAwait(false);
 
-        await using var server = await ExampleServer.StartAsync(database.ConnectionString, cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync($"2. Server listening at {server.Address}; the built-in administrator's password is the server's configuration.").ConfigureAwait(false);
+        var server = run.Server;
+        await using var asAdmin = server.ConnectAsAdministrator();
+        await output.WriteLineAsync($"2. Connected to the run's server at {server.Address} as the built-in administrator, whose password is the server's configuration, naming no tenant: the management calls are above any.").ConfigureAwait(false);
 
-        await using var asAdmin = server.Connect();
         var admin = asAdmin.Client.Management;
         var made = new List<string>();
         foreach (var (name, password, role) in new[] { ("operator", "operator-password-12", CredentialRole.Ops), ("reader", "reader-password-12", CredentialRole.User) })
         {
-            made.Add((await admin.CreateCredentialAsync(name, password, role, Tenant.DefaultId, cancellationToken).ConfigureAwait(false)).Name);
+            made.Add((await admin.CreateCredentialAsync(name, password, role, tenant.Id, cancellationToken).ConfigureAwait(false)).Name);
         }
 
-        await output.WriteLineAsync($"3. As the administrator, created {string.Join(" and ", made)}, an ops credential and a user, both bound to the default tenant.").ConfigureAwait(false);
+        await output.WriteLineAsync($"3. As the administrator, created {string.Join(" and ", made)}, an ops credential and a user, both bound to this scenario's tenant.").ConfigureAwait(false);
 
         string readerRefusal;
         await using (var asReader = server.ConnectAs("reader", "reader-password-12"))
@@ -103,10 +103,10 @@ public static class Scenario
 
         await output.WriteLineAsync("5. The user changed its own password and read the stream under the new one.").ConfigureAwait(false);
 
-        var tenant = await admin.CreateTenantAsync("acme", cancellationToken).ConfigureAwait(false);
-        await admin.CreateCredentialAsync("acme-reader", "acme-password-12", CredentialRole.User, tenant.Id, cancellationToken).ConfigureAwait(false);
+        var acme = await admin.CreateTenantAsync(run.ReserveTenantName("acme"), cancellationToken).ConfigureAwait(false);
+        await admin.CreateCredentialAsync("acme-reader", "acme-password-12", CredentialRole.User, acme.Id, cancellationToken).ConfigureAwait(false);
         string boundRefusal;
-        await using (var asAcme = server.ConnectAs("acme-reader", "acme-password-12", Tenant.DefaultId))
+        await using (var asAcme = server.ConnectAs("acme-reader", "acme-password-12", tenant.Id))
         {
             try
             {
@@ -120,7 +120,7 @@ public static class Scenario
             }
         }
 
-        await output.WriteLineAsync($"6. Created the tenant {tenant.Name} ({tenant.Id}) and a credential bound to it; naming the default tenant with it was refused: {boundRefusal}.").ConfigureAwait(false);
+        await output.WriteLineAsync($"6. Created the tenant {acme.Name} ({acme.Id}) and a credential bound to it; naming this scenario's tenant with it was refused: {boundRefusal}.").ConfigureAwait(false);
 
         long tenantRevision;
         int tenantEvents;
@@ -132,15 +132,15 @@ public static class Scenario
             tenantEvents = await CountAsync(asAcme.Client, cancellationToken).ConfigureAwait(false);
         }
 
-        int defaultTenantEvents;
+        int readerEvents;
         await using (var asReader = server.ConnectAs("reader", "reader-password-13"))
         {
-            defaultTenantEvents = await CountAsync(asReader.Client, cancellationToken).ConfigureAwait(false);
+            readerEvents = await CountAsync(asReader.Client, cancellationToken).ConfigureAwait(false);
         }
 
-        await output.WriteLineAsync($"7. The bound credential appended to orders-1 in its tenant, reaching revision {tenantRevision}, and read {tenantEvents} events back; the default tenant's user sees {defaultTenantEvents} under the same name.").ConfigureAwait(false);
+        await output.WriteLineAsync($"7. The bound credential appended to orders-1 in its tenant, reaching revision {tenantRevision}, and read {tenantEvents} events back; the first tenant's user sees {readerEvents} under the same name.").ConfigureAwait(false);
 
-        await admin.UpdateTenantAsync(tenant.Id, disabled: true, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await admin.UpdateTenantAsync(acme.Id, disabled: true, cancellationToken: cancellationToken).ConfigureAwait(false);
         string disabledRefusal;
         await using (var asAcme = server.ConnectAs("acme-reader", "acme-password-12"))
         {
@@ -164,9 +164,9 @@ public static class Scenario
         }
 
         var remaining = (await admin.ListCredentialsAsync(cancellationToken).ConfigureAwait(false)).Select(credential => credential.Name).ToList();
-        await output.WriteLineAsync($"9. Deleted the credentials; {remaining.Count} remain. Dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync($"9. Deleted the credentials; {remaining.Count} remain.").ConfigureAwait(false);
 
-        return new Report(made, readerRefusal, operatorCreated, readerReadAfterChange, tenant, boundRefusal, tenantRevision, tenantEvents, defaultTenantEvents, disabledRefusal, remaining);
+        return new Report(made, readerRefusal, operatorCreated, readerReadAfterChange, acme, boundRefusal, tenantRevision, tenantEvents, readerEvents, disabledRefusal, remaining);
     }
 
     /// <summary>How many events <c>orders-1</c> holds in the caller's tenant: none when the name is not a stream there.</summary>
