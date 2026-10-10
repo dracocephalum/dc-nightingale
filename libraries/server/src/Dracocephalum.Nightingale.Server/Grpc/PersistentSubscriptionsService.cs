@@ -1,12 +1,12 @@
 using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Dracocephalum.Nightingale.Server.Auth;
 using Grpc.Core;
 
-namespace Dracocephalum.Nightingale.Server;
+namespace Dracocephalum.Nightingale.Server.Grpc;
 
 /// <summary>
 /// The <c>PersistentSubscriptions</c> service over the group store and the stream store. Create,
@@ -106,12 +106,12 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         // Where a group starts and how it counts say what its checkpoint means; they are not
         // changed under one. A field the caller left unset keeps its value.
         var current = definition.Settings;
-        var asked = request.Settings ?? new Protocol.V1.GroupSettings();
+        var asked = request.Settings ?? new Protocols.Grpc.V1.GroupSettings();
         var start = asked.StartCase switch
         {
-            Protocol.V1.GroupSettings.StartOneofCase.FromStart => StreamPosition.Start,
-            Protocol.V1.GroupSettings.StartOneofCase.FromEnd => StreamPosition.End,
-            Protocol.V1.GroupSettings.StartOneofCase.FromPosition => StreamPosition.From(asked.FromPosition),
+            Protocols.Grpc.V1.GroupSettings.StartOneofCase.FromStart => StreamPosition.Start,
+            Protocols.Grpc.V1.GroupSettings.StartOneofCase.FromEnd => StreamPosition.End,
+            Protocols.Grpc.V1.GroupSettings.StartOneofCase.FromPosition => StreamPosition.From(asked.FromPosition),
             _ => current.Start,
         };
         if (start != current.Start)
@@ -119,7 +119,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             throw NightingaleErrors.InvalidArgument("Where a group starts is fixed when it is created; delete the group and create it again to start elsewhere.");
         }
 
-        if (asked.Numbering != Protocol.V1.Numbering.Unspecified && asked.Numbering.ToNumbering() != current.Numbering)
+        if (asked.Numbering != Protocols.Grpc.V1.Numbering.Unspecified && asked.Numbering.ToNumbering() != current.Numbering)
         {
             throw NightingaleErrors.InvalidArgument("A group's numbering is fixed when it is created; a consumer that wants the other numbering creates another group.");
         }
@@ -133,7 +133,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
             CheckpointLowerBound = asked.CheckpointLowerBound > 0 ? asked.CheckpointLowerBound : current.CheckpointLowerBound,
             BufferSize = asked.BufferSize > 0 ? asked.BufferSize : current.BufferSize,
             MaxSubscriberCount = asked.MaxSubscriberCount > 0 ? asked.MaxSubscriberCount : current.MaxSubscriberCount,
-            ConsumerStrategy = asked.ConsumerStrategy == Protocol.V1.ConsumerStrategy.Unspecified ? current.ConsumerStrategy : asked.ConsumerStrategy.ToConsumerStrategy(),
+            ConsumerStrategy = asked.ConsumerStrategy == Protocols.Grpc.V1.ConsumerStrategy.Unspecified ? current.ConsumerStrategy : asked.ConsumerStrategy.ToConsumerStrategy(),
         };
         try
         {
@@ -696,7 +696,13 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         }
         catch (ChannelClosedException closed) when (closed.InnerException is { } cause)
         {
-            // The group completed the channel with a cause; the call ends with that, not the wrapper.
+            // The group completed the channel with a cause; the call ends with that, not the
+            // wrapper, as the status the contract promises when the cause is a refusal.
+            if (NightingaleErrors.TryTranslate(cause, out var status))
+            {
+                throw status;
+            }
+
             ExceptionDispatchInfo.Throw(cause);
         }
     }
@@ -714,8 +720,8 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
                     var nack = requestStream.Current.Nack;
                     var action = nack.Action switch
                     {
-                        Protocol.V1.NackAction.Park => Nightingale.NackAction.Park,
-                        Protocol.V1.NackAction.Skip => Nightingale.NackAction.Skip,
+                        Protocols.Grpc.V1.NackAction.Park => Nightingale.NackAction.Park,
+                        Protocols.Grpc.V1.NackAction.Skip => Nightingale.NackAction.Skip,
                         _ => Nightingale.NackAction.Retry,
                     };
                     await live.RefuseAsync(ParseIds(nack.Ids), action, nack.Reason).ConfigureAwait(false);

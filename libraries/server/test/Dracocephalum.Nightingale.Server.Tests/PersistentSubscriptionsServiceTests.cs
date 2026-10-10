@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.Json.Nodes;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
+using Dracocephalum.Nightingale.Server.Grpc;
 using FakeItEasy;
 using Google.Rpc;
 using Grpc.Core;
@@ -65,7 +66,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
-        await client.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromStart = new(), MaxRetryCount = 3 } }, cancellationToken: TestContext.Current.CancellationToken);
+        await client.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { FromStart = new(), MaxRetryCount = 3 } }, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         var group = captured.ShouldNotBeNull();
@@ -87,7 +88,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
-        await client.CreateAsync(new CreateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromStart = new(), Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken);
+        await client.CreateAsync(new CreateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { FromStart = new(), Numbering = Protocols.Grpc.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         captured.ShouldNotBeNull().Settings.Numbering.ShouldBe(Numbering.Ordinal);
@@ -100,7 +101,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
-        var exception = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { Numbering = Protocols.Grpc.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
@@ -115,7 +116,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
 
         // Act
-        var exception = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "$et-order_placed", Group = "billing", Settings = new Protocol.V1.GroupSettings { Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "$et-order_placed", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { Numbering = Protocols.Grpc.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
@@ -282,7 +283,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // Act: only the message timeout and the retry limit are named.
         var response = await client.UpdateAsync(
-            new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { MessageTimeout = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(TimeSpan.FromSeconds(5)), MaxRetryCount = 7 } },
+            new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { MessageTimeout = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(TimeSpan.FromSeconds(5)), MaxRetryCount = 7 } },
             cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
@@ -301,10 +302,10 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // Act: the same start named again is no change; another one is, and so is another numbering.
         A.CallTo(() => _groups.UpdateSettingsAsync(definition.Id, A<GroupSettings>._, A<CancellationToken>._)).Returns(true);
-        await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromStart = new(), Numbering = Protocol.V1.Numbering.Global } }, cancellationToken: TestContext.Current.CancellationToken);
+        await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { FromStart = new(), Numbering = Protocols.Grpc.V1.Numbering.Global } }, cancellationToken: TestContext.Current.CancellationToken);
         Fake.ClearRecordedCalls(_groups);
-        var otherStart = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromPosition = 40 } }, cancellationToken: TestContext.Current.CancellationToken));
-        var otherNumbering = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocol.V1.GroupSettings { Numbering = Protocol.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
+        var otherStart = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { FromPosition = 40 } }, cancellationToken: TestContext.Current.CancellationToken));
+        var otherNumbering = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { Numbering = Protocols.Grpc.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         otherStart.StatusCode.ShouldBe(StatusCode.InvalidArgument);
@@ -325,7 +326,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         A.CallTo(() => _groups.LeaseHolderAsync(SubscriptionGroupRegistry.GetLeaseName(running.Id), A<CancellationToken>._)).Returns(new LeaseHolder("other-instance", new Uri("http://other-instance:5000")));
         A.CallTo(() => _groups.UpdateSettingsAsync(gone.Id, A<GroupSettings>._, A<CancellationToken>._)).Returns(false);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
-        var change = new Protocol.V1.GroupSettings { MaxRetryCount = 7 };
+        var change = new Protocols.Grpc.V1.GroupSettings { MaxRetryCount = 7 };
 
         // Act
         var elsewhere = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = change }, cancellationToken: TestContext.Current.CancellationToken));
@@ -362,7 +363,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         await Next(other, 2);
 
         // Act
-        var response = await client.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
+        var response = await client.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
         var ended = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
         var otherEnded = await Should.ThrowAsync<RpcException>(async () => await other.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
 
@@ -587,7 +588,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         // Assert
         info.HasCheckpoint.ShouldBeFalse();
         info.HasLastKnownPosition.ShouldBeFalse();
-        info.Settings.Numbering.ShouldBe(Protocol.V1.Numbering.Ordinal);
+        info.Settings.Numbering.ShouldBe(Protocols.Grpc.V1.Numbering.Ordinal);
     }
 
     [Fact]

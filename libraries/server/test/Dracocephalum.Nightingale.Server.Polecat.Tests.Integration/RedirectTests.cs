@@ -1,6 +1,6 @@
 using System.Net;
 
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Google.Rpc;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -60,13 +60,13 @@ public sealed class RedirectTests : IAsyncLifetime
         var onFirst = new PersistentSubscriptions.PersistentSubscriptionsClient(ChannelTo(firstAddress));
         var onSecond = new PersistentSubscriptions.PersistentSubscriptionsClient(ChannelTo(second));
         await AppendAsync(streams, "orders-1", "order_placed", "order_paid");
-        await onFirst.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { FromStart = new() } }, cancellationToken: TestContext.Current.CancellationToken);
+        await onFirst.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { FromStart = new() } }, cancellationToken: TestContext.Current.CancellationToken);
         using var consumer = onFirst.Read(cancellationToken: TestContext.Current.CancellationToken);
         await consumer.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
         (await NextAsync(consumer)).ContentCase.ShouldBe(PersistentReadResponse.ContentOneofCase.Confirmed);
         var placed = (await NextAsync(consumer)).Event.Event;
         var paid = (await NextAsync(consumer)).Event.Event;
-        await consumer.RequestStream.WriteAsync(new PersistentReadRequest { Nack = new Nack { Ids = { placed.Id }, Action = Protocol.V1.NackAction.Park, Reason = "poison" } }, TestContext.Current.CancellationToken);
+        await consumer.RequestStream.WriteAsync(new PersistentReadRequest { Nack = new Nack { Ids = { placed.Id }, Action = Protocols.Grpc.V1.NackAction.Park, Reason = "poison" } }, TestContext.Current.CancellationToken);
         await consumer.RequestStream.WriteAsync(new PersistentReadRequest { Ack = new Ack { Ids = { paid.Id } } }, TestContext.Current.CancellationToken);
 
         // Act: a second consumer and a replay, both asked of the instance that does not run the
@@ -98,8 +98,8 @@ public sealed class RedirectTests : IAsyncLifetime
         // refused with the owner's address; made at the owner it ends the consumer's call, and
         // the group is then nobody's, with its new setting, for any instance to describe.
         var refusedUpdate = await Should.ThrowAsync<RpcException>(async () =>
-            await onSecond.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken));
-        var updated = await onFirst.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
+            await onSecond.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken));
+        var updated = await onFirst.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
         var ended = await Should.ThrowAsync<RpcException>(async () =>
         {
             while (await consumer.ResponseStream.MoveNext(TestContext.Current.CancellationToken))

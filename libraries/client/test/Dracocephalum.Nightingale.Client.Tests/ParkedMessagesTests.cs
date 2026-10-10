@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using FakeItEasy;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;

@@ -18,6 +18,7 @@
        package feed exists. Listed in TODO.md. -->
   <ItemGroup>
     <ProjectReference Include="../../../core/src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
+    <ProjectReference Include="../../../core/src/Dracocephalum.Nightingale.Protocols.Grpc/Dracocephalum.Nightingale.Protocols.Grpc.csproj" />
   </ItemGroup>
 
 </Project>

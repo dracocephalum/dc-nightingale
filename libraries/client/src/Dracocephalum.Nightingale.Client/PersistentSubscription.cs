@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Grpc.Core;
 
 namespace Dracocephalum.Nightingale.Client;
@@ -60,9 +60,9 @@ public sealed class PersistentSubscription : IAsyncEnumerable<PersistentSubscrip
     {
         var wire = action switch
         {
-            NackAction.Park => Protocol.V1.NackAction.Park,
-            NackAction.Skip => Protocol.V1.NackAction.Skip,
-            _ => Protocol.V1.NackAction.Retry,
+            NackAction.Park => Protocols.Grpc.V1.NackAction.Park,
+            NackAction.Skip => Protocols.Grpc.V1.NackAction.Skip,
+            _ => Protocols.Grpc.V1.NackAction.Retry,
         };
         return WriteAsync(new PersistentReadRequest { Nack = new Nack { Action = wire, Reason = reason ?? string.Empty, Ids = { ids.Select(id => id.ToString("D")) } } });
     }

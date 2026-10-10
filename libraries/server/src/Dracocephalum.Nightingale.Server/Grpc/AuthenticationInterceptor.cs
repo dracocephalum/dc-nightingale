@@ -1,9 +1,10 @@
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
+using Dracocephalum.Nightingale.Server.Auth;
 using Grpc.AspNetCore.Server;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 
-namespace Dracocephalum.Nightingale.Server.Auth;
+namespace Dracocephalum.Nightingale.Server.Grpc;
 
 /// <summary>
 /// Authenticates every call before its service sees it, from the <c>authorization</c> header,

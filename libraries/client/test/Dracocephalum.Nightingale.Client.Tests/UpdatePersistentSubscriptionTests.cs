@@ -1,5 +1,5 @@
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using FakeItEasy;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -30,8 +30,8 @@ public sealed class UpdatePersistentSubscriptionTests
         var request = asked.ShouldHaveSingleItem();
         request.Stream.ShouldBe("orders-1");
         request.Group.ShouldBe("billing");
-        request.Settings.StartCase.ShouldBe(Protocol.V1.GroupSettings.StartOneofCase.None);
-        request.Settings.Numbering.ShouldBe(Protocol.V1.Numbering.Unspecified);
+        request.Settings.StartCase.ShouldBe(Protocols.Grpc.V1.GroupSettings.StartOneofCase.None);
+        request.Settings.Numbering.ShouldBe(Protocols.Grpc.V1.Numbering.Unspecified);
         request.Settings.MaxRetryCount.ShouldBe(7);
         request.Settings.MessageTimeout.ToTimeSpan().ShouldBe(TimeSpan.FromSeconds(5));
         request.Settings.BufferSize.ShouldBe(GroupSettings.Default.BufferSize);

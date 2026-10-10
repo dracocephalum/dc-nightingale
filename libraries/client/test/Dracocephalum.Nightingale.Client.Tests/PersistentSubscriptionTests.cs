@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using FakeItEasy;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -85,7 +85,7 @@ public sealed class PersistentSubscriptionTests
 
         // Assert
         var nack = sent.Last().Nack;
-        nack.Action.ShouldBe(Protocol.V1.NackAction.Park);
+        nack.Action.ShouldBe(Protocols.Grpc.V1.NackAction.Park);
         nack.Reason.ShouldBe("poison");
         nack.Ids.ShouldBe([id.ToString("D")]);
     }

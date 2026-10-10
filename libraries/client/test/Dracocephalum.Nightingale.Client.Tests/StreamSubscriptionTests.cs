@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -64,7 +64,7 @@ public sealed class StreamSubscriptionTests
         }
 
         // Assert
-        request()!.Numbering.ShouldBe(Protocol.V1.Numbering.Ordinal);
+        request()!.Numbering.ShouldBe(Protocols.Grpc.V1.Numbering.Ordinal);
         records.ShouldHaveSingleItem().Ordinal.ShouldBe(4);
     }
 

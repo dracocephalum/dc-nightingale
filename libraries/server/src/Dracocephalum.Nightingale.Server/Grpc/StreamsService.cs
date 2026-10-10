@@ -1,10 +1,10 @@
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Dracocephalum.Nightingale.Server.Auth;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 
-namespace Dracocephalum.Nightingale.Server;
+namespace Dracocephalum.Nightingale.Server.Grpc;
 
 /// <summary>
 /// The <c>Streams</c> service over an <see cref="IStreamStore"/> and its <see cref="IStoreTail"/>.

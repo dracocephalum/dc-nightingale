@@ -12,10 +12,15 @@ the default host.
 
 ## What it does
 
-`Dracocephalum.Nightingale.Server` holds the service implementations of the
-wire contract, the two ports a backend implements, `IStreamStore` for reads
-and appends and `IStoreTail` for the head every subscription waits on, and
-the two extension methods a host calls: `AddNightingaleServer()` to register and
+`Dracocephalum.Nightingale.Server` holds the application core — the two
+ports a backend implements, `IStreamStore` for reads and appends and
+`IStoreTail` for the head every subscription waits on, the subscription
+runtime, and authorization and the credential and tenant managers, none of
+which knows a transport — and, in its `Grpc` namespace, the gRPC transport
+over it: the service implementations of the wire contract, the interceptor
+that authenticates every call, and the mapping from the shared exceptions
+to the statuses the contract promises. A host calls two extension methods:
+`AddNightingaleServer()` to register the core and the transport, and
 `MapNightingaleServer()` to map. It has no entry point and no backend of its
 own.
 

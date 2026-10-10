@@ -1,10 +1,10 @@
 using System.Collections.Frozen;
 using System.Reflection;
 
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Google.Protobuf.Reflection;
 
-namespace Dracocephalum.Nightingale.Protocol;
+namespace Dracocephalum.Nightingale.Protocols.Grpc;
 
 /// <summary>
 /// The reason strings a failed call carries, derived from the contract's <see cref="ErrorReason"/>

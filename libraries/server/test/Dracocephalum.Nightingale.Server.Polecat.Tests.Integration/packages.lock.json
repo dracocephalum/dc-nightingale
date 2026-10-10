@@ -856,8 +856,12 @@
         }
       },
       "dracocephalum.nightingale.core": {
+        "type": "Project"
+      },
+      "dracocephalum.nightingale.protocols.grpc": {
         "type": "Project",
         "dependencies": {
+          "Dracocephalum.Nightingale.Core": "[1.0.0, )",
           "Google.Protobuf": "[3.36.1, )",
           "Grpc.Core.Api": "[2.83.0, )"
         }
@@ -866,6 +870,7 @@
         "type": "Project",
         "dependencies": {
           "Dracocephalum.Nightingale.Core": "[1.0.0, )",
+          "Dracocephalum.Nightingale.Protocols.Grpc": "[1.0.0, )",
           "Google.Api.CommonProtos": "[2.17.0, )",
           "Grpc.AspNetCore": "[2.83.0, )",
           "Grpc.StatusProto": "[2.83.0, )",

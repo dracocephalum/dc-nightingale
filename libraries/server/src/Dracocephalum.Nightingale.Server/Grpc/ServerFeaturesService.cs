@@ -1,9 +1,9 @@
 using System.Reflection;
 
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Grpc.Core;
 
-namespace Dracocephalum.Nightingale.Server;
+namespace Dracocephalum.Nightingale.Server.Grpc;
 
 /// <summary>
 /// The server-features service: liveness, the server's version, and what the store was

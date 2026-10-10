@@ -1,5 +1,6 @@
 using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Grpc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
@@ -14,13 +15,20 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 public static class NightingaleServerExtensions
 {
-    /// <summary>Registers the gRPC services a Nightingale server needs. The options come from the backend's registration, through <see cref="AddNightingaleOptions{TOptions}"/>.</summary>
+    /// <summary>
+    /// Registers the application core a Nightingale server runs on, and the gRPC transport over
+    /// it. The options come from the backend's registration, through
+    /// <see cref="AddNightingaleOptions{TOptions}"/>.
+    /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddNightingaleServer(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddGrpc(grpc => grpc.Interceptors.Add<AuthenticationInterceptor>());
+        services.AddNightingaleGrpc();
+        services.TryAddSingleton(provider => new Authorizer(provider.GetService<TenantDirectory>(), provider.GetService<StoreTenant>()));
+        services.TryAddSingleton<CredentialManager>();
+        services.TryAddSingleton<TenantManager>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<SubscriptionGroupRegistry>();
         services.TryAddSingleton<InstanceAddress>();
@@ -103,16 +111,9 @@ public static class NightingaleServerExtensions
         && (char.IsAsciiLetter(name[0]) || name[0] == '_')
         && name.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
 
-    /// <summary>Maps the Nightingale gRPC services onto the host's endpoints.</summary>
+    /// <summary>Maps the Nightingale services onto the host's endpoints, over gRPC.</summary>
     /// <param name="endpoints">The endpoint route builder.</param>
     /// <returns>The same builder, for chaining.</returns>
-    public static IEndpointRouteBuilder MapNightingaleServer(this IEndpointRouteBuilder endpoints)
-    {
-        endpoints.MapGrpcService<ServerFeaturesService>();
-        endpoints.MapGrpcService<StreamsService>();
-        endpoints.MapGrpcService<PersistentSubscriptionsService>();
-        endpoints.MapGrpcService<CredentialsService>();
-        endpoints.MapGrpcService<TenantsService>();
-        return endpoints;
-    }
+    public static IEndpointRouteBuilder MapNightingaleServer(this IEndpointRouteBuilder endpoints) =>
+        endpoints.MapNightingaleGrpc();
 }

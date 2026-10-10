@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
@@ -56,7 +56,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// </summary>
     /// <param name="invoker">The call invoker.</param>
     /// <param name="redirects">Opens a connection to another instance when a group runs there; a channel of this client's own by default.</param>
-    public NightingaleClient(CallInvoker invoker, Func<Uri, CallInvoker>? redirects = null)
+    internal NightingaleClient(CallInvoker invoker, Func<Uri, CallInvoker>? redirects = null)
     {
         ArgumentNullException.ThrowIfNull(invoker);
         _streams = new Streams.StreamsClient(invoker);
@@ -321,7 +321,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(settings);
         var wire = settings.ToWire();
         wire.ClearStart();
-        wire.Numbering = Protocol.V1.Numbering.Unspecified;
+        wire.Numbering = Protocols.Grpc.V1.Numbering.Unspecified;
         var request = new UpdateRequest { Stream = stream, Group = group, Settings = wire };
         try
         {

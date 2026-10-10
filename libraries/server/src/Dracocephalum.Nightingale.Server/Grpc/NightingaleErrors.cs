@@ -1,14 +1,15 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Google.Protobuf.WellKnownTypes;
 using Google.Rpc;
 using Grpc.Core;
 
 using Status = Google.Rpc.Status;
 
-namespace Dracocephalum.Nightingale.Server;
+namespace Dracocephalum.Nightingale.Server.Grpc;
 
 /// <summary>
 /// Builds the failures a service raises, in the one shape the contract promises: a rich status whose
@@ -187,7 +188,32 @@ public static class NightingaleErrors
     /// <param name="feature">What was asked for.</param>
     /// <returns>The exception to throw.</returns>
     public static RpcException NotImplemented(string feature) =>
-        new(new Grpc.Core.Status(StatusCode.Unimplemented, $"{feature} is not implemented yet."));
+        new(new global::Grpc.Core.Status(StatusCode.Unimplemented, $"{feature} is not implemented yet."));
+
+    /// <summary>
+    /// Turns a refusal the application core raised into the status the contract promises for it:
+    /// a request that is not well formed, a role too low, credentials not accepted, a tenant
+    /// missing or disabled, or something this server does not do yet. Not every exception is a
+    /// status: one this does not know passes through, to be the internal error it is.
+    /// </summary>
+    /// <param name="exception">What was thrown.</param>
+    /// <param name="status">The status to throw instead, when there is one.</param>
+    /// <returns>True when the exception is a refusal the contract has a status for.</returns>
+    public static bool TryTranslate(Exception exception, [NotNullWhen(true)] out RpcException? status)
+    {
+        status = exception switch
+        {
+            ArgumentException argument => InvalidArgument(argument.Message),
+            AccessDeniedException { Required: { } required } => AccessDenied(required),
+            AccessDeniedException denied => AccessDenied(denied.Message),
+            AuthenticationFailedException failed => AuthenticationFailed(failed.Message),
+            TenantNotFoundException notFound => TenantNotFound(notFound.TenantId?.ToString("D") ?? string.Empty),
+            TenantDisabledException disabled => TenantDisabled(disabled.TenantId),
+            NotSupportedException unsupported => NotImplemented(unsupported.Message),
+            _ => null,
+        };
+        return status is not null;
+    }
 
     private static RpcException Build(StatusCode code, ErrorReason reason, string message, params (string Key, string Value)[] metadata)
     {

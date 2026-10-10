@@ -73,8 +73,12 @@
         "contentHash": "zvn9Mqs/ox/83cpYPignI8hJEM2A93s2HkHs8HYMOAQW0PkampyoErAiIyKxgTLqbbad29HX/shv/6LGSjPJNQ=="
       },
       "dracocephalum.nightingale.core": {
+        "type": "Project"
+      },
+      "dracocephalum.nightingale.protocols.grpc": {
         "type": "Project",
         "dependencies": {
+          "Dracocephalum.Nightingale.Core": "[1.0.0, )",
           "Google.Protobuf": "[3.36.1, )",
           "Grpc.Core.Api": "[2.83.0, )"
         }

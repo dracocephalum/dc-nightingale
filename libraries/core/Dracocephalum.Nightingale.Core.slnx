@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Dracocephalum.Nightingale.Core/Dracocephalum.Nightingale.Core.csproj" />
+    <Project Path="src/Dracocephalum.Nightingale.Protocols.Grpc/Dracocephalum.Nightingale.Protocols.Grpc.csproj" />
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/Dracocephalum.Nightingale.Core.Tests/Dracocephalum.Nightingale.Core.Tests.csproj" />
+    <Project Path="test/Dracocephalum.Nightingale.Protocols.Grpc.Tests/Dracocephalum.Nightingale.Protocols.Grpc.Tests.csproj" />
   </Folder>
 </Solution>

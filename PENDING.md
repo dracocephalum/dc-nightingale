@@ -24,6 +24,46 @@ in order:
   step that asks the vault to HMAC, behind the same seam.
 - **Stream ACLs**, with stream metadata below.
 
+## Protocols beyond gRPC
+
+The server is an application core with gRPC as one adapter over it
+(`DESIGN.md` §10), so a second protocol is a sibling, not a rewrite. The
+shape, decided so nothing here is re-derived:
+
+- **Assemblies.** A second stack is `Protocols.<Stack>` beside
+  `Protocols.Grpc`, referencing `Core` and never the other stack; its server
+  adapter is `Server.<Stack>` with `AddNightingale<Stack>()` and
+  `MapNightingale<Stack>()`, and its client adapter is `Client.<Stack>`. When
+  the first sibling arrives, the `Server.Grpc` namespace becomes an assembly
+  and the client's transport seam becomes an interface in `Client` that each
+  stack implements. The seam is defined in the core's terms —
+  `IAsyncEnumerable<EventRecord>` for reads, a duplex of messages and
+  acknowledgements for groups, resumable positions — so a request-response
+  stack such as Thrift can satisfy it by polling where gRPC streams.
+- **Both at once.** Kestrel hosts several endpoints with different protocols,
+  and a stack with its own listener is a hosted service on its own port; the
+  core never learns which listener a call came in on. Credentials ride where
+  each stack carries them — metadata for gRPC, a call argument or a header
+  protocol for Thrift — and end in the same `NightingalePrincipal` and the
+  same `Authorizer`. gRPC is the full contract; a sibling may carry a subset,
+  and refuses what it cannot carry rather than quietly degrading.
+- **Fallback in the client.** Safe because appends are idempotent by event
+  id, reads are pure, subscriptions resume from a position and seats are per
+  connection: a failover is a reconnect over another transport from the
+  checkpoint, never a mid-stream migration. The server advertises its
+  transports and their addresses through `ServerFeatures`; the client caches
+  the table and falls back only on connection failure, never on a missing
+  feature. On the very first connect the seed itself must answer.
+- **The connection string.** The authority stays the seed list, as today;
+  `transports=grpc,thrift` is the preference order, and a stack listed there
+  is used only when listed; `thrift=:9988` or `thrift=h1:9988,h2:9988` is an
+  explicit seed list for a stack, in the authority's own `host[:port]` comma
+  idiom, for a network where discovery cannot work. One key, one value: a
+  repeated key stays refused, and `@` never appears outside the userinfo.
+  `nightingale+discover://` resolves per stack, by SRV name
+  (`_nightingale-grpc._tcp`, `_nightingale-thrift._tcp`), when a cluster
+  needs it.
+
 ## Stream metadata
 
 `$maxAge`, `$maxCount` and `$tb` (truncate before) stored as one document per

@@ -127,14 +127,6 @@
           "NETStandard.Library": "1.6.1"
         }
       },
-      "Grpc.Net.Common": {
-        "type": "Transitive",
-        "resolved": "2.83.0",
-        "contentHash": "9w52xxORdIGu4Mm8lff3psMIlarenu+7TC4uIfiiW9AyaHZ6iPE/18gIkG1DD9byGDuhjuhnN9hiviBUAmCuZw==",
-        "dependencies": {
-          "Grpc.Core.Api": "2.83.0"
-        }
-      },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
         "resolved": "2.23.0",
@@ -554,16 +546,6 @@
           "xunit.v3.runner.common": "[4.0.1]"
         }
       },
-      "dracocephalum.nightingale.client": {
-        "type": "Project",
-        "dependencies": {
-          "Dracocephalum.Nightingale.Core": "[1.0.0, )",
-          "Dracocephalum.Nightingale.Protocols.Grpc": "[1.0.0, )",
-          "Google.Api.CommonProtos": "[2.17.0, )",
-          "Grpc.Net.Client": "[2.83.0, )",
-          "Grpc.StatusProto": "[2.83.0, )"
-        }
-      },
       "dracocephalum.nightingale.core": {
         "type": "Project"
       },
@@ -573,15 +555,6 @@
           "Dracocephalum.Nightingale.Core": "[1.0.0, )",
           "Google.Protobuf": "[3.36.1, )",
           "Grpc.Core.Api": "[2.83.0, )"
-        }
-      },
-      "Google.Api.CommonProtos": {
-        "type": "CentralTransitive",
-        "requested": "[2.17.0, )",
-        "resolved": "2.17.0",
-        "contentHash": "elfQPknFr495hm7vdy6ZlgyQh6yzZq9TU7sS35L/Fj/fqjM/mUGau9gVJLhvQEtUlPjtR80hpn/m9HvBMyCXIw==",
-        "dependencies": {
-          "Google.Protobuf": "[3.31.1, 4.0.0]"
         }
       },
       "Google.Protobuf": {
@@ -595,26 +568,6 @@
         "requested": "[2.83.0, )",
         "resolved": "2.83.0",
         "contentHash": "xU8BT2bCw4Ct+/qIFJhhjkDEilKUbBOfp4US7l3Xa3hnlkN9l2LgISCbOw4PFYpW5jJFcK7FUAyWOFIQ94Hiqg=="
-      },
-      "Grpc.Net.Client": {
-        "type": "CentralTransitive",
-        "requested": "[2.83.0, )",
-        "resolved": "2.83.0",
-        "contentHash": "dHYtx7hW4muttsCrWNG4/Ysb1iAIhNPEq28eo7vF166CdXn/RXOr3SGvSreIGIjvmdrADrBNJ2cUeJBto/T0XA==",
-        "dependencies": {
-          "Grpc.Net.Common": "2.83.0",
-          "Microsoft.Extensions.Logging.Abstractions": "8.0.0"
-        }
-      },
-      "Grpc.StatusProto": {
-        "type": "CentralTransitive",
-        "requested": "[2.83.0, )",
-        "resolved": "2.83.0",
-        "contentHash": "nqdA+tBE5Sly9DJ/S9M90vdShhu9dPOZYQnTzzfy+WgJgo6fgtWBnNym0FNYhT21SK/dDoqeExLf3MZAxGIQXQ==",
-        "dependencies": {
-          "Google.Api.CommonProtos": "2.16.0",
-          "Grpc.Core.Api": "2.83.0"
-        }
       },
       "Microsoft.Extensions.Hosting": {
         "type": "CentralTransitive",

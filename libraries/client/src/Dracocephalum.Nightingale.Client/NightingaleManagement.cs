@@ -1,5 +1,5 @@
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Grpc.Core;
 
 namespace Dracocephalum.Nightingale.Client;
@@ -49,7 +49,7 @@ public sealed class NightingaleManagement
     public Task<CredentialInfo> UpdateCredentialAsync(string name, CredentialRole? role = null, Guid? tenantId = null, bool? disabled = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
-        var request = new UpdateCredentialRequest { Name = name, Role = role?.ToWire() ?? Protocol.V1.CredentialRole.Unspecified, Tenant = tenantId is null ? string.Empty : tenantId == Guid.Empty ? "-" : tenantId.Value.ToString("D") };
+        var request = new UpdateCredentialRequest { Name = name, Role = role?.ToWire() ?? Protocols.Grpc.V1.CredentialRole.Unspecified, Tenant = tenantId is null ? string.Empty : tenantId == Guid.Empty ? "-" : tenantId.Value.ToString("D") };
         if (disabled is { } flag)
         {
             request.Disabled = flag;
