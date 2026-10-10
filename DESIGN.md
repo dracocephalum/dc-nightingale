@@ -449,9 +449,18 @@ running groups failed here. Credentials are rows with a salted, peppered
 PBKDF2 hash in PHC form (`PasswordHasher`), the built-in administrator is
 configuration, and a verified name and password are remembered per
 instance for a short while, keyed by a digest of what was presented. The
-stores still take the one tenant the instance serves; the scope is checked
-against it, and the stores taking a tenant per call is the multi-tenancy
-slice.
+scope is what a call resolves its stores through: `ITenantStores` hands out
+the stream store and the group store of the tenant, one of each per tenant
+served, made on first use over the one document store, the one sequence and
+the one set of gateway tables — the Polecat stream store opens every
+session for its tenant, the group store reads and writes its tenant's rows,
+and a running group resolves its own tenant's stores from the tenant its row
+carries, so a disabled tenant stops its groups alone. The wildcard resolves
+to a stream store with no tenant, which reads `$all` and the virtual streams
+across tenants through the mirror of the events table and refuses a stream
+name, which is per tenant; it exists while the sequence is shared, which
+`ServerFeatures` says. A host without a backend registers `TenantStores`,
+which hands every scope the one store it has.
 
 ### 10. The transport is an adapter over the core
 

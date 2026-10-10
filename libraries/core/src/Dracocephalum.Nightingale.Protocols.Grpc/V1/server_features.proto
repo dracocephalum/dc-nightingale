@@ -29,4 +29,9 @@ message PingResponse {
   // Whether every other call needs credentials in the authorization header;
   // see "Call metadata" in shared.proto. This call never does.
   bool authentication_required = 3;
+  // Whether a read may name every tenant with the wildcard in the tenant
+  // header; see "Call metadata" in shared.proto. True while the store keeps
+  // one sequence across tenants; a server whose store numbers each tenant on
+  // its own says false here and refuses the wildcard.
+  bool supports_every_tenant = 4;
 }

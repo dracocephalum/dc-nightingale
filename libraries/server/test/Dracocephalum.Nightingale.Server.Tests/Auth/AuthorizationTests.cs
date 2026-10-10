@@ -31,6 +31,7 @@ public sealed class AuthorizationTests : IAsyncLifetime
 
     private readonly IStreamStore _store = A.Fake<IStreamStore>();
     private readonly ISubscriptionGroupStore _groups = A.Fake<ISubscriptionGroupStore>();
+    private readonly ITenantStores _stores = A.Fake<ITenantStores>();
     private readonly FakeTail _tail = new();
     private readonly string _database = Guid.NewGuid().ToString("N");
     private WebApplication? _app;
@@ -45,7 +46,11 @@ public sealed class AuthorizationTests : IAsyncLifetime
         builder.Services.AddNightingaleSubscriptionGroupStore("nightingale", Tenant.DefaultStoreTenantId, options => options.UseInMemoryDatabase(_database));
         builder.Services.AddSingleton(_store);
         builder.Services.AddSingleton(_groups);
+        builder.Services.AddSingleton(_stores);
         builder.Services.AddSingleton<IStoreTail>(_tail);
+        A.CallTo(() => _stores.GetStreams(A<TenantScope>._)).Returns(_store);
+        A.CallTo(() => _stores.GetGroups(A<TenantScope>.That.Matches(scope => !scope.IsWildcard))).Returns(_groups);
+        A.CallTo(() => _stores.GetGroups(A<TenantScope>.That.Matches(scope => scope.IsWildcard))).Throws(new ArgumentException("Persistent subscriptions are per tenant; the wildcard has none."));
         _app = builder.Build();
         _app.MapNightingaleServer();
 
@@ -157,25 +162,30 @@ public sealed class AuthorizationTests : IAsyncLifetime
         var streams = new Streams.StreamsClient(_channel);
         var groups = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         var read = new ReadRequest { Stream = "orders-1", Start = new(), Count = 1 };
+        var readAll = new ReadRequest { Stream = "$all", Start = new(), Count = 1 };
 
         // Act
         var none = await Refusal(async () => await ReadAll(streams, read, Headers("auditor", "auditor-password-12")));
         var named = await ReadAll(streams, read, Headers("auditor", "auditor-password-12", Tenant.DefaultId));
-        var wildcard = await ReadAll(streams, read, Headers("auditor", "auditor-password-12", "*"));
+        var wildcard = await ReadAll(streams, readAll, Headers("auditor", "auditor-password-12", "*"));
         var unknown = await Refusal(async () => await ReadAll(streams, read, Headers("auditor", "auditor-password-12", Guid.NewGuid())));
         var disabled = await Refusal(async () => await ReadAll(streams, read, Headers("auditor", "auditor-password-12", Shipping)));
-        var otherTenant = await Refusal(async () => await ReadAll(streams, read, Headers("admin", AdminPassword, Billing)));
+        var otherTenant = await ReadAll(streams, read, Headers("admin", AdminPassword, Billing));
         var wildcardWrite = await Refusal(async () => await groups.DeleteAsync(new DeleteGroupRequest { Stream = "orders-1", Group = "g" }, Headers("admin", AdminPassword, "*"), cancellationToken: TestContext.Current.CancellationToken));
 
-        // Assert
+        // Assert: each call resolves its store for the tenant it was authorized for.
         none.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Reason.ShouldBe("TENANT_NOT_FOUND");
         named.ShouldNotBeNull();
         wildcard.ShouldNotBeNull();
         unknown.StatusCode.ShouldBe(StatusCode.NotFound);
         disabled.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
         disabled.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Reason.ShouldBe("TENANT_DISABLED");
-        otherTenant.StatusCode.ShouldBe(StatusCode.Unimplemented, "the stores serve one tenant until they take one per call");
+        otherTenant.ShouldNotBeNull();
         wildcardWrite.StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        A.CallTo(() => _stores.GetStreams(A<TenantScope>.That.Matches(scope => scope.TenantId == Tenant.DefaultId && scope.StoreTenantId == Tenant.DefaultStoreTenantId))).MustHaveHappened();
+        A.CallTo(() => _stores.GetStreams(A<TenantScope>.That.Matches(scope => scope.TenantId == Billing && scope.StoreTenantId == "2"))).MustHaveHappened();
+        A.CallTo(() => _stores.GetStreams(A<TenantScope>.That.Matches(scope => scope.IsWildcard))).MustHaveHappened();
+        A.CallTo(() => _stores.GetStreams(A<TenantScope>.That.Matches(scope => scope.TenantId == Shipping))).MustNotHaveHappened();
     }
 
     private static Metadata Headers(string name, string password, object? tenant = null)

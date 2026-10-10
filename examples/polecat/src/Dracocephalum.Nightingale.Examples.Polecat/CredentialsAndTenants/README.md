@@ -13,8 +13,10 @@ credential and a user bound to the default tenant, see the user refused a
 group's creation and the ops credential allowed it, have the user change its
 own password and read under the new one, create a second tenant and a
 credential bound to it, see that credential refused when it names the
-default tenant, disable the tenant and see its credential refused, and
-delete what was made. Then it drops the database.
+default tenant, have it append to `orders-1` in its own tenant and read the
+events back while the default tenant's user sees none under the same name,
+disable the tenant and see its credential refused, and delete what was made.
+Then it drops the database.
 The scenario's test runs exactly the same code and asserts the report it
 returns.
 

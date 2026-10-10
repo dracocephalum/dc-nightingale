@@ -94,7 +94,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new EventStoreSchema(options.Store.Schema));
         services.AddDbContextFactory<EventsDbContext>(context => context.UseSqlServer(connectionString));
         services.AddDbContextFactory<ReadOnlyEventsDbContext>(context => context.UseSqlServer(readOnlyConnectionString ?? connectionString));
-        services.AddSingleton<IStreamStore>(provider => new PolecatStreamStore(
+
+        // One stream store and one group store per tenant, made as tenants are served; the
+        // default tenant's stream store is also the store of a host that resolves none.
+        services.AddSingleton(provider => new PolecatTenantStores(
             provider.GetRequiredService<IDocumentStore>(),
             provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(),
             options.Store.AssignOrdinals,
@@ -103,8 +106,11 @@ public static class ServiceCollectionExtensions
                 ? DocumentStore.For(store => Configure(store, readOnlyConnectionString, options))
                 : null,
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
+            options.Store.Partitioning != PartitioningMode.Tenant,
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
+        services.AddSingleton<ITenantStores>(provider => provider.GetRequiredService<PolecatTenantStores>());
+        services.AddSingleton(provider => provider.GetRequiredService<PolecatTenantStores>().GetStreams(TenantScope.Default));
         services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
         services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddNightingaleSubscriptionGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));

@@ -28,6 +28,9 @@ public sealed class CredentialsAndTenantsTests
         report.ReaderReadAfterPasswordChange.ShouldBeTrue();
         report.Tenant.Name.ShouldBe("acme");
         report.BoundRefusal.ShouldBe("TenantNotFoundException");
+        report.TenantRevision.ShouldBe(1);
+        report.TenantEvents.ShouldBe(2);
+        report.DefaultTenantEvents.ShouldBe(0);
         report.DisabledRefusal.ShouldBe("TenantDisabledException");
         report.Remaining.ShouldBeEmpty();
     }

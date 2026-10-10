@@ -58,15 +58,21 @@ public sealed class SubscriptionGroupRegistry
         return true;
     }
 
-    /// <summary>Ends the calls of every consumer of every group running here, with the cause: the tenant was disabled.</summary>
+    /// <summary>Ends the calls of every consumer of every group of a tenant running here, with the cause: the tenant was disabled.</summary>
+    /// <param name="tenantId">The id the store keeps for the tenant.</param>
     /// <param name="cause">What each consumer's call ends with.</param>
-    public void StopAll(Exception cause)
+    public void StopTenant(string tenantId, Exception cause)
     {
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
         ArgumentNullException.ThrowIfNull(cause);
         List<SubscriptionGroupHost> hosts;
         lock (_gate)
         {
-            hosts = _groups.Values.Where(entry => !entry.Closing && entry.Ready.Task.IsCompletedSuccessfully).Select(entry => entry.Ready.Task.Result).ToList();
+            hosts = _groups.Values
+                .Where(entry => !entry.Closing && entry.Ready.Task.IsCompletedSuccessfully)
+                .Select(entry => entry.Ready.Task.Result)
+                .Where(host => string.Equals(host.Definition.TenantId, tenantId, StringComparison.Ordinal))
+                .ToList();
         }
 
         foreach (var host in hosts)

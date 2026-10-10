@@ -26,7 +26,8 @@ public static class NightingaleServerExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddNightingaleGrpc();
-        services.TryAddSingleton(provider => new Authorizer(provider.GetService<TenantDirectory>(), provider.GetService<StoreTenant>()));
+        services.TryAddSingleton(provider => new Authorizer(provider.GetService<TenantDirectory>()));
+        services.TryAddSingleton<ITenantStores>(provider => new TenantStores(provider.GetRequiredService<IStreamStore>(), provider.GetService<ISubscriptionGroupStore>()));
         services.TryAddSingleton<CredentialManager>();
         services.TryAddSingleton<TenantManager>();
         services.TryAddSingleton(TimeProvider.System);
@@ -83,7 +84,6 @@ public static class NightingaleServerExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentNullException.ThrowIfNull(configure);
         services.AddSingleton(new NightingaleSchema(schema));
-        services.AddSingleton(new StoreTenant(tenantId));
         services.AddDbContextFactory<NightingaleDbContext>(configure);
         services.TryAddSingleton<ICredentialStore, CredentialStore>();
         services.TryAddSingleton<ITenantStore, TenantStore>();

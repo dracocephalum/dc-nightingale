@@ -76,6 +76,10 @@
 //                       operations on groups and streams take the tenant
 //                       the same way.
 //   Every stream name, $all included, is read within the resolved tenant.
+//   Under "*", $all and the virtual streams are read by position across
+//   every tenant; a stream name is a name within one tenant, and a read of
+//   one under "*" is refused as INVALID_ARGUMENT, as is ordinal numbering,
+//   which is per tenant.
 //
 // Errors
 //   A failed call carries a google.rpc.Status whose details hold one

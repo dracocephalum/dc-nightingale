@@ -83,38 +83,24 @@ consistency model is richer still, tag-based conditions of the form "no event
 matching this query since sequence N", and can be exposed once the single-stream
 contract is stable.
 
-## Multi-tenancy
+## Multi-tenancy: what is left
 
-Tenants share one database and one global sequence, so positions stay coherent
-across tenants. A tenant-bound credential needs no tenant header: every read
-and append happens within its tenant, `$all` and the virtual streams
-included, and a persistent-subscription group is identified by tenant, stream
-and group name; a header sent anyway must equal the credential's tenant. An
-admin credential must send the tenant header on every data operation, so
-nothing lands in a tenant or spans tenants by omission; the wildcard value
-spans all tenants and is accepted on reads only. The wildcard exists because
-the sequence is shared, so it is only offered while it is: with the store's
-per-tenant partitioning (`Nightingale:Store:Partitioning` = `Tenant`, fixed when the
-store is initialized and guarded by its marker row) or a database per tenant
-there is no global position,
-the server says so through its features call, and the wildcard is refused.
-Range partitioning by sequence, the gateway's own if ever added, keeps the
-shared sequence and the wildcard. Ordinals are per tenant by construction,
-the sequencer partitions by tenant and the ordinal indexes lead with the tenant
-column, so they fit either partitioning; what tenant partitioning needs is a
-sequencer that follows the mark and keeps its progress per tenant, which is why
-`Nightingale:Store:AssignOrdinals` is refused with it until then. A wildcard
-read spans tenants and so has no single ordinal sequence: it is served under
-global numbering only, and ordinal numbering with the wildcard is refused.
-Provisioning a tenant touches no schema: a new value in the tenant column, a
-registry entry and credentials, all the gateway's own documents. The store
-runs in conjoined mode
-with the default tenant from day one, so enabling tenants later adds
-credentials, not a schema migration; the category and type indexes lead with
-the tenant column. Database-per-tenant is not planned; what it would take is
-under its own heading below.
+Tenants share one database and one sequence, every data call works in the
+tenant it was authorized for, and the wildcard spans tenants on reads of
+`$all` and the virtual streams by position; `DESIGN.md` has the shape. Two
+things remain.
 
-The samples would use it. Each scenario under `examples/` creates and
+**Tenant partitioning.** With the store's per-tenant partitioning
+(`Nightingale:Store:Partitioning` = `Tenant`, fixed when the store is
+initialized and guarded by its marker row) there is a sequence per tenant and
+no global position: the server says so through its features call and refuses
+the wildcard, which is done; what is not is the tail and the sequencer, which
+follow one high-water mark and would need one per tenant, so
+`Nightingale:Store:AssignOrdinals` is refused with it and subscriptions under
+it follow the wrong mark (`TODO.md`). Range partitioning by sequence, the
+gateway's own if ever added, keeps the shared sequence and the wildcard.
+
+**The samples on one database.** Each scenario under `examples/` creates and
 initializes a database of its own, because several of them append to the same
 stream names and read the same category. With tenants, one database
 initialized once serves every scenario of a run, a tenant each: names, groups

@@ -1,4 +1,5 @@
 using Dracocephalum.Nightingale;
+using Dracocephalum.Nightingale.Server.Data;
 
 namespace Dracocephalum.Nightingale.Server;
 
@@ -15,4 +16,11 @@ public sealed record SubscriptionGroupDefinition(string Stream, string Group, Gr
     /// messages, its outbox and its lease never depend on how a name is spelt or compared.
     /// </summary>
     public Guid Id { get; init; } = Guid.CreateVersion7();
+
+    /// <summary>
+    /// Gets the id the store keeps for the group's tenant: set from the row when a group is read,
+    /// so its runtime resolves the tenant's stores and a disabled tenant stops its groups alone.
+    /// A group store writes its own tenant on creation, whatever a new definition says here.
+    /// </summary>
+    public string TenantId { get; init; } = Tenant.DefaultStoreTenantId;
 }
