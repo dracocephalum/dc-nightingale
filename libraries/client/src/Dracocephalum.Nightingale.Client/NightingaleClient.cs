@@ -46,6 +46,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         var invoker = CreateInvoker(channel);
         _streams = new Streams.StreamsClient(invoker);
         _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(invoker);
+        Management = new NightingaleManagement(invoker);
         _redirects = OpenOwnedChannel;
     }
 
@@ -60,8 +61,12 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(invoker);
         _streams = new Streams.StreamsClient(invoker);
         _persistent = new PersistentSubscriptions.PersistentSubscriptionsClient(invoker);
+        Management = new NightingaleManagement(invoker);
         _redirects = redirects ?? OpenOwnedChannel;
     }
+
+    /// <summary>Gets the management calls: credentials and tenants, for an admin.</summary>
+    public NightingaleManagement Management { get; }
 
     /// <summary>Appends events to a stream atomically under an expected state.</summary>
     /// <param name="stream">The stream name.</param>

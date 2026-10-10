@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package dracocephalum.nightingale.v1;
+
+import "google/protobuf/timestamp.proto";
+import "shared.proto";
+
+option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+
+// Credentials and tenants: who may call, and the tenants there are. Every
+// call needs the admin role. A tenant-bound admin manages the credentials of
+// its own tenant only, and no credential may be given a role above its
+// maker's or a tenant other than its maker's; a global admin manages every
+// credential and the tenants. The built-in administrator is not a
+// credential here: its password is the server's configuration.
+service Credentials {
+  // Creates a credential. Refused with CREDENTIAL_EXISTS when the name is
+  // taken, INVALID_ARGUMENT when the password is shorter than the server
+  // allows, ACCESS_DENIED when the role or the tenant is beyond the caller's.
+  rpc Create (CreateCredentialRequest) returns (CredentialResponse);
+  // Changes a credential's role, tenant or disabled flag; a field left
+  // unset keeps its value. What an instance remembered of the credential
+  // is dropped within its cache duration. Refused with CREDENTIAL_NOT_FOUND.
+  rpc Update (UpdateCredentialRequest) returns (CredentialResponse);
+  // Sets a credential's password, and clears its lockout.
+  rpc SetPassword (SetPasswordRequest) returns (CredentialResponse);
+  // Deletes a credential. Refused with CREDENTIAL_NOT_FOUND.
+  rpc Delete (DeleteCredentialRequest) returns (DeleteCredentialResponse);
+  // Lists the credentials the caller may manage, by name.
+  rpc List (ListCredentialsRequest) returns (ListCredentialsResponse);
+  // Sets the caller's own password, given the current one; any role, except
+  // the built-in administrator, whose password is configuration.
+  rpc ChangeOwnPassword (ChangeOwnPasswordRequest) returns (ChangeOwnPasswordResponse);
+}
+
+service Tenants {
+  // Creates a tenant under a name; global admin only. Refused with
+  // TENANT_EXISTS when the name is taken.
+  rpc Create (CreateTenantRequest) returns (TenantResponse);
+  // Renames a tenant, or disables or enables it; a field left unset keeps
+  // its value. Disabled, the tenant's calls are refused and its consumers
+  // disconnected on every instance within the refresh interval. Global
+  // admin only; refused with TENANT_NOT_FOUND.
+  rpc Update (UpdateTenantRequest) returns (TenantResponse);
+  // Lists the tenants, by name; global admin only.
+  rpc List (ListTenantsRequest) returns (ListTenantsResponse);
+}
+
+// A credential's role.
+enum CredentialRole {
+  // Treated as USER on create; keeps the value on update.
+  CREDENTIAL_ROLE_UNSPECIFIED = 0;
+  CREDENTIAL_ROLE_USER = 1;
+  CREDENTIAL_ROLE_OPS = 2;
+  CREDENTIAL_ROLE_ADMIN = 3;
+}
+
+message CredentialInfo {
+  string name = 1;
+  CredentialRole role = 2;
+  // The tenant the credential is bound to; empty for a global credential.
+  string tenant = 3;
+  bool disabled = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp password_changed_at = 6;
+  // Until when the credential is refused after too many wrong passwords.
+  optional google.protobuf.Timestamp locked_until = 7;
+}
+
+message CreateCredentialRequest {
+  string name = 1;
+  string password = 2;
+  CredentialRole role = 3;
+  // The tenant to bind the credential to, a UUID in its canonical form;
+  // empty for a global credential, which only a global admin may make.
+  string tenant = 4;
+}
+
+message UpdateCredentialRequest {
+  string name = 1;
+  CredentialRole role = 2;
+  // A tenant to bind to, or "-" for global; empty keeps the value.
+  string tenant = 3;
+  optional bool disabled = 4;
+}
+
+message SetPasswordRequest {
+  string name = 1;
+  string password = 2;
+}
+
+message DeleteCredentialRequest {
+  string name = 1;
+}
+
+message DeleteCredentialResponse {}
+
+message ListCredentialsRequest {}
+
+message ListCredentialsResponse {
+  repeated CredentialInfo credentials = 1;
+}
+
+message ChangeOwnPasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+
+message ChangeOwnPasswordResponse {}
+
+message CredentialResponse {
+  CredentialInfo credential = 1;
+}
+
+message TenantInfo {
+  string id = 1;
+  string name = 2;
+  bool disabled = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message CreateTenantRequest {
+  string name = 1;
+}
+
+message UpdateTenantRequest {
+  string id = 1;
+  // Empty keeps the name.
+  string name = 2;
+  optional bool disabled = 3;
+}
+
+message ListTenantsRequest {}
+
+message ListTenantsResponse {
+  repeated TenantInfo tenants = 1;
+}
+
+message TenantResponse {
+  TenantInfo tenant = 1;
+}

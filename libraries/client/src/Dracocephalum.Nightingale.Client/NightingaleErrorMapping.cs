@@ -47,6 +47,9 @@ public static class NightingaleErrorMapping
             ErrorReason.AuthenticationFailed => new AuthenticationFailedException(exception.Status.Detail),
             ErrorReason.AccessDenied => Enum.TryParse<CredentialRole>(GetText(info, "required"), true, out var required) ? new AccessDeniedException(exception.Status.Detail, required) : new AccessDeniedException(exception.Status.Detail),
             ErrorReason.TenantNotFound => new TenantNotFoundException(Guid.TryParse(GetText(info, "tenant"), out var missing) ? missing : null),
+            ErrorReason.CredentialExists => new CredentialExistsException(exception.Status.Detail),
+            ErrorReason.CredentialNotFound => new CredentialNotFoundException(exception.Status.Detail),
+            ErrorReason.TenantExists => new TenantExistsException(exception.Status.Detail),
             ErrorReason.TenantDisabled => new TenantDisabledException(Guid.TryParse(GetText(info, "tenant"), out var disabled) ? disabled : Guid.Empty),
             ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument =>
                 new ArgumentException(exception.Status.Detail),

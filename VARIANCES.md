@@ -482,6 +482,13 @@ proxies carry it unchanged; what is behind it differs.
   it from the `tenant` setting of its connection string.
 - **Basic over cleartext is refused** unless `Nightingale:Auth:AllowInsecureTransport`
   says the network is private; the reference leaves that to the operator.
+- **Credentials and tenants are managed through two services of their own**,
+  `Credentials` and `Tenants`, admin only, a tenant-bound admin within its
+  tenant and never granting above its own role; the reference manages users
+  through its users service and has no tenants. A disabled tenant is told
+  apart from an unknown one (`TENANT_DISABLED` against `TENANT_NOT_FOUND`):
+  only an authenticated caller naming a random 128-bit id can tell, and the
+  tenant's own consumers need the difference to back off rather than fail.
 - **The features call needs no credentials** and says whether the others do.
 - **No client certificates, and no tokens yet**; the Bearer scheme is
   reserved, see `PENDING.md`.

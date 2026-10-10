@@ -84,4 +84,11 @@ enum ErrorReason {
   ERROR_REASON_TENANT_NOT_FOUND = 18;
   // FAILED_PRECONDITION. The tenant is disabled. metadata: tenant.
   ERROR_REASON_TENANT_DISABLED = 19;
+  // ALREADY_EXISTS. A credential of that name exists. metadata: name.
+  ERROR_REASON_CREDENTIAL_EXISTS = 20;
+  // NOT_FOUND. No credential of that name among those the caller may
+  // manage. metadata: name.
+  ERROR_REASON_CREDENTIAL_NOT_FOUND = 21;
+  // ALREADY_EXISTS. A tenant of that name exists. metadata: name.
+  ERROR_REASON_TENANT_EXISTS = 22;
 }

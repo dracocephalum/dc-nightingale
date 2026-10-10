@@ -101,6 +101,32 @@ public static class Authorization
         return scope;
     }
 
+    /// <summary>
+    /// Checks the call's role only: for a management call, which works in the caller's own
+    /// tenant or across all of them by the caller's binding, not by a header. A tenant-bound
+    /// caller whose tenant is disabled is refused like any of its calls.
+    /// </summary>
+    /// <param name="context">The call.</param>
+    /// <param name="required">The role the call needs.</param>
+    /// <returns>The principal.</returns>
+    /// <exception cref="RpcException">The role is too low, or the caller's tenant is gone or disabled.</exception>
+    public static async Task<NightingalePrincipal> RequireRoleAsync(this ServerCallContext context, CredentialRole required)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var principal = context.GetPrincipal();
+        if (!principal.IsAtLeast(required))
+        {
+            throw NightingaleErrors.AccessDenied(required);
+        }
+
+        if (principal.TenantId is { } bound)
+        {
+            await ResolveAsync(context.GetHttpContext().RequestServices.GetService<TenantDirectory>(), bound, context.CancellationToken).ConfigureAwait(false);
+        }
+
+        return principal;
+    }
+
     private static async Task<TenantScope> ResolveAsync(TenantDirectory? directory, Guid tenantId, CancellationToken cancellationToken)
     {
         if (directory is null)

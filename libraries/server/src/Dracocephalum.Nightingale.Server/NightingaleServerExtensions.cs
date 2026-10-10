@@ -78,6 +78,8 @@ public static class NightingaleServerExtensions
         services.AddSingleton(new StoreTenant(tenantId));
         services.AddDbContextFactory<NightingaleDbContext>(configure);
         services.TryAddSingleton<ICredentialStore, CredentialStore>();
+        services.TryAddSingleton<ITenantStore, TenantStore>();
+        services.TryAddSingleton<ITenantProvisioner, NoTenantProvisioning>();
         services.TryAddSingleton(provider => new PasswordHasher(provider.GetRequiredService<NightingaleOptionsBase>().Auth));
         services.TryAddSingleton(provider => new BasicAuthenticator(
             provider.GetRequiredService<NightingaleOptionsBase>().Auth,
@@ -88,7 +90,6 @@ public static class NightingaleServerExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<SubscriptionGroupRegistry>();
         services.TryAddSingleton<TenantDirectory>();
-        services.AddHostedService<TenantRefresher>();
         services.AddSingleton<ISubscriptionGroupStore>(provider => new SubscriptionGroupStore(
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             tenantId,
@@ -110,6 +111,8 @@ public static class NightingaleServerExtensions
         endpoints.MapGrpcService<ServerFeaturesService>();
         endpoints.MapGrpcService<StreamsService>();
         endpoints.MapGrpcService<PersistentSubscriptionsService>();
+        endpoints.MapGrpcService<CredentialsService>();
+        endpoints.MapGrpcService<TenantsService>();
         return endpoints;
     }
 }

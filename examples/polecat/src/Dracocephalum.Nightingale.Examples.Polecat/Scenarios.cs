@@ -42,6 +42,11 @@ public static class Scenarios
             CompetingConsumers.Scenario.RunAsync,
             report => $"Done: {report.PinnedDelivered} events pinned over {report.PinnedStreams[0].Count} and {report.PinnedStreams[1].Count} streams; both ended with {report.EndedWith[0]}; the leaver's event was handed over with retry count {report.QuickReceived[^1].RetryCount}."),
         ExampleScenario.Create(
+            "credentials-and-tenants",
+            "credentials and tenants: roles kept to, a password changed, a tenant made and disabled",
+            CredentialsAndTenants.Scenario.RunAsync,
+            report => $"Done: {report.Made.Count} credentials made; the user was refused as {report.ReaderRefusal}; tenant {report.Tenant.Name} disabled, its credential refused as {report.DisabledRefusal}."),
+        ExampleScenario.Create(
             "delete-and-tombstone",
             "delete hides a stream, tombstone frees its name, and the default server refuses both",
             DeleteAndTombstone.Scenario.RunAsync,
