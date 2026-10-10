@@ -12,7 +12,7 @@ namespace Dracocephalum.Nightingale.Server;
 public sealed class TenantStores(IStreamStore streams, ISubscriptionGroupStore? groups = null) : ITenantStores
 {
     /// <inheritdoc/>
-    public bool SupportsEveryTenant => true;
+    public bool SupportsAllTenants => true;
 
     /// <inheritdoc/>
     public IStreamStore GetStreams(TenantScope scope) => streams;

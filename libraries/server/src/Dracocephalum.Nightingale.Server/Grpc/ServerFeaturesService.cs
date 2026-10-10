@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// initialized with, so a client can learn before its first read whether the virtual streams can
 /// be read by ordinal.
 /// </summary>
-/// <param name="stores">The backend's stores, for what the store was initialized with and whether a read may span every tenant.</param>
+/// <param name="stores">The backend's stores, for what the store was initialized with and whether a read may span all tenants.</param>
 /// <param name="options">The host's options, for whether calls are authenticated; none in a host that registered none.</param>
 public sealed class ServerFeaturesService(ITenantStores stores, NightingaleOptionsBase? options = null) : ServerFeatures.ServerFeaturesBase
 {
@@ -25,6 +25,6 @@ public sealed class ServerFeaturesService(ITenantStores stores, NightingaleOptio
             Version = Version,
             SupportsOrdinals = stores.GetStreams(Auth.TenantScope.Default).OrdinalsEnabled,
             AuthenticationRequired = options?.Auth.Enabled ?? false,
-            SupportsEveryTenant = stores.SupportsEveryTenant,
+            SupportsAllTenants = stores.SupportsAllTenants,
         });
 }

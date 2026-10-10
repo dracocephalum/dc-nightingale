@@ -52,11 +52,11 @@ public sealed class MultiTenancyTests(SqlServerTestDatabase database)
 
         // Act
         var acmeAll = await stores.GetStreams(acme).ReadAllAsync(Direction.Forwards, a.Position, head, 100, TestContext.Current.CancellationToken);
-        var everyAll = await stores.GetStreams(TenantScope.Every).ReadAllAsync(Direction.Forwards, a.Position, head, 100, TestContext.Current.CancellationToken);
+        var everyAll = await stores.GetStreams(TenantScope.AllTenants).ReadAllAsync(Direction.Forwards, a.Position, head, 100, TestContext.Current.CancellationToken);
         var acmeBounds = await stores.GetStreams(acme).VirtualHeadAsync(virtualStream, head, TestContext.Current.CancellationToken);
         var globexBounds = await stores.GetStreams(globex).VirtualHeadAsync(virtualStream, head, TestContext.Current.CancellationToken);
-        var everyBounds = await stores.GetStreams(TenantScope.Every).VirtualHeadAsync(virtualStream, head, TestContext.Current.CancellationToken);
-        var everyStream = await Should.ThrowAsync<ArgumentException>(async () => await stores.GetStreams(TenantScope.Every).ReadAsync(category + "-1", Direction.Forwards, null, 1, TestContext.Current.CancellationToken));
+        var everyBounds = await stores.GetStreams(TenantScope.AllTenants).VirtualHeadAsync(virtualStream, head, TestContext.Current.CancellationToken);
+        var everyStream = await Should.ThrowAsync<ArgumentException>(async () => await stores.GetStreams(TenantScope.AllTenants).ReadAsync(category + "-1", Direction.Forwards, null, 1, TestContext.Current.CancellationToken));
 
         // Assert
         acmeAll.Select(record => record.Position).ShouldNotContain(b.Position);
@@ -83,7 +83,7 @@ public sealed class MultiTenancyTests(SqlServerTestDatabase database)
         var acmeGroup = await stores.GetGroups(acme).GetAsync(stream, group, TestContext.Current.CancellationToken);
         var globexGroup = await stores.GetGroups(globex).GetAsync(stream, group, TestContext.Current.CancellationToken);
         var defaultGroup = await stores.GetGroups(TenantScope.Default).GetAsync(stream, group, TestContext.Current.CancellationToken);
-        var wildcard = Should.Throw<ArgumentException>(() => stores.GetGroups(TenantScope.Every));
+        var wildcard = Should.Throw<ArgumentException>(() => stores.GetGroups(TenantScope.AllTenants));
 
         // Assert: two groups, one per tenant, each carrying its tenant for its runtime to resolve.
         acmeGroup.ShouldNotBeNull().TenantId.ShouldBe(acme.StoreTenantId);
@@ -91,7 +91,7 @@ public sealed class MultiTenancyTests(SqlServerTestDatabase database)
         acmeGroup.Id.ShouldNotBe(globexGroup.Id);
         defaultGroup.ShouldBeNull();
         wildcard.Message.ShouldContain("wildcard");
-        stores.SupportsEveryTenant.ShouldBeTrue();
+        stores.SupportsAllTenants.ShouldBeTrue();
     }
 
     private static EventData Event(string type) => new(Guid.NewGuid(), type, "{}"u8.ToArray(), null);

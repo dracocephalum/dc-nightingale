@@ -15,7 +15,7 @@ public static class Authorization
     /// <summary>The header a global credential names its tenant in.</summary>
     public const string TenantHeader = "nightingale-tenant";
 
-    /// <summary>The value of the header that spans every tenant, on a read.</summary>
+    /// <summary>The value of the header that spans all tenants, on a read.</summary>
     public const string Wildcard = "*";
 
     /// <summary>The principal the interceptor left on the call.</summary>

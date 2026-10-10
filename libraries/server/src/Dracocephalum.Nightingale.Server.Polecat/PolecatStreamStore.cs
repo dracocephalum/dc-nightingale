@@ -29,7 +29,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </para>
 /// </summary>
 /// <param name="store">The store.</param>
-/// <param name="tenantId">The tenant every session is opened for, or <see langword="null"/> for every tenant, under the wildcard: then <c>$all</c> and the virtual streams read across tenants and a stream name, which is per tenant, is refused.</param>
+/// <param name="tenantId">The tenant every session is opened for, or <see langword="null"/> for all tenants, under the wildcard: then <c>$all</c> and the virtual streams read across tenants and a stream name, which is per tenant, is refused.</param>
 /// <param name="events">Makes the mirror of the store's events table over the main connection, for the virtual streams.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>

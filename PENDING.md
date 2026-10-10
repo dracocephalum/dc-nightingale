@@ -133,7 +133,7 @@ What enabling it would mean, each a design of its own:
   lease, one set of gateway tables and one registry of running groups per
   tenant, activated on first use and evicted when idle, so that startup,
   migration and the catalog comparison, seconds per fresh database, are not
-  paid for every tenant on every instance at once.
+  paid for all tenants on every instance at once.
 - **A database that knows its tenant**: the tenant id stamped in the
   store's marker row at provisioning, and a registration refused when the
   database says another, since the registry row is otherwise the only link
@@ -143,7 +143,7 @@ What enabling it would mean, each a design of its own:
 - **Registry changes seen by every instance**: a tenant disabled or
   re-pointed on one instance ends the consumers and stops the tail on the
   others, on a refresh cadence or a signal.
-- **Placement of per-tenant leases**, so every tenant's sequencer does not
+- **Placement of per-tenant leases**, so all tenants's sequencer does not
   land on the instance that woke first.
 - **Operator tooling per database**: the schema report and apply, the
   collation rule and the initialization-fixed settings checked and reported

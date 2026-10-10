@@ -40,7 +40,7 @@ public sealed class TenantManager(ITenantStore tenants, Authorizer authorizer)
             ?? throw new TenantNotFoundException(id);
     }
 
-    /// <summary>Lists every tenant.</summary>
+    /// <summary>Lists all tenants.</summary>
     /// <param name="caller">The caller, a global admin.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The rows, by name.</returns>

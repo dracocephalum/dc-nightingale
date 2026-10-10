@@ -60,7 +60,7 @@ public sealed class VirtualStreamReaderTests
     }
 
     [Fact]
-    public async Task ReadAllAsync_WithNoTenant_ShouldSpanEveryTenantAndWithOneStayWithinIt()
+    public async Task ReadAllAsync_WithNoTenant_ShouldSpanAllTenantsAndWithOneStayWithinIt()
     {
         // Arrange
         var every = new VirtualStreamReader(() => new EventsDbContext(_options, Schema), null);

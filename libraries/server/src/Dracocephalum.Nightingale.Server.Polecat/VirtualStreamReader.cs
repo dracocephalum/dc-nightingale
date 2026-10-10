@@ -21,7 +21,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// test's to say.
 /// </summary>
 /// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
-/// <param name="tenantId">The tenant every read is scoped to, or <see langword="null"/> for every tenant, under the wildcard.</param>
+/// <param name="tenantId">The tenant every read is scoped to, or <see langword="null"/> for all tenants, under the wildcard.</param>
 internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string? tenantId)
 {
     private static readonly Expression<Func<EventRow, Raw>> Plain =
@@ -68,7 +68,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         return await PageAsync(FilterByPosition(QueryLive(context, stream), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>One page of <c>$all</c> by position, with the same bounds as <see cref="ReadAsync"/>: every live event of the tenant, or of every tenant.</summary>
+    /// <summary>One page of <c>$all</c> by position, with the same bounds as <see cref="ReadAsync"/>: every live event of the tenant, or of all tenants.</summary>
     /// <param name="direction">The direction to read in.</param>
     /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
     /// <param name="head">The highest position a forwards page may hold.</param>

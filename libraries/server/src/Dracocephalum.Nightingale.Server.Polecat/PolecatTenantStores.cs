@@ -25,7 +25,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
 /// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned here, or <see langword="null"/>.</param>
 /// <param name="contexts">Makes the gateway's own context.</param>
-/// <param name="supportsEveryTenant">Whether positions are coherent across tenants, which they are while the sequence is shared.</param>
+/// <param name="supportsAllTenants">Whether positions are coherent across tenants, which they are while the sequence is shared.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger the stream stores log through.</param>
 internal sealed class PolecatTenantStores(
@@ -35,16 +35,16 @@ internal sealed class PolecatTenantStores(
     IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents,
     IDocumentStore? readOnlyStore,
     IDbContextFactory<NightingaleDbContext> contexts,
-    bool supportsEveryTenant,
+    bool supportsAllTenants,
     TimeProvider timeProvider,
     ILogger<PolecatStreamStore> logger) : ITenantStores, IDisposable, IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, PolecatStreamStore> _streams = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SubscriptionGroupStore> _groups = new(StringComparer.Ordinal);
-    private readonly Lazy<PolecatStreamStore> _every = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStore, contexts, timeProvider, logger));
+    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStore, contexts, timeProvider, logger));
 
     /// <inheritdoc/>
-    public bool SupportsEveryTenant => supportsEveryTenant;
+    public bool SupportsAllTenants => supportsAllTenants;
 
     /// <inheritdoc/>
     public IStreamStore GetStreams(TenantScope scope)
@@ -52,12 +52,12 @@ internal sealed class PolecatTenantStores(
         ArgumentNullException.ThrowIfNull(scope);
         if (scope.IsWildcard)
         {
-            if (!supportsEveryTenant)
+            if (!supportsAllTenants)
             {
-                throw new ArgumentException("The store numbers each tenant on its own, so no read spans every tenant.", nameof(scope));
+                throw new ArgumentException("The store numbers each tenant on its own, so no read spans all tenants.", nameof(scope));
             }
 
-            return _every.Value;
+            return _allTenants.Value;
         }
 
         return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStore, contexts, timeProvider, logger));

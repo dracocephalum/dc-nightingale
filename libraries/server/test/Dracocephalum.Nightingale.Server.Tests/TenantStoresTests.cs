@@ -19,9 +19,9 @@ public sealed class TenantStoresTests
         // Act & Assert
         sut.GetStreams(TenantScope.Default).ShouldBeSameAs(_streams);
         sut.GetStreams(TenantScope.OfStoreTenant("7")).ShouldBeSameAs(_streams);
-        sut.GetStreams(TenantScope.Every).ShouldBeSameAs(_streams);
+        sut.GetStreams(TenantScope.AllTenants).ShouldBeSameAs(_streams);
         sut.GetGroups(TenantScope.OfStoreTenant("7")).ShouldBeSameAs(_groups);
-        sut.SupportsEveryTenant.ShouldBeTrue();
+        sut.SupportsAllTenants.ShouldBeTrue();
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public sealed class TenantStoresTests
         var without = new TenantStores(_streams);
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => sut.GetGroups(TenantScope.Every)).Message.ShouldContain("wildcard");
+        Should.Throw<ArgumentException>(() => sut.GetGroups(TenantScope.AllTenants)).Message.ShouldContain("wildcard");
         Should.Throw<InvalidOperationException>(() => without.GetGroups(TenantScope.Default));
     }
 }

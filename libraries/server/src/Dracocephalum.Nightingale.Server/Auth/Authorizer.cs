@@ -56,7 +56,7 @@ public sealed class Authorizer(TenantDirectory? directory = null)
                 throw new AccessDeniedException("The wildcard tenant is for reads and subscriptions only.");
             }
 
-            scope = TenantScope.Every;
+            scope = TenantScope.AllTenants;
         }
         else
         {
