@@ -38,6 +38,8 @@ Read the linked file **before** acting on a matching request, rather than
 working from memory. Each row states *when* it applies; that trigger is what
 makes it selectable from a plain-language request.
 
+<!-- agentics:guidelines -->
+
 | When you are | Read |
 |---|---|
 | Writing, reviewing or refactoring C# in this repository | [`agentics/rules/coding/csharp/csharp-coding-rules.md`](agentics/rules/coding/csharp/csharp-coding-rules.md) |
@@ -57,8 +59,6 @@ makes it selectable from a plain-language request.
 | Starting any source-control action, or asked what this repository's settings and defaults are | [`.agentics.yaml`](.agentics.yaml) — the mode the agent works in (`auto`, `local`, `manual`) and every choice made at initialization |
 | Understanding how the pieces fit, or why the store is wrapped, patched, or initialized the way it is | [`DESIGN.md`](DESIGN.md) — the seams and the reasons; type comments say what, this says why |
 | Leaving something unfinished, blocked, or undecided — or asked what is still open | [`TODO.md`](TODO.md) — add it there; a remark in a conversation is lost |
-| Making the API behave differently from the reference event store on purpose, or asked why it differs | [`VARIANCES.md`](VARIANCES.md) — record the difference and the reason there |
-| Deferring a product feature with its approach already decided | [`PENDING.md`](PENDING.md) — record it there; `TODO.md` is for what is owed soon |
 
 The documents above are the substance, for every tool. In Claude Code some
 are also invocable through a shim in `.claude/skills/` -
@@ -73,6 +73,8 @@ measures unless asked for more.
 
 Add a row whenever a rules document is added under `agentics/rules/`. A document
 nobody is pointed at will not be read.
+
+<!-- /agentics:guidelines -->
 
 ## Conventions
 
