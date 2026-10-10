@@ -1,9 +1,10 @@
 using System.Text;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Grpc;
 using FakeItEasy;
 using Google.Rpc;
 using Grpc.Core;

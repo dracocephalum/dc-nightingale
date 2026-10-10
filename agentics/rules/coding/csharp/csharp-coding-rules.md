@@ -53,6 +53,11 @@ Metrics and spans:
   packages, so treat a migration as a port, not a package swap.
 - **Never expose the persistence schema.** Queries return DTOs or projections;
   entities stay behind the boundary.
+- **The core knows no transport and no storage.** Where a type lives, what
+  an assembly may reference, how a generated or third-party type is kept off
+  the core's surface, and what crosses a seam (copy, view or stream) are in
+  [`../architecture.md`](../architecture.md); the C#-specific spellings are
+  *Naming* and *gRPC contracts* here.
 - **Expected failures are values or well-known exceptions; unexpected ones are
   exceptions.** Validation, not-found, conflict, business-rule rejections: either
   return a domain-specific result record carrying an error code, or throw a
@@ -153,6 +158,15 @@ Metrics and spans:
   test-data builders in test projects (`Record(stream, 3)`, `Event("paid")`),
   and the accessor a `[GeneratedRegex]` generates, named for its pattern with
   a `Regex` suffix as the BCL samples do (`CollationNameRegex()`).
+- **A gRPC service implementation is named for its proto service plus
+  `Service`, and overrides the rpc names as generated.**
+  `TenantsService : Tenants.TenantsBase` with `override Task<TenantResponse> Create(...)`,
+  not `TenantService` and not `CreateAsync`: the chain from proto to generated
+  base to implementation reads as one thing and is found from either end. The
+  plural is the proto's, not a breach of the singular unit noun, which the
+  types behind the implementation keep (`TenantStore`, `Tenant`,
+  `TenantManager`). Generated names are the generator's and are never wrapped
+  or renamed for style.
 
 ## One type per file, and the feature file
 
@@ -371,9 +385,18 @@ other files to learn why this one exists.
 
 ### gRPC contracts
 
-- The proto package is the component's namespace plus `Protocol.V1`, and the
-  version is part of the package from the first draft: renaming a package
-  later changes every generated type.
+- The contract is its own assembly, `<Prefix>.Protocols.<Stack>` —
+  `Protocols.Grpc` — holding the `.proto` files, the generated code and the
+  conversions to the domain types, and referencing the domain assembly and
+  nothing else: the domain carries no wire package, the compiler holds that
+  line, and a second stack is a sibling that never references the first.
+  The `csharp_namespace` is that assembly's root plus `.V1`; the proto
+  package is the versioned API name (`<org>.<product>.v1`), named for the
+  API and not the transport, because the package is what goes on the wire.
+  Both carry the version from the first draft: renaming either later changes
+  every generated type, and renaming the package changes the wire. The
+  language-neutral rule, and what crosses between the generated types and the
+  domain, is [`../architecture.md`](../architecture.md).
 - Services are named by area — `Streams`, `Subscriptions` — never after the
   product, which clashes with the namespace, and never after a domain type,
   which clashes with the type. Enums and messages that mirror a domain type

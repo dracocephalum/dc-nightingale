@@ -91,7 +91,7 @@ public sealed partial class TenantDirectory(IDbContextFactory<NightingaleDbConte
     {
         // The instance serves one tenant's data today, so every running group is the tenant's;
         // a store serving many tenants will stop the tenant's groups only.
-        registry.StopAll(NightingaleErrors.TenantDisabled(tenant.Id));
+        registry.StopAll(new TenantDisabledException(tenant.Id));
         LogDisabled(logger, tenant.Id);
     }
 

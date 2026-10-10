@@ -41,6 +41,7 @@ makes it selectable from a plain-language request.
 | When you are | Read |
 |---|---|
 | Writing, reviewing or refactoring C# in this repository | [`agentics/rules/coding/csharp/csharp-coding-rules.md`](agentics/rules/coding/csharp/csharp-coding-rules.md) |
+| Shaping a boundary — where a type lives, what an assembly may reference, wrapping a generated or third-party API, adding a transport or a backend | [`agentics/rules/coding/architecture.md`](agentics/rules/coding/architecture.md) — language-neutral; the C# rules carry the spellings |
 | Touching an entity, a `DbContext`, or a migration | [`agentics/rules/coding/csharp/csharp-ef-core-rules.md`](agentics/rules/coding/csharp/csharp-ef-core-rules.md) |
 | Adding a project, component, or test project | [`agentics/rules/coding/csharp/csharp-new-project.md`](agentics/rules/coding/csharp/csharp-new-project.md) |
 | Asking where something goes, how it should be named, or what the other layout looks like | [`agentics/rules/layout.md`](agentics/rules/layout.md) — both modes, so this repository can describe a shape it does not currently have |

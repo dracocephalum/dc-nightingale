@@ -2,8 +2,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Google.Protobuf;
 using Shouldly;
 
@@ -72,27 +72,27 @@ public sealed class WireConversionsTests
     }
 
     [Theory]
-    [InlineData(Numbering.Global, Protocol.V1.Numbering.Global)]
-    [InlineData(Numbering.Ordinal, Protocol.V1.Numbering.Ordinal)]
-    public void Numbering_ShouldRoundTripAndTreatUnspecifiedAsGlobal(Numbering numbering, Protocol.V1.Numbering wire)
+    [InlineData(Numbering.Global, Protocols.Grpc.V1.Numbering.Global)]
+    [InlineData(Numbering.Ordinal, Protocols.Grpc.V1.Numbering.Ordinal)]
+    public void Numbering_ShouldRoundTripAndTreatUnspecifiedAsGlobal(Numbering numbering, Protocols.Grpc.V1.Numbering wire)
     {
         // Act & Assert
         numbering.ToWire().ShouldBe(wire);
         wire.ToNumbering().ShouldBe(numbering);
-        Protocol.V1.Numbering.Unspecified.ToNumbering().ShouldBe(Numbering.Global);
+        Protocols.Grpc.V1.Numbering.Unspecified.ToNumbering().ShouldBe(Numbering.Global);
     }
 
     [Theory]
-    [InlineData(ConsumerStrategy.RoundRobin, Protocol.V1.ConsumerStrategy.RoundRobin)]
-    [InlineData(ConsumerStrategy.Pinned, Protocol.V1.ConsumerStrategy.Pinned)]
-    [InlineData(ConsumerStrategy.DispatchToSingle, Protocol.V1.ConsumerStrategy.DispatchToSingle)]
-    [InlineData(ConsumerStrategy.PinnedByCorrelation, Protocol.V1.ConsumerStrategy.PinnedByCorrelation)]
-    public void ConsumerStrategy_ShouldRoundTripAndTreatUnspecifiedAsRoundRobin(ConsumerStrategy strategy, Protocol.V1.ConsumerStrategy wire)
+    [InlineData(ConsumerStrategy.RoundRobin, Protocols.Grpc.V1.ConsumerStrategy.RoundRobin)]
+    [InlineData(ConsumerStrategy.Pinned, Protocols.Grpc.V1.ConsumerStrategy.Pinned)]
+    [InlineData(ConsumerStrategy.DispatchToSingle, Protocols.Grpc.V1.ConsumerStrategy.DispatchToSingle)]
+    [InlineData(ConsumerStrategy.PinnedByCorrelation, Protocols.Grpc.V1.ConsumerStrategy.PinnedByCorrelation)]
+    public void ConsumerStrategy_ShouldRoundTripAndTreatUnspecifiedAsRoundRobin(ConsumerStrategy strategy, Protocols.Grpc.V1.ConsumerStrategy wire)
     {
         // Act & Assert
         strategy.ToWire().ShouldBe(wire);
         wire.ToConsumerStrategy().ShouldBe(strategy);
-        Protocol.V1.ConsumerStrategy.Unspecified.ToConsumerStrategy().ShouldBe(ConsumerStrategy.RoundRobin);
+        Protocols.Grpc.V1.ConsumerStrategy.Unspecified.ToConsumerStrategy().ShouldBe(ConsumerStrategy.RoundRobin);
     }
 
     [Fact]

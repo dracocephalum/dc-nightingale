@@ -1,7 +1,7 @@
 using System.Globalization;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Google.Rpc;
 using Grpc.Core;
 
@@ -13,7 +13,7 @@ namespace Dracocephalum.Nightingale.Client;
 /// and never on the status code or the message. A failure without the detail, or with a reason
 /// this build does not know, is surfaced as the raw <see cref="RpcException"/>.
 /// </summary>
-public static class NightingaleErrorMapping
+internal static class NightingaleErrorMapping
 {
     /// <summary>Maps a failed call.</summary>
     /// <param name="exception">The failure.</param>

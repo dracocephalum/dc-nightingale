@@ -30,7 +30,7 @@ undecided adds it here rather than mentioning it once in a conversation.
   at 100%). Read the per-class rates in the cobertura file for those two, not
   the total.
 - **The gRPC contract is half drafted, and the first slice of it works end to
-  end.** `libraries/core/src/.../Protocol/` splits the contract by area the
+  end.** `libraries/core/src/.../Protocols.Grpc/V1/` splits the contract by area the
   way the reference protocol does. `streams.proto` is drafted in full, with
   `shared.proto` for the numbers, names, bodies, headers and error conventions
   and `errors.proto` for the reasons. Implemented and verified against a local

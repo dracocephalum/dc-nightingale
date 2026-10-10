@@ -26,7 +26,7 @@ Consequences:
 
 | Look for | Ask |
 |---|---|
-| **Design** | Does this belong here, shaped like this? Does it fit how the system already works? |
+| **Design** | Does this belong here, shaped like this? Does it fit how the system already works? A boundary touched — a core type, an adapter, a generated or third-party type crossing between them — is judged by [`architecture.md`](architecture.md), which ends in its own smell table. |
 | **Correctness** | Does it do what the description says, including edge cases and failure paths? Would it behave under concurrency, cancellation, partial failure? |
 | **Tests** | Do they exist, test behaviour rather than implementation, and would they fail if the code were wrong? |
 | **Security and data** | Secrets, PII in logs, injection, trust boundaries, machine-specific paths and personal data ([`../security-reminders.md`](../security-reminders.md)), new dependencies and their licences ([`../dependencies.md`](../dependencies.md)). |

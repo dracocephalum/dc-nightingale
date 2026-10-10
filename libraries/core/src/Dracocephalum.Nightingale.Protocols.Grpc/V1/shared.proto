@@ -88,7 +88,7 @@ package dracocephalum.nightingale.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+option csharp_namespace = "Dracocephalum.Nightingale.Protocols.Grpc.V1";
 
 // An event as the store holds it.
 message RecordedEvent {

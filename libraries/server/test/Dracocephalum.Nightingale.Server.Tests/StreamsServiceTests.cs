@@ -1,7 +1,8 @@
 using System.Text;
 using System.Text.Json.Nodes;
 
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
+using Dracocephalum.Nightingale.Server.Grpc;
 using FakeItEasy;
 using Google.Protobuf;
 using Google.Rpc;
@@ -625,7 +626,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         var client = new Streams.StreamsClient(_channel);
 
         // Act
-        var messages = await ReadAll(client, new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 10, Numbering = Protocol.V1.Numbering.Ordinal });
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 10, Numbering = Protocols.Grpc.V1.Numbering.Ordinal });
 
         // Assert
         messages[0].Head.ShouldSatisfyAllConditions(head => head.First.ShouldBe(0), head => head.Last.ShouldBe(2));
@@ -646,7 +647,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         var client = new Streams.StreamsClient(_channel);
 
         // Act
-        var messages = await ReadAll(client, new ReadRequest { Stream = "$et-OrderPlaced", Direction = ReadDirection.Backwards, End = new(), Count = 2, Numbering = Protocol.V1.Numbering.Ordinal });
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$et-OrderPlaced", Direction = ReadDirection.Backwards, End = new(), Count = 2, Numbering = Protocols.Grpc.V1.Numbering.Ordinal });
 
         // Assert
         messages.Skip(1).Select(message => message.Event.Ordinal).ShouldBe([7, 6]);
@@ -658,7 +659,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         // Arrange
         A.CallTo(() => _store.OrdinalsEnabled).Returns(false);
         var client = new Streams.StreamsClient(_channel);
-        var request = new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 1, Numbering = Protocol.V1.Numbering.Ordinal };
+        var request = new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 1, Numbering = Protocols.Grpc.V1.Numbering.Ordinal };
 
         // Act
         var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
@@ -675,7 +676,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     {
         // Arrange
         var client = new Streams.StreamsClient(_channel);
-        var request = new ReadRequest { Stream = stream, Start = new(), Count = 1, Numbering = Protocol.V1.Numbering.Ordinal };
+        var request = new ReadRequest { Stream = stream, Start = new(), Count = 1, Numbering = Protocols.Grpc.V1.Numbering.Ordinal };
 
         // Act
         var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
@@ -701,7 +702,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
             .ReturnsNextFromSequence([], [Numbered("orders-2", 0, 25, 2)]);
         A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsNextFromSequence(20L, 20L, 30L);
         var client = new Streams.StreamsClient(_channel);
-        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", Start = new(), Subscription = new SubscriptionOptions(), Numbering = Protocol.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", Start = new(), Subscription = new SubscriptionOptions(), Numbering = Protocols.Grpc.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
 
         // Act
         var catchUp = await Next(call, 4);
@@ -736,7 +737,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         var client = new Streams.StreamsClient(_channel);
         using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         giveUp.CancelAfter(TimeSpan.FromSeconds(20));
-        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocol.V1.Numbering.Ordinal }, cancellationToken: giveUp.Token);
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocols.Grpc.V1.Numbering.Ordinal }, cancellationToken: giveUp.Token);
 
         // Act: the confirmation, the caught-up note, then the event.
         var messages = await Next(call, 3);
@@ -758,7 +759,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 8, StreamsService.PageSize, A<CancellationToken>._)).Returns([]);
         A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).Returns(20L);
         var client = new Streams.StreamsClient(_channel);
-        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocol.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
+        using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocols.Grpc.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
 
         // Act
         var confirmed = await Next(call, 1);

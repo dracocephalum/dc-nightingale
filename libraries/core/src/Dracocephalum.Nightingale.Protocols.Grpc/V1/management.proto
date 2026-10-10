@@ -3,9 +3,8 @@ syntax = "proto3";
 package dracocephalum.nightingale.v1;
 
 import "google/protobuf/timestamp.proto";
-import "shared.proto";
 
-option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+option csharp_namespace = "Dracocephalum.Nightingale.Protocols.Grpc.V1";
 
 // Credentials and tenants: who may call, and the tenants there are. Every
 // call needs the admin role. A tenant-bound admin manages the credentials of

@@ -1,11 +1,11 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 
-namespace Dracocephalum.Nightingale.Protocol;
+namespace Dracocephalum.Nightingale.Protocols.Grpc;
 
 /// <summary>
 /// Explicit mappings between the domain types and the generated wire messages, shared by the client
@@ -93,40 +93,40 @@ public static class WireConversions
     /// <summary>Maps a numbering to its wire form.</summary>
     /// <param name="numbering">The numbering.</param>
     /// <returns>The wire value.</returns>
-    public static Protocol.V1.Numbering ToWire(this Numbering numbering) =>
-        numbering == Numbering.Ordinal ? Protocol.V1.Numbering.Ordinal : Protocol.V1.Numbering.Global;
+    public static Protocols.Grpc.V1.Numbering ToWire(this Numbering numbering) =>
+        numbering == Numbering.Ordinal ? Protocols.Grpc.V1.Numbering.Ordinal : Protocols.Grpc.V1.Numbering.Global;
 
     /// <summary>Maps a wire numbering to the domain type; unspecified is global.</summary>
     /// <param name="numbering">The wire value.</param>
     /// <returns>The numbering.</returns>
-    public static Numbering ToNumbering(this Protocol.V1.Numbering numbering) =>
-        numbering == Protocol.V1.Numbering.Ordinal ? Numbering.Ordinal : Numbering.Global;
+    public static Numbering ToNumbering(this Protocols.Grpc.V1.Numbering numbering) =>
+        numbering == Protocols.Grpc.V1.Numbering.Ordinal ? Numbering.Ordinal : Numbering.Global;
 
     /// <summary>Maps a credential role to its wire form.</summary>
     /// <param name="role">The role.</param>
     /// <returns>The wire value.</returns>
-    public static Protocol.V1.CredentialRole ToWire(this CredentialRole role) => role switch
+    public static Protocols.Grpc.V1.CredentialRole ToWire(this CredentialRole role) => role switch
     {
-        CredentialRole.Ops => Protocol.V1.CredentialRole.Ops,
-        CredentialRole.Admin => Protocol.V1.CredentialRole.Admin,
-        _ => Protocol.V1.CredentialRole.User,
+        CredentialRole.Ops => Protocols.Grpc.V1.CredentialRole.Ops,
+        CredentialRole.Admin => Protocols.Grpc.V1.CredentialRole.Admin,
+        _ => Protocols.Grpc.V1.CredentialRole.User,
     };
 
     /// <summary>Maps a credential role from its wire form; unspecified is <see langword="null"/>, for a caller to default or keep.</summary>
     /// <param name="role">The wire value.</param>
     /// <returns>The role, or <see langword="null"/> when unspecified.</returns>
-    public static CredentialRole? ToCredentialRole(this Protocol.V1.CredentialRole role) => role switch
+    public static CredentialRole? ToCredentialRole(this Protocols.Grpc.V1.CredentialRole role) => role switch
     {
-        Protocol.V1.CredentialRole.User => CredentialRole.User,
-        Protocol.V1.CredentialRole.Ops => CredentialRole.Ops,
-        Protocol.V1.CredentialRole.Admin => CredentialRole.Admin,
+        Protocols.Grpc.V1.CredentialRole.User => CredentialRole.User,
+        Protocols.Grpc.V1.CredentialRole.Ops => CredentialRole.Ops,
+        Protocols.Grpc.V1.CredentialRole.Admin => CredentialRole.Admin,
         _ => null,
     };
 
     /// <summary>Maps a credential from its wire form.</summary>
     /// <param name="info">The wire credential.</param>
     /// <returns>The credential.</returns>
-    public static CredentialInfo ToCredentialInfo(this Protocol.V1.CredentialInfo info)
+    public static CredentialInfo ToCredentialInfo(this Protocols.Grpc.V1.CredentialInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
         return new CredentialInfo(
@@ -142,7 +142,7 @@ public static class WireConversions
     /// <summary>Maps a tenant from its wire form.</summary>
     /// <param name="info">The wire tenant.</param>
     /// <returns>The tenant.</returns>
-    public static TenantInfo ToTenantInfo(this Protocol.V1.TenantInfo info)
+    public static TenantInfo ToTenantInfo(this Protocols.Grpc.V1.TenantInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
         return new TenantInfo(Guid.Parse(info.Id), info.Name, info.Disabled, info.CreatedAt?.ToDateTimeOffset() ?? default);
@@ -151,36 +151,36 @@ public static class WireConversions
     /// <summary>Maps a consumer strategy to its wire form.</summary>
     /// <param name="strategy">The strategy.</param>
     /// <returns>The wire value.</returns>
-    public static Protocol.V1.ConsumerStrategy ToWire(this ConsumerStrategy strategy) => strategy switch
+    public static Protocols.Grpc.V1.ConsumerStrategy ToWire(this ConsumerStrategy strategy) => strategy switch
     {
-        ConsumerStrategy.Pinned => Protocol.V1.ConsumerStrategy.Pinned,
-        ConsumerStrategy.DispatchToSingle => Protocol.V1.ConsumerStrategy.DispatchToSingle,
-        ConsumerStrategy.PinnedByCorrelation => Protocol.V1.ConsumerStrategy.PinnedByCorrelation,
-        _ => Protocol.V1.ConsumerStrategy.RoundRobin,
+        ConsumerStrategy.Pinned => Protocols.Grpc.V1.ConsumerStrategy.Pinned,
+        ConsumerStrategy.DispatchToSingle => Protocols.Grpc.V1.ConsumerStrategy.DispatchToSingle,
+        ConsumerStrategy.PinnedByCorrelation => Protocols.Grpc.V1.ConsumerStrategy.PinnedByCorrelation,
+        _ => Protocols.Grpc.V1.ConsumerStrategy.RoundRobin,
     };
 
     /// <summary>Maps a consumer strategy from its wire form; unspecified is round robin.</summary>
     /// <param name="strategy">The wire value.</param>
     /// <returns>The strategy.</returns>
-    public static ConsumerStrategy ToConsumerStrategy(this Protocol.V1.ConsumerStrategy strategy) => strategy switch
+    public static ConsumerStrategy ToConsumerStrategy(this Protocols.Grpc.V1.ConsumerStrategy strategy) => strategy switch
     {
-        Protocol.V1.ConsumerStrategy.Pinned => ConsumerStrategy.Pinned,
-        Protocol.V1.ConsumerStrategy.DispatchToSingle => ConsumerStrategy.DispatchToSingle,
-        Protocol.V1.ConsumerStrategy.PinnedByCorrelation => ConsumerStrategy.PinnedByCorrelation,
+        Protocols.Grpc.V1.ConsumerStrategy.Pinned => ConsumerStrategy.Pinned,
+        Protocols.Grpc.V1.ConsumerStrategy.DispatchToSingle => ConsumerStrategy.DispatchToSingle,
+        Protocols.Grpc.V1.ConsumerStrategy.PinnedByCorrelation => ConsumerStrategy.PinnedByCorrelation,
         _ => ConsumerStrategy.RoundRobin,
     };
 
     /// <summary>Maps group settings from their wire form; unset fields take the defaults.</summary>
     /// <param name="settings">The wire message.</param>
     /// <returns>The settings.</returns>
-    public static GroupSettings ToGroupSettings(this Protocol.V1.GroupSettings settings)
+    public static GroupSettings ToGroupSettings(this Protocols.Grpc.V1.GroupSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
         var defaults = GroupSettings.Default;
         var start = settings.StartCase switch
         {
-            Protocol.V1.GroupSettings.StartOneofCase.FromStart => StreamPosition.Start,
-            Protocol.V1.GroupSettings.StartOneofCase.FromPosition => StreamPosition.From(settings.FromPosition),
+            Protocols.Grpc.V1.GroupSettings.StartOneofCase.FromStart => StreamPosition.Start,
+            Protocols.Grpc.V1.GroupSettings.StartOneofCase.FromPosition => StreamPosition.From(settings.FromPosition),
             _ => StreamPosition.End,
         };
         return new GroupSettings(
@@ -199,10 +199,10 @@ public static class WireConversions
     /// <summary>Maps group settings to their wire form.</summary>
     /// <param name="settings">The settings.</param>
     /// <returns>The wire message.</returns>
-    public static Protocol.V1.GroupSettings ToWire(this GroupSettings settings)
+    public static Protocols.Grpc.V1.GroupSettings ToWire(this GroupSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        var wire = new Protocol.V1.GroupSettings
+        var wire = new Protocols.Grpc.V1.GroupSettings
         {
             MessageTimeout = Duration.FromTimeSpan(settings.MessageTimeout),
             MaxRetryCount = settings.MaxRetryCount,
@@ -239,7 +239,7 @@ public static class WireConversions
         return new PersistentSubscriptionInfo(
             info.Stream,
             info.Group,
-            (info.Settings ?? new Protocol.V1.GroupSettings()).ToGroupSettings(),
+            (info.Settings ?? new Protocols.Grpc.V1.GroupSettings()).ToGroupSettings(),
             info.CreatedAt?.ToDateTimeOffset() ?? default,
             info.HasCheckpoint ? info.Checkpoint : null,
             info.ParkedCount,

@@ -1,9 +1,10 @@
 using System.Text;
 
-using Dracocephalum.Nightingale.Protocol;
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Grpc;
 using FakeItEasy;
 using Google.Rpc;
 using Grpc.Core;
@@ -68,14 +69,14 @@ public sealed class ManagementTests : IAsyncLifetime
     public async Task Credentials_ShouldBeMadeUsedChangedAndDeletedByAnAdminWithinTheRules()
     {
         // Arrange
-        var credentials = new Protocol.V1.Credentials.CredentialsClient(_channel);
+        var credentials = new Protocols.Grpc.V1.Credentials.CredentialsClient(_channel);
         var groups = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         var admin = Headers("admin", AdminPassword);
 
         // Act: an ops credential and a user, both bound to the default tenant; the user tries
         // management, the ops credential succeeds; the user changes its own password; the
         // admin disables the ops credential, which is refused at once on this instance.
-        var made = await credentials.CreateAsync(new CreateCredentialRequest { Name = "operator", Password = "operator-password-12", Role = Protocol.V1.CredentialRole.Ops, Tenant = Tenant.DefaultId.ToString("D") }, admin, cancellationToken: TestContext.Current.CancellationToken);
+        var made = await credentials.CreateAsync(new CreateCredentialRequest { Name = "operator", Password = "operator-password-12", Role = Protocols.Grpc.V1.CredentialRole.Ops, Tenant = Tenant.DefaultId.ToString("D") }, admin, cancellationToken: TestContext.Current.CancellationToken);
         await credentials.CreateAsync(new CreateCredentialRequest { Name = "reader", Password = "reader-password-12", Tenant = Tenant.DefaultId.ToString("D") }, admin, cancellationToken: TestContext.Current.CancellationToken);
         var duplicate = await Refusal(async () => await credentials.CreateAsync(new CreateCredentialRequest { Name = "reader", Password = "reader-password-12", Tenant = Tenant.DefaultId.ToString("D") }, admin, cancellationToken: TestContext.Current.CancellationToken));
         var tooShort = await Refusal(async () => await credentials.CreateAsync(new CreateCredentialRequest { Name = "short", Password = "short", Tenant = Tenant.DefaultId.ToString("D") }, admin, cancellationToken: TestContext.Current.CancellationToken));
@@ -90,7 +91,7 @@ public sealed class ManagementTests : IAsyncLifetime
         var gone = await Refusal(async () => await credentials.DeleteAsync(new DeleteCredentialRequest { Name = "operator" }, admin, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
-        made.Credential.Role.ShouldBe(Protocol.V1.CredentialRole.Ops);
+        made.Credential.Role.ShouldBe(Protocols.Grpc.V1.CredentialRole.Ops);
         made.Credential.Tenant.ShouldBe(Tenant.DefaultId.ToString("D"));
         Reason(duplicate).ShouldBe("CREDENTIAL_EXISTS");
         tooShort.StatusCode.ShouldBe(StatusCode.InvalidArgument);
@@ -107,22 +108,22 @@ public sealed class ManagementTests : IAsyncLifetime
     public async Task Credentials_ByATenantBoundAdmin_ShouldStayWithinItsTenantAndRole()
     {
         // Arrange: a tenant-bound admin of a second tenant, made by the global admin.
-        var credentials = new Protocol.V1.Credentials.CredentialsClient(_channel);
-        var tenants = new Protocol.V1.Tenants.TenantsClient(_channel);
+        var credentials = new Protocols.Grpc.V1.Credentials.CredentialsClient(_channel);
+        var tenants = new Protocols.Grpc.V1.Tenants.TenantsClient(_channel);
         var admin = Headers("admin", AdminPassword);
         var billing = (await tenants.CreateAsync(new CreateTenantRequest { Name = "billing" }, admin, cancellationToken: TestContext.Current.CancellationToken)).Tenant;
-        await credentials.CreateAsync(new CreateCredentialRequest { Name = "billing-admin", Password = "billing-password-12", Role = Protocol.V1.CredentialRole.Admin, Tenant = billing.Id }, admin, cancellationToken: TestContext.Current.CancellationToken);
+        await credentials.CreateAsync(new CreateCredentialRequest { Name = "billing-admin", Password = "billing-password-12", Role = Protocols.Grpc.V1.CredentialRole.Admin, Tenant = billing.Id }, admin, cancellationToken: TestContext.Current.CancellationToken);
         await credentials.CreateAsync(new CreateCredentialRequest { Name = "elsewhere", Password = "elsewhere-password-12", Tenant = Tenant.DefaultId.ToString("D") }, admin, cancellationToken: TestContext.Current.CancellationToken);
         var bound = Headers("billing-admin", "billing-password-12");
 
         // Act
-        var ownTenant = await credentials.CreateAsync(new CreateCredentialRequest { Name = "billing-ops", Password = "billing-ops-password-12", Role = Protocol.V1.CredentialRole.Ops, Tenant = billing.Id }, bound, cancellationToken: TestContext.Current.CancellationToken);
+        var ownTenant = await credentials.CreateAsync(new CreateCredentialRequest { Name = "billing-ops", Password = "billing-ops-password-12", Role = Protocols.Grpc.V1.CredentialRole.Ops, Tenant = billing.Id }, bound, cancellationToken: TestContext.Current.CancellationToken);
         var otherTenant = await Refusal(async () => await credentials.CreateAsync(new CreateCredentialRequest { Name = "intruder", Password = "intruder-password-12", Tenant = Tenant.DefaultId.ToString("D") }, bound, cancellationToken: TestContext.Current.CancellationToken));
         var global = await Refusal(async () => await credentials.CreateAsync(new CreateCredentialRequest { Name = "intruder", Password = "intruder-password-12" }, bound, cancellationToken: TestContext.Current.CancellationToken));
         var othersRow = await Refusal(async () => await credentials.SetPasswordAsync(new SetPasswordRequest { Name = "elsewhere", Password = "changed-password-12" }, bound, cancellationToken: TestContext.Current.CancellationToken));
         var listed = await credentials.ListAsync(new ListCredentialsRequest(), bound, cancellationToken: TestContext.Current.CancellationToken);
         var tenantsByBound = await Refusal(async () => await tenants.ListAsync(new ListTenantsRequest(), bound, cancellationToken: TestContext.Current.CancellationToken));
-        var aboveRole = await Refusal(async () => await credentials.UpdateAsync(new UpdateCredentialRequest { Name = "billing-ops", Role = Protocol.V1.CredentialRole.Admin }, Headers("billing-ops", "billing-ops-password-12"), cancellationToken: TestContext.Current.CancellationToken));
+        var aboveRole = await Refusal(async () => await credentials.UpdateAsync(new UpdateCredentialRequest { Name = "billing-ops", Role = Protocols.Grpc.V1.CredentialRole.Admin }, Headers("billing-ops", "billing-ops-password-12"), cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         ownTenant.Credential.Tenant.ShouldBe(billing.Id);
@@ -138,8 +139,8 @@ public sealed class ManagementTests : IAsyncLifetime
     public async Task Tenants_ShouldBeMadeRenamedAndDisabledByAGlobalAdminAndRefuseTheirCallersWhenDisabled()
     {
         // Arrange
-        var tenants = new Protocol.V1.Tenants.TenantsClient(_channel);
-        var credentials = new Protocol.V1.Credentials.CredentialsClient(_channel);
+        var tenants = new Protocols.Grpc.V1.Tenants.TenantsClient(_channel);
+        var credentials = new Protocols.Grpc.V1.Credentials.CredentialsClient(_channel);
         var streams = new Streams.StreamsClient(_channel);
         var admin = Headers("admin", AdminPassword);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, A<long?>._, A<int>._, A<CancellationToken>._)).Returns(new StreamSlice(new StreamHead(0, -1), []));

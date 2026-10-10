@@ -14,7 +14,7 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "shared.proto";
 
-option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+option csharp_namespace = "Dracocephalum.Nightingale.Protocols.Grpc.V1";
 
 service Streams {
   // A bounded read, or a subscription, over a stream, $all, or a virtual

@@ -11,7 +11,7 @@ syntax = "proto3";
 
 package dracocephalum.nightingale.v1;
 
-option csharp_namespace = "Dracocephalum.Nightingale.Protocol.V1";
+option csharp_namespace = "Dracocephalum.Nightingale.Protocols.Grpc.V1";
 
 enum ErrorReason {
   ERROR_REASON_UNSPECIFIED = 0;

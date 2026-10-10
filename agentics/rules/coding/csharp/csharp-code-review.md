@@ -59,6 +59,7 @@ banned-API list. The authority for each item is
 | Public type or member without a `<summary>`, or one that only restates the name | Comments | `issue` |
 | Comment narrating what the code plainly does | Comments | `nitpick` — improve the name instead |
 | Method named for the noun it returns (`LeaseName(id)`, `OptionsFor(x)`), or a delegate-typed member named as a verb; not a result/error factory under a class that supplies the verb | Naming | `suggestion` |
+| gRPC service implementation not named for its proto service plus `Service` (`TenantsService : Tenants.TenantsBase`), or a wire package referenced by the domain assembly rather than its `Protocols.<Stack>` sibling | Naming | `suggestion` |
 | Commented-out code, change history, author tag, or task narration ("added per request") | Comments | `issue` |
 
 Tests:

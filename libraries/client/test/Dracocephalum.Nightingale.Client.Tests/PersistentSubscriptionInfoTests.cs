@@ -1,4 +1,4 @@
-using Dracocephalum.Nightingale.Protocol.V1;
+using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using FakeItEasy;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -24,7 +24,7 @@ public sealed class PersistentSubscriptionInfoTests
         {
             Stream = "$ce-orders",
             Group = "billing",
-            Settings = new Protocol.V1.GroupSettings { FromStart = new(), MaxRetryCount = 3, Numbering = Protocol.V1.Numbering.Ordinal },
+            Settings = new Protocols.Grpc.V1.GroupSettings { FromStart = new(), MaxRetryCount = 3, Numbering = Protocols.Grpc.V1.Numbering.Ordinal },
             CreatedAt = Timestamp.FromDateTimeOffset(Created),
             Checkpoint = 41,
             ParkedCount = 2,
@@ -88,7 +88,7 @@ public sealed class PersistentSubscriptionInfoTests
     public async Task GetInfo_WhenTheServerLeavesNumbersOut_ShouldLeaveThemNull()
     {
         // Arrange: a group created and never read, over a stream that holds nothing.
-        var invoker = Describing([], new GroupInfo { Stream = "orders-1", Group = "billing", Settings = new Protocol.V1.GroupSettings(), CreatedAt = Timestamp.FromDateTimeOffset(Created) });
+        var invoker = Describing([], new GroupInfo { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings(), CreatedAt = Timestamp.FromDateTimeOffset(Created) });
         await using var sut = new NightingaleClient(invoker);
 
         // Act
