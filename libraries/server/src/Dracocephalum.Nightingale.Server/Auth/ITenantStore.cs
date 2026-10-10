@@ -21,7 +21,7 @@ public interface ITenantStore
     /// <exception cref="TenantExistsException">The new name is taken.</exception>
     Task<Tenant?> UpdateAsync(Guid id, string? name, bool? disabled, CancellationToken cancellationToken);
 
-    /// <summary>Lists every tenant, by name.</summary>
+    /// <summary>Lists all tenants, by name.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The rows.</returns>
     Task<IReadOnlyList<Tenant>> ListAsync(CancellationToken cancellationToken);

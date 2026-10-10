@@ -570,7 +570,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
 
         // The names are the row's own: a case-insensitive database finds the row under another
         // spelling, and the group still goes by the names it was created with.
-        return new SubscriptionGroupDefinition(row.Stream, row.Name, settings, row.CheckpointPosition) { Id = row.Id };
+        return new SubscriptionGroupDefinition(row.Stream, row.Name, settings, row.CheckpointPosition) { Id = row.Id, TenantId = row.TenantId };
     }
 
     /// <summary>

@@ -15,7 +15,7 @@ public static class Authorization
     /// <summary>The header a global credential names its tenant in.</summary>
     public const string TenantHeader = "nightingale-tenant";
 
-    /// <summary>The value of the header that spans every tenant, on a read.</summary>
+    /// <summary>The value of the header that spans all tenants, on a read.</summary>
     public const string Wildcard = "*";
 
     /// <summary>The principal the interceptor left on the call.</summary>
@@ -34,7 +34,7 @@ public static class Authorization
     /// <param name="required">The role the call needs.</param>
     /// <param name="access">Whether the call reads, which admits the wildcard, or writes.</param>
     /// <returns>The tenant the call works in.</returns>
-    /// <exception cref="RpcException">The role is too low, the tenant is missing, unknown or disabled, or not the one the instance serves.</exception>
+    /// <exception cref="RpcException">The role is too low, or the tenant is missing, unknown or disabled.</exception>
     public static async Task<TenantScope> AuthorizeAsync(this ServerCallContext context, CredentialRole required, TenantAccess access)
     {
         ArgumentNullException.ThrowIfNull(context);

@@ -5,13 +5,12 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// transport: a role at least this high, and a tenant to work in. The tenant is the credential's
 /// own, or, for a global credential, the one the call named, which a global credential must name
 /// on every data call and which may be the wildcard on a read. Nothing is served to a disabled
-/// tenant. Until the stores take a tenant per call, only the tenant the instance serves can be
-/// worked in. A refusal is one of the shared exceptions; each transport reads the named tenant
-/// from wherever it carries it and maps the refusals to its own statuses.
+/// tenant. The scope is what a call resolves its stores through, <see cref="ITenantStores"/>. A
+/// refusal is one of the shared exceptions; each transport reads the named tenant from wherever
+/// it carries it and maps the refusals to its own statuses.
 /// </summary>
-/// <param name="directory">The tenants; none in a host that keeps no tenants, where the instance's one tenant is every call's scope.</param>
-/// <param name="served">The tenant the instance serves; none in a host without a store.</param>
-public sealed class Authorizer(TenantDirectory? directory = null, StoreTenant? served = null)
+/// <param name="directory">The tenants; none in a host that keeps no tenants, where the store's default tenant is every call's scope.</param>
+public sealed class Authorizer(TenantDirectory? directory = null)
 {
     /// <summary>Checks the call's role and resolves its tenant.</summary>
     /// <param name="principal">The caller.</param>
@@ -23,7 +22,6 @@ public sealed class Authorizer(TenantDirectory? directory = null, StoreTenant? s
     /// <exception cref="AccessDeniedException">The role is too low, or the wildcard was named on a write.</exception>
     /// <exception cref="TenantNotFoundException">No tenant was named where one is needed, or the one named is unknown or not the credential's own.</exception>
     /// <exception cref="TenantDisabledException">The tenant is disabled.</exception>
-    /// <exception cref="NotSupportedException">The tenant is not the one this instance serves.</exception>
     public async Task<TenantScope> AuthorizeAsync(NightingalePrincipal principal, CredentialRole required, TenantAccess access, TenantSelection selection, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(principal);
@@ -58,18 +56,11 @@ public sealed class Authorizer(TenantDirectory? directory = null, StoreTenant? s
                 throw new AccessDeniedException("The wildcard tenant is for reads and subscriptions only.");
             }
 
-            scope = TenantScope.Every;
+            scope = TenantScope.AllTenants;
         }
         else
         {
             scope = await ResolveAsync(selection.TenantId!.Value, cancellationToken).ConfigureAwait(false);
-        }
-
-        // One tenant's data is served today; a call for another is refused rather than served
-        // from the wrong rows. The wildcard spans that one tenant, which is every tenant there is.
-        if (served is not null && scope.StoreTenantId is { } store && !string.Equals(store, served.StoreTenantId, StringComparison.Ordinal))
-        {
-            throw new NotSupportedException("Data access for a tenant other than the one this instance serves");
         }
 
         return scope;

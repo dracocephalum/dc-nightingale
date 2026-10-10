@@ -8,9 +8,10 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.CredentialsAndTenants;
 /// Credentials and tenants against a Nightingale server, step by step: as the built-in
 /// administrator, create an ops credential and a user bound to the default tenant, see what
 /// each may and may not do, have the user change its own password, create a second tenant and
-/// a credential bound to it, see that credential kept to its tenant, disable the tenant and see
-/// its credential refused, and delete what was made. The program prints the steps; the test
-/// project asserts the report.
+/// a credential bound to it, see that credential kept to its tenant and its appends invisible to
+/// the default tenant's user under the same stream name, disable the tenant and see its
+/// credential refused, and delete what was made. The program prints the steps; the test project
+/// asserts the report.
 /// </summary>
 public static class Scenario
 {
@@ -21,6 +22,9 @@ public static class Scenario
     /// <param name="ReaderReadAfterPasswordChange">Whether the user read the stream under its new password.</param>
     /// <param name="Tenant">The second tenant.</param>
     /// <param name="BoundRefusal">How the bound credential's read of the default tenant ended.</param>
+    /// <param name="TenantRevision">The revision the bound credential's append reached in its own tenant.</param>
+    /// <param name="TenantEvents">How many events the bound credential read back from its tenant's stream.</param>
+    /// <param name="DefaultTenantEvents">How many events the default tenant's user saw under the same stream name.</param>
     /// <param name="DisabledRefusal">How the bound credential's call ended once its tenant was disabled.</param>
     /// <param name="Remaining">The credentials left when the run is done.</param>
     public sealed record Report(
@@ -30,6 +34,9 @@ public static class Scenario
         bool ReaderReadAfterPasswordChange,
         TenantInfo Tenant,
         string BoundRefusal,
+        long TenantRevision,
+        int TenantEvents,
+        int DefaultTenantEvents,
         string DisabledRefusal,
         IReadOnlyList<string> Remaining);
 
@@ -115,6 +122,24 @@ public static class Scenario
 
         await output.WriteLineAsync($"6. Created the tenant {tenant.Name} ({tenant.Id}) and a credential bound to it; naming the default tenant with it was refused: {boundRefusal}.").ConfigureAwait(false);
 
+        long tenantRevision;
+        int tenantEvents;
+        await using (var asAcme = server.ConnectAs("acme-reader", "acme-password-12"))
+        {
+            var placed = new EventData(Guid.NewGuid(), "order_placed", "{\"orderId\":\"acme-1\"}"u8.ToArray(), null);
+            var paid = new EventData(Guid.NewGuid(), "order_paid", "{\"orderId\":\"acme-1\"}"u8.ToArray(), null);
+            tenantRevision = (await asAcme.Client.AppendToStreamAsync("orders-1", StreamState.NoStream, [placed, paid], cancellationToken).ConfigureAwait(false)).Revision;
+            tenantEvents = await CountAsync(asAcme.Client, cancellationToken).ConfigureAwait(false);
+        }
+
+        int defaultTenantEvents;
+        await using (var asReader = server.ConnectAs("reader", "reader-password-13"))
+        {
+            defaultTenantEvents = await CountAsync(asReader.Client, cancellationToken).ConfigureAwait(false);
+        }
+
+        await output.WriteLineAsync($"7. The bound credential appended to orders-1 in its tenant, reaching revision {tenantRevision}, and read {tenantEvents} events back; the default tenant's user sees {defaultTenantEvents} under the same name.").ConfigureAwait(false);
+
         await admin.UpdateTenantAsync(tenant.Id, disabled: true, cancellationToken: cancellationToken).ConfigureAwait(false);
         string disabledRefusal;
         await using (var asAcme = server.ConnectAs("acme-reader", "acme-password-12"))
@@ -131,7 +156,7 @@ public static class Scenario
             }
         }
 
-        await output.WriteLineAsync($"7. Disabled the tenant: its credential's call ended with {disabledRefusal}.").ConfigureAwait(false);
+        await output.WriteLineAsync($"8. Disabled the tenant: its credential's call ended with {disabledRefusal}.").ConfigureAwait(false);
 
         foreach (var name in new[] { "operator", "reader", "acme-reader" })
         {
@@ -139,8 +164,28 @@ public static class Scenario
         }
 
         var remaining = (await admin.ListCredentialsAsync(cancellationToken).ConfigureAwait(false)).Select(credential => credential.Name).ToList();
-        await output.WriteLineAsync($"8. Deleted the credentials; {remaining.Count} remain. Dropping the database.").ConfigureAwait(false);
+        await output.WriteLineAsync($"9. Deleted the credentials; {remaining.Count} remain. Dropping the database.").ConfigureAwait(false);
 
-        return new Report(made, readerRefusal, operatorCreated, readerReadAfterChange, tenant, boundRefusal, disabledRefusal, remaining);
+        return new Report(made, readerRefusal, operatorCreated, readerReadAfterChange, tenant, boundRefusal, tenantRevision, tenantEvents, defaultTenantEvents, disabledRefusal, remaining);
+    }
+
+    /// <summary>How many events <c>orders-1</c> holds in the caller's tenant: none when the name is not a stream there.</summary>
+    private static async Task<int> CountAsync(NightingaleClient client, CancellationToken cancellationToken)
+    {
+        await using var read = client.ReadStreamAsync(Direction.Forwards, "orders-1", StreamPosition.Start, cancellationToken: cancellationToken);
+        var count = 0;
+        try
+        {
+            await foreach (var record in read.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                count += record is null ? 0 : 1;
+            }
+        }
+        catch (StreamNotFoundException)
+        {
+            // The name is a stream in another tenant and none in this one.
+        }
+
+        return count;
     }
 }

@@ -60,6 +60,23 @@ public sealed class VirtualStreamReaderTests
     }
 
     [Fact]
+    public async Task ReadAllAsync_WithNoTenant_ShouldSpanAllTenantsAndWithOneStayWithinIt()
+    {
+        // Arrange
+        var every = new VirtualStreamReader(() => new EventsDbContext(_options, Schema), null);
+
+        // Act
+        var own = await _sut.ReadAllAsync(Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+        var all = await every.ReadAllAsync(Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+        var head = await every.HeadAsync(Orders, 100, TestContext.Current.CancellationToken);
+
+        // Assert: the archived event at 4 is in neither; the other tenant's at 5 is in the wildcard's.
+        own.Select(record => record.Position).ShouldBe([1, 2, 3, 6, 7, 8]);
+        all.Select(record => record.Position).ShouldBe([1, 2, 3, 5, 6, 7, 8]);
+        head.ShouldBe(new StreamHead(1, 8));
+    }
+
+    [Fact]
     public async Task ReadAsync_ShouldPageInPositionOrderWithinTheBounds()
     {
         // Act

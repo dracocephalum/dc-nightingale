@@ -6,7 +6,7 @@ using Polecat.Storage;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// One database for every tenant, answered by the gateway's own database class. The store's
+/// One database for all tenants, answered by the gateway's own database class. The store's
 /// default tenancy is internal and always builds the plain database; this one is the seam through
 /// which the schema additions reach the migration, because the store migrates whatever the tenancy
 /// returns. The store still runs in conjoined mode with the default tenant, so enabling tenants

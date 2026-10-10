@@ -29,14 +29,15 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </para>
 /// </summary>
 /// <param name="store">The store.</param>
+/// <param name="tenantId">The tenant every session is opened for, or <see langword="null"/> for all tenants, under the wildcard: then <c>$all</c> and the virtual streams read across tenants and a stream name, which is per tenant, is refused.</param>
 /// <param name="events">Makes the mirror of the store's events table over the main connection, for the virtual streams.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
-/// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by this instance, or <see langword="null"/> when they stay on the main connection.</param>
+/// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by whoever made this instance, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="contexts">Makes the gateway's own context, for the sequencer's progress.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore, IDisposable, IAsyncDisposable
+internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
 {
     /// <summary>SQL Server's error for a value longer than its column, naming the column.</summary>
     /// <summary>
@@ -54,8 +55,8 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
     /// <summary>SQL Server's error for a command with more parameters than it takes, 2100.</summary>
     private const int TooManyParameters = 8003;
 
-    private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
-    private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, JasperFx.StorageConstants.DefaultTenantId);
+    private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, tenantId);
+    private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, tenantId);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
 
     /// <inheritdoc/>
@@ -74,7 +75,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
             wrapped[i] = JsonEvent.From(events[i]);
         }
 
-        await using var session = store.LightweightSession();
+        await using var session = store.LightweightSession(ToSessionOptions(RequireTenant(stream)));
         if (expected == StreamState.NoStream)
         {
             session.Events.StartStream(stream, wrapped);
@@ -141,29 +142,26 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
 
     /// <inheritdoc/>
     public Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken) =>
-        ReadFromAsync(store, stream, direction, from, count, cancellationToken);
+        ReadFromAsync(store, RequireTenant(stream), stream, direction, from, count, cancellationToken);
 
     /// <inheritdoc/>
-    public Task<StreamSlice?> ReadEventualAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken) =>
-        readOnlyStore is null
-            ? ReadFromAsync(store, stream, direction, from, count, cancellationToken)
+    public Task<StreamSlice?> ReadEventualAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
+    {
+        var tenant = RequireTenant(stream);
+        return readOnlyStore is null
+            ? ReadFromAsync(store, tenant, stream, direction, from, count, cancellationToken)
             : _router.PreferReplicaAsync(
-                token => ReadFromAsync(readOnlyStore, stream, direction, from, count, token),
-                token => ReadFromAsync(store, stream, direction, from, count, token),
+                token => ReadFromAsync(readOnlyStore, tenant, stream, direction, from, count, token),
+                token => ReadFromAsync(store, tenant, stream, direction, from, count, token),
                 cancellationToken);
+    }
 
-    /// <inheritdoc/>
-    public void Dispose() => readOnlyStore?.Dispose();
-
-    /// <inheritdoc/>
-    public ValueTask DisposeAsync() => readOnlyStore?.DisposeAsync() ?? ValueTask.CompletedTask;
-
-    private static async Task<StreamSlice?> ReadFromAsync(IDocumentStore reads, string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
+    private static async Task<StreamSlice?> ReadFromAsync(IDocumentStore reads, string tenant, string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
 
-        await using var session = reads.QuerySession();
+        await using var session = reads.QuerySession(ToSessionOptions(tenant));
         var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
         if (state is null || state.Version == 0)
         {
@@ -225,8 +223,15 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
 
     private async Task<IReadOnlyList<EventRecord>> ReadAllFromPrimaryAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
+        if (tenantId is null)
+        {
+            // Every tenant: the store's sessions are each one tenant's, so the page is read
+            // through the mirror of the events table, which the wildcard reader leaves unfiltered.
+            return await _virtual.ReadAllAsync(direction, from, head, count, cancellationToken).ConfigureAwait(false);
+        }
+
         // The store's query hides archived events and scopes to the session's tenant on its own.
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(ToSessionOptions(tenantId));
         var query = session.Events.QueryAllRawEvents();
         var stored = direction == Direction.Forwards
             ? await PolecatQueryableExtensions.ToListAsync(query.Where(stored => stored.Sequence >= from && stored.Sequence <= head).OrderBy(stored => stored.Sequence).Take(count), cancellationToken).ConfigureAwait(false)
@@ -268,6 +273,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
     public Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
     {
         RequireOrdinals(stream.Name);
+        RequireTenant(stream.Name);
         return _virtual.OrdinalHeadAsync(stream, cancellationToken);
     }
 
@@ -276,6 +282,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         RequireOrdinals(stream.Name);
+        RequireTenant(stream.Name);
         return _virtual.ReadByOrdinalAsync(stream, direction, from, count, cancellationToken);
     }
 
@@ -324,7 +331,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
 
         // The check and the archive are two statements in one session; an append that lands between
         // them is archived with the rest, so the outcome is a deleted stream either way.
-        await using var session = store.LightweightSession();
+        await using var session = store.LightweightSession(ToSessionOptions(RequireTenant(stream)));
         var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
         if (state is null || state.Version == 0)
         {
@@ -346,7 +353,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
 
-        await using var session = store.LightweightSession();
+        await using var session = store.LightweightSession(ToSessionOptions(RequireTenant(stream)));
         var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
         if (state is null || state.Version == 0)
         {
@@ -357,6 +364,13 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
         session.Events.TombstoneStream(stream);
         await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>A session's options for one tenant: the store scopes every read and write in the session to it.</summary>
+    private static global::Polecat.SessionOptions ToSessionOptions(string tenant) => new() { TenantId = tenant };
+
+    /// <summary>The tenant a stream name is read or written in: a name is per tenant, so under the wildcard there is none to use.</summary>
+    private string RequireTenant(string stream) =>
+        tenantId ?? throw new ArgumentException($"'{stream}' is a name within one tenant; the wildcard tenant reads $all and the virtual streams by position only.", nameof(stream));
 
     /// <summary>The expected state against the stream's current revision; any and stream-exists always pass here, because the stream exists.</summary>
     private static void CheckExpected(string stream, StreamState expected, long actual)
@@ -385,7 +399,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, IDbContex
     /// </summary>
     private async Task<AppendResult> ResolveConflict(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken)
     {
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(ToSessionOptions(RequireTenant(stream)));
         var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
         var actual = state is null ? -1 : state.Version - 1;
         if (state is null || (!expected.HasRevision && expected != StreamState.NoStream))

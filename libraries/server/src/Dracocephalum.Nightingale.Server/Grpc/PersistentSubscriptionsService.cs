@@ -15,13 +15,12 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// instance, refuses a second consumer, runs the group in memory for as long as the consumer
 /// stays, and turns the consumer's acknowledgements into the group's checkpoint.
 /// </summary>
-/// <param name="groups">The group store.</param>
-/// <param name="store">The stream store.</param>
+/// <param name="stores">The backend's stores, one per tenant: a call resolves the group store and the stream store of the tenant it was authorized for, and a running group those of its own tenant.</param>
 /// <param name="tail">The tail.</param>
 /// <param name="registry">The groups live in this instance.</param>
 /// <param name="address">Where this instance is reached, written with every lease it takes.</param>
 /// <param name="timeProvider">The clock.</param>
-public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore groups, IStreamStore store, IStoreTail tail, SubscriptionGroupRegistry registry, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
+public sealed class PersistentSubscriptionsService(ITenantStores stores, IStoreTail tail, SubscriptionGroupRegistry registry, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
 {
     /// <summary>How long a lease lasts; it is renewed at a third of this.</summary>
     public static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
@@ -40,7 +39,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -63,7 +62,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
                 throw NightingaleErrors.InvalidArgument("Ordinal numbering applies to $ce- and $et- streams only.");
             }
 
-            if (!store.OrdinalsEnabled)
+            if (!stores.GetStreams(TenantScope.Default).OrdinalsEnabled)
             {
                 throw NightingaleErrors.OrdinalsNotEnabled(stream);
             }
@@ -90,9 +89,9 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
-        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+        var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
 
         // A running group has its settings in memory and a consumer delivered to under them, so
         // the change is made where it runs: refused with the owner's address, and the client
@@ -160,7 +159,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -177,7 +176,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -216,7 +215,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         var stream = request.Stream.Length == 0 ? null : RequireReadableStreamName(request.Stream);
         var response = new ListResponse();
@@ -243,7 +242,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -287,9 +286,9 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
-        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+        var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         var by = GetNumberKind(definition);
         var response = new ListParkedResponse();
         foreach (var message in await groups.ListParkedAsync(definition.Id, by, request.HasAfter ? request.After : null, ClampLimit(request.Limit), context.CancellationToken).ConfigureAwait(false))
@@ -314,9 +313,9 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
-        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+        var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         var by = GetNumberKind(definition);
         var response = new ListOutboxResponse();
         foreach (var message in await groups.ListOutboxAsync(definition.Id, by, request.HasAfter ? request.After : null, ClampLimit(request.Limit), context.CancellationToken).ConfigureAwait(false))
@@ -341,11 +340,11 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         // Parked messages are rows and no running group holds them in memory, so any instance
         // removes them; there is no consumer to wake and nowhere to send the caller.
-        var definition = await GroupAsync(request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
+        var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         long? position = request.WhichCase == SkipParkedRequest.WhichOneofCase.Position ? request.Position : null;
         long? before = request.WhichCase == SkipParkedRequest.WhichOneofCase.Before ? request.Before : null;
         var skipped = await groups.SkipAsync(definition.Id, position, before, GetNumberKind(definition), context.CancellationToken).ConfigureAwait(false);
@@ -363,7 +362,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         ArgumentNullException.ThrowIfNull(requestStream);
         ArgumentNullException.ThrowIfNull(responseStream);
         ArgumentNullException.ThrowIfNull(context);
-        await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false);
+        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false));
 
         var cancellationToken = context.CancellationToken;
         if (!await requestStream.MoveNext(cancellationToken).ConfigureAwait(false)
@@ -439,13 +438,13 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         // Refused with the owner's address: the client goes there itself, the way the reference
         // client follows a not-leader answer.
         var lease = SubscriptionGroupRegistry.GetLeaseName(definition.Id);
-        var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
+        var owner = await GetGroups(definition).AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
         if (owner is not null)
         {
             throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, owner);
         }
 
-        var runtime = new SubscriptionGroupRuntime(store, tail, groups, timeProvider, definition);
+        var runtime = new SubscriptionGroupRuntime(GetStreams(definition), tail, GetGroups(definition), timeProvider, definition);
         return new SubscriptionGroupHost(definition, runtime, (live, token) => KeepAsync(live, definition, lease, token));
     }
 
@@ -460,6 +459,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         {
             // Cleared before the lease goes, so the row never says a consumer is connected under
             // no lease; an instance that dies first leaves it, and readers go by the lease.
+            var groups = GetGroups(host.Definition);
             await groups.SaveLiveAsync(host.Definition.Id, null, CancellationToken.None).ConfigureAwait(false);
             await groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(host.Definition.Id), registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
         }
@@ -490,7 +490,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     };
 
     /// <summary>The group two names find, known from here on by the names in its own row.</summary>
-    private async Task<SubscriptionGroupDefinition> GroupAsync(string streamName, string groupName, CancellationToken cancellationToken)
+    private static async Task<SubscriptionGroupDefinition> GroupAsync(ISubscriptionGroupStore groups, string streamName, string groupName, CancellationToken cancellationToken)
     {
         var stream = RequireReadableStreamName(streamName);
         var group = RequireGroupName(groupName);
@@ -566,6 +566,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
     /// </summary>
     private async Task<long?> LastKnownAsync(SubscriptionGroupDefinition definition, CancellationToken cancellationToken)
     {
+        var store = GetStreams(definition);
         if (StreamNames.TryParseVirtual(definition.Stream, out var virtualStream))
         {
             var head = definition.Settings.Numbering == Numbering.Ordinal
@@ -654,7 +655,7 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         {
             // Written now, so a listing shows the consumer as soon as it is connected, and again
             // with every renewal of the lease.
-            await groups.SaveLiveAsync(live.Definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
+            await GetGroups(live.Definition).SaveLiveAsync(live.Definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
             await responseStream.WriteAsync(
                 new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = consumer.Id.ToString("D"), Checkpoint = live.Checkpoint } },
                 cancellationToken).ConfigureAwait(false);
@@ -739,14 +740,20 @@ public sealed class PersistentSubscriptionsService(ISubscriptionGroupStore group
         while (true)
         {
             await Task.Delay(interval, timeProvider, cancellationToken).ConfigureAwait(false);
-            var owner = await groups.AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
+            var owner = await GetGroups(definition).AcquireLeaseAsync(lease, registry.InstanceId, address.Current, LeaseDuration, cancellationToken).ConfigureAwait(false);
             if (owner is not null)
             {
                 throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, owner);
             }
 
             await live.ExpireAsync().ConfigureAwait(false);
-            await groups.SaveLiveAsync(definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
+            await GetGroups(definition).SaveLiveAsync(definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>The stream store of a group's own tenant, for its runtime; the call that started it may be another tenant's admin.</summary>
+    private IStreamStore GetStreams(SubscriptionGroupDefinition definition) => stores.GetStreams(TenantScope.OfStoreTenant(definition.TenantId));
+
+    /// <summary>The group store of a group's own tenant.</summary>
+    private ISubscriptionGroupStore GetGroups(SubscriptionGroupDefinition definition) => stores.GetGroups(TenantScope.OfStoreTenant(definition.TenantId));
 }

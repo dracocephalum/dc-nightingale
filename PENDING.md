@@ -83,38 +83,24 @@ consistency model is richer still, tag-based conditions of the form "no event
 matching this query since sequence N", and can be exposed once the single-stream
 contract is stable.
 
-## Multi-tenancy
+## Multi-tenancy: what is left
 
-Tenants share one database and one global sequence, so positions stay coherent
-across tenants. A tenant-bound credential needs no tenant header: every read
-and append happens within its tenant, `$all` and the virtual streams
-included, and a persistent-subscription group is identified by tenant, stream
-and group name; a header sent anyway must equal the credential's tenant. An
-admin credential must send the tenant header on every data operation, so
-nothing lands in a tenant or spans tenants by omission; the wildcard value
-spans all tenants and is accepted on reads only. The wildcard exists because
-the sequence is shared, so it is only offered while it is: with the store's
-per-tenant partitioning (`Nightingale:Store:Partitioning` = `Tenant`, fixed when the
-store is initialized and guarded by its marker row) or a database per tenant
-there is no global position,
-the server says so through its features call, and the wildcard is refused.
-Range partitioning by sequence, the gateway's own if ever added, keeps the
-shared sequence and the wildcard. Ordinals are per tenant by construction,
-the sequencer partitions by tenant and the ordinal indexes lead with the tenant
-column, so they fit either partitioning; what tenant partitioning needs is a
-sequencer that follows the mark and keeps its progress per tenant, which is why
-`Nightingale:Store:AssignOrdinals` is refused with it until then. A wildcard
-read spans tenants and so has no single ordinal sequence: it is served under
-global numbering only, and ordinal numbering with the wildcard is refused.
-Provisioning a tenant touches no schema: a new value in the tenant column, a
-registry entry and credentials, all the gateway's own documents. The store
-runs in conjoined mode
-with the default tenant from day one, so enabling tenants later adds
-credentials, not a schema migration; the category and type indexes lead with
-the tenant column. Database-per-tenant is not planned; what it would take is
-under its own heading below.
+Tenants share one database and one sequence, every data call works in the
+tenant it was authorized for, and the wildcard spans tenants on reads of
+`$all` and the virtual streams by position; `DESIGN.md` has the shape. Two
+things remain.
 
-The samples would use it. Each scenario under `examples/` creates and
+**Tenant partitioning.** With the store's per-tenant partitioning
+(`Nightingale:Store:Partitioning` = `Tenant`, fixed when the store is
+initialized and guarded by its marker row) there is a sequence per tenant and
+no global position: the server says so through its features call and refuses
+the wildcard, which is done; what is not is the tail and the sequencer, which
+follow one high-water mark and would need one per tenant, so
+`Nightingale:Store:AssignOrdinals` is refused with it and subscriptions under
+it follow the wrong mark (`TODO.md`). Range partitioning by sequence, the
+gateway's own if ever added, keeps the shared sequence and the wildcard.
+
+**The samples on one database.** Each scenario under `examples/` creates and
 initializes a database of its own, because several of them append to the same
 stream names and read the same category. With tenants, one database
 initialized once serves every scenario of a run, a tenant each: names, groups
@@ -147,7 +133,7 @@ What enabling it would mean, each a design of its own:
   lease, one set of gateway tables and one registry of running groups per
   tenant, activated on first use and evicted when idle, so that startup,
   migration and the catalog comparison, seconds per fresh database, are not
-  paid for every tenant on every instance at once.
+  paid for all tenants on every instance at once.
 - **A database that knows its tenant**: the tenant id stamped in the
   store's marker row at provisioning, and a registration refused when the
   database says another, since the registry row is otherwise the only link
@@ -157,7 +143,7 @@ What enabling it would mean, each a design of its own:
 - **Registry changes seen by every instance**: a tenant disabled or
   re-pointed on one instance ends the consumers and stops the tail on the
   others, on a refresh cadence or a signal.
-- **Placement of per-tenant leases**, so every tenant's sequencer does not
+- **Placement of per-tenant leases**, so all tenants's sequencer does not
   land on the instance that woke first.
 - **Operator tooling per database**: the schema report and apply, the
   collation rule and the initialization-fixed settings checked and reported
@@ -170,6 +156,42 @@ What enabling it would mean, each a design of its own:
 - **Credentials in the control plane**, since a caller is authenticated
   before its tenant is known; which is the model the authentication design
   takes from the start, so that it does not move later.
+
+### A registry of stores
+
+The shape that holds database-per-tenant and today's layout as its two
+corners is a registry of **stores**, with tenants placed into them: one store
+with many conjoined tenants is what runs today, one store per tenant is the
+heading above, and several stores with several tenants each is the mix. A
+store is exactly the unit the composition root serves now — one database and
+its read-only secondary, one tail, one sequencer lease, one set of gateway
+tables, one registry of running groups, one marker row — so the work is to
+instantiate that unit per store, keyed by a store id and activated on first
+use, and to give the tenant registry a store column. Positions, `$all`, the
+wildcard, ordinals and persistent groups are coherent within a store and
+meaningless across stores, which the features call says per tenant. A store
+carries a backend kind, so stores on SQL Server and on PostgreSQL mix behind
+one gateway once the Marten backend exists; a backend is admitted by what the
+store port demands — an append-only total order per store, atomic
+multi-event appends with the per-stream revision check, a high-water mark the
+tail can follow, the category and type projections, and a lease — and a
+database without a sequence of its own brings one, as the ordinal sequencer
+already does.
+
+Three decisions are settled now so that they do not move later. The registry
+is **driven by `appsettings` first**: stores are declared in configuration,
+not registered at runtime, until the dynamic design above is wanted and
+mature; the registry row then exists already, with the same columns. A store
+row holds a **reference to its connection strings, never the secret**: a name
+the host resolves through its configuration or a vault provider at
+activation, as the pepper is resolved, so the table holds nothing worth
+stealing and rotation is a configuration change. And the gateway's own tables
+are a **control plane with a connection string of their own, defaulting to
+the store's**, so a single-store deployment keeps today's layout and a
+multi-store one points the control plane elsewhere without a change of shape;
+the tenant and store refresh is the cadence `TenantRefresher` already runs. A
+tenant moving between stores is an export and an import with positions
+renumbered, never a transparent feature.
 
 ## Ordinals on a store initialized without them
 

@@ -21,8 +21,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// test's to say.
 /// </summary>
 /// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
-/// <param name="tenantId">The tenant every read is scoped to.</param>
-internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string tenantId)
+/// <param name="tenantId">The tenant every read is scoped to, or <see langword="null"/> for all tenants, under the wildcard.</param>
+internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string? tenantId)
 {
     private static readonly Expression<Func<EventRow, Raw>> Plain =
         e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, null);
@@ -66,6 +66,19 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     {
         await using var context = OpenContext();
         return await PageAsync(FilterByPosition(QueryLive(context, stream), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>One page of <c>$all</c> by position, with the same bounds as <see cref="ReadAsync"/>: every live event of the tenant, or of all tenants.</summary>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
+    /// <param name="head">The highest position a forwards page may hold.</param>
+    /// <param name="count">The most events to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events of the page.</returns>
+    public async Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
+    {
+        await using var context = OpenContext();
+        return await PageAsync(FilterByPosition(QueryLive(context, null), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -130,7 +143,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     public async Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
     {
         await using var context = OpenContext();
-        var all = FilterByKey(context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId), stream);
+        var all = FilterByKey(context.EventRows.AsNoTracking().Where(e => (tenantId == null || e.TenantId == tenantId)), stream);
         var ordinals = stream.Kind == VirtualStreamKind.Category
             ? all.Where(e => e.CategoryOrdinal != null).Select(e => e.CategoryOrdinal)
             : all.Where(e => e.TypeOrdinal != null).Select(e => e.TypeOrdinal);
@@ -230,7 +243,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <summary>The live events of the tenant, of one virtual stream or of all.</summary>
     private IQueryable<EventRow> QueryLive(EventsDbContext context, VirtualStreamName? stream)
     {
-        var live = context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId && !e.IsArchived);
+        var live = context.EventRows.AsNoTracking().Where(e => (tenantId == null || e.TenantId == tenantId) && !e.IsArchived);
         return stream is { } named ? FilterByKey(live, named) : live;
     }
 

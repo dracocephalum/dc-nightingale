@@ -12,7 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// kept; the table is read again on a cadence, so a tenant disabled or enabled on another
 /// instance is noticed within one interval, and a tenant disabled here or there has its running
 /// groups stopped here. A read that fails keeps what was known and says so: a database that
-/// cannot be reached for a moment must not disable every tenant on the instance.
+/// cannot be reached for a moment must not disable all tenants on the instance.
 /// </summary>
 public sealed partial class TenantDirectory(IDbContextFactory<NightingaleDbContext> contexts, SubscriptionGroupRegistry registry, ILogger<TenantDirectory> logger)
 {
@@ -45,7 +45,7 @@ public sealed partial class TenantDirectory(IDbContextFactory<NightingaleDbConte
         return _tenants.GetOrAdd(tenantId, new TenantEntry(row.Id, row.StoreTenantId, row.IsDisabled));
     }
 
-    /// <summary>Reads every tenant again and applies what changed: a tenant now disabled has its running groups here stopped.</summary>
+    /// <summary>Reads all tenants again and applies what changed: a tenant now disabled has its running groups here stopped.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the table has been read and applied.</returns>
     public async Task RefreshAsync(CancellationToken cancellationToken)
@@ -89,9 +89,7 @@ public sealed partial class TenantDirectory(IDbContextFactory<NightingaleDbConte
 
     private void Disable(TenantEntry tenant)
     {
-        // The instance serves one tenant's data today, so every running group is the tenant's;
-        // a store serving many tenants will stop the tenant's groups only.
-        registry.StopAll(new TenantDisabledException(tenant.Id));
+        registry.StopTenant(tenant.StoreTenantId, new TenantDisabledException(tenant.Id));
         LogDisabled(logger, tenant.Id);
     }
 
