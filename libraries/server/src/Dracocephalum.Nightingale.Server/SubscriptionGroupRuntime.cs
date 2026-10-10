@@ -605,7 +605,13 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         }
     }
 
-    /// <summary>The next event to send, and whether it is a retry: a queued retry if there is one, else the next live event, whichever comes first.</summary>
+    /// <summary>
+    /// The next event to send, and whether it is a retry: a queued retry if there is one, else the
+    /// next live event. The choice is made under the lock from what is queued at that moment,
+    /// never from which arrival ended the wait: a retry queued while the live buffer was being
+    /// waited on goes ahead of the live event that filled it, however the two wake-ups were
+    /// scheduled.
+    /// </summary>
     private async Task<(InFlight? Flight, bool Retry)> NextAsync(CancellationToken cancellationToken)
     {
         while (true)
@@ -625,23 +631,18 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                     return (held, false);
                 }
 
+                if (_live.Reader.TryRead(out var record))
+                {
+                    return (new InFlight(record, 0, default, false, Guid.Empty), false);
+                }
+
                 arrived = _retryArrived.Task;
             }
 
             var live = _live.Reader.WaitToReadAsync(cancellationToken).AsTask();
-            if (await Task.WhenAny(live, arrived).ConfigureAwait(false) == arrived)
-            {
-                continue;
-            }
-
-            if (!await live.ConfigureAwait(false))
+            if (await Task.WhenAny(live, arrived).ConfigureAwait(false) == live && !await live.ConfigureAwait(false))
             {
                 return (null, false);
-            }
-
-            if (_live.Reader.TryRead(out var record))
-            {
-                return (new InFlight(record, 0, default, false, Guid.Empty), false);
             }
         }
     }

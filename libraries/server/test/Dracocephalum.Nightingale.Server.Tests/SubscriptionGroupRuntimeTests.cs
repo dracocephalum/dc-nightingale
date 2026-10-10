@@ -160,8 +160,8 @@ public sealed class SubscriptionGroupRuntimeTests
     public async Task Wake_ShouldDeliverTheOutboxAheadOfTheNextLiveEvent()
     {
         // Arrange: room for one; the stream has two events after the checkpoint and the consumer
-        // holds the first. A replay arrives meanwhile; once the first is acknowledged the replayed
-        // message goes out before the second live event, the reference's order.
+        // holds the first. A replay arrives meanwhile and is queued; once the first is acknowledged
+        // the replayed message goes out before the second live event, the reference's order.
         var replayed = Record("orders-1", 3, 30);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 9, 500, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 10), [Record("orders-1", 9, 90), Record("orders-1", 10, 100)]));
@@ -176,7 +176,7 @@ public sealed class SubscriptionGroupRuntimeTests
 
         // Act
         sut.Wake();
-        await WaitUntilAsync(() => Fake.GetCalls(_store).Any(call => call.Method.Name == nameof(IStreamStore.ReadAsync) && Equals(call.Arguments[2], 3L)));
+        await WaitUntilAsync(() => sut.Describe().AwaitingRetryCount == 1);
         await sut.AcknowledgeAsync([first.Record.Id]);
         var second = await Next(sut);
         await sut.AcknowledgeAsync([second.Record.Id]);
