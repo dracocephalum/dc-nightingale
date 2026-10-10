@@ -30,39 +30,83 @@ The server is an application core with gRPC as one adapter over it
 (`DESIGN.md` §10), so a second protocol is a sibling, not a rewrite. The
 shape, decided so nothing here is re-derived:
 
+- **The ladder, by the reason a sibling exists.** Before any second stack,
+  two things the gRPC contract gives away for the same proto and the same
+  service classes: gRPC-Web, a middleware, carries unary and server-streaming
+  calls through an HTTP/1.1 proxy and into a browser, and cannot carry
+  client or duplex streaming, so under it a group's acknowledgements go as a
+  unary call; JSON transcoding, `google.api.http` annotations on the proto,
+  gives a REST shape for `curl`, scripts and an OpenAPI document. The second
+  stack proper is **SignalR**: full duplex where HTTP/2 cannot go, a browser
+  client with no proxy, and its own negotiation from WebSockets down to
+  server-sent events and long polling. A hub method streams both ways as
+  `IAsyncEnumerable<T>`, so reads, subscriptions and a group's duplex map
+  onto the seam without polling; the simpler shape, a server stream plus an
+  acknowledge call on the same connection, is as good because the connection
+  already ties them. Set aside, with the reason: Thrift and the other
+  request-response stacks (streaming becomes polling, the least of the
+  contract carried); RSocket (the right spec on paper, request-stream,
+  request-channel and resumption built in, and a thin .NET implementation);
+  a WebSocket with framing of our own (SignalR without the library); brokers
+  such as MQTT, AMQP or NATS (a bridge, not an adapter).
 - **Assemblies.** A second stack is `Protocols.<Stack>` beside
   `Protocols.Grpc`, referencing `Core` and never the other stack; its server
   adapter is `Server.<Stack>` with `AddNightingale<Stack>()` and
-  `MapNightingale<Stack>()`, and its client adapter is `Client.<Stack>`. When
-  the first sibling arrives, the `Server.Grpc` namespace becomes an assembly
-  and the client's transport seam becomes an interface in `Client` that each
-  stack implements. The seam is defined in the core's terms —
-  `IAsyncEnumerable<EventRecord>` for reads, a duplex of messages and
-  acknowledgements for groups, resumable positions — so a request-response
-  stack such as Thrift can satisfy it by polling where gRPC streams.
+  `MapNightingale<Stack>()`, and its client adapter is `Client.<Stack>`; for
+  SignalR a browser speaks to the hub with the JavaScript client directly,
+  and `Client.SignalR` is the .NET adapter. When the first sibling arrives,
+  the `Server.Grpc` namespace becomes an assembly and the client's transport
+  seam becomes an interface in `Client` that each stack implements. The seam
+  is defined in the core's terms — `IAsyncEnumerable<EventRecord>` for reads,
+  a duplex of messages and acknowledgements for groups, resumable positions —
+  and each stack's messages are its own, mapped at the adapter as the gRPC
+  ones are (`agentics/rules/coding/architecture.md`), so the hub's messages
+  are not the proto's.
 - **Both at once.** Kestrel hosts several endpoints with different protocols,
-  and a stack with its own listener is a hosted service on its own port; the
-  core never learns which listener a call came in on. Credentials ride where
-  each stack carries them — metadata for gRPC, a call argument or a header
-  protocol for Thrift — and end in the same `NightingalePrincipal` and the
-  same `Authorizer`. gRPC is the full contract; a sibling may carry a subset,
-  and refuses what it cannot carry rather than quietly degrading.
+  the hub beside the gRPC services on the same port if the host likes, and a
+  stack with its own listener is a hosted service on its own port; the core
+  never learns which listener a call came in on. Credentials ride where each
+  stack carries them — metadata for gRPC, a bearer token in the header or,
+  over WebSockets, the `access_token` query string for SignalR — and end in
+  the same `NightingalePrincipal` and the same `Authorizer`. gRPC is the full
+  contract; a sibling may carry a subset, and refuses what it cannot carry
+  rather than quietly degrading. SignalR's receive-size limit is raised for
+  appends, since its default is sized for chat.
 - **Fallback in the client.** Safe because appends are idempotent by event
   id, reads are pure, subscriptions resume from a position and seats are per
   connection: a failover is a reconnect over another transport from the
-  checkpoint, never a mid-stream migration. The server advertises its
-  transports and their addresses through `ServerFeatures`; the client caches
-  the table and falls back only on connection failure, never on a missing
-  feature. On the very first connect the seed itself must answer.
+  checkpoint, never a mid-stream migration. SignalR's own reconnect drops the
+  streams in flight and is treated the same way. The redirect to a group's
+  owning instance maps one to one, the hub answers with the owner's address
+  and the client connects there; a SignalR connection is sticky to one
+  instance behind a load balancer, which the redirect rule assumes anyway.
+  The server advertises its transports and their addresses through
+  `ServerFeatures`; the client caches the table and falls back only on
+  connection failure, never on a missing feature. On the very first connect
+  the seed itself must answer.
 - **The connection string.** The authority stays the seed list, as today;
-  `transports=grpc,thrift` is the preference order, and a stack listed there
-  is used only when listed; `thrift=:9988` or `thrift=h1:9988,h2:9988` is an
-  explicit seed list for a stack, in the authority's own `host[:port]` comma
-  idiom, for a network where discovery cannot work. One key, one value: a
-  repeated key stays refused, and `@` never appears outside the userinfo.
+  `transports=grpc,signalr` is the preference order, and a stack listed there
+  is used only when listed; `signalr=:5000` or `signalr=h1:5000,h2:5000` is
+  an explicit seed list for a stack, in the authority's own `host[:port]`
+  comma idiom, for a network where discovery cannot work, the hub's path
+  being the stack's own and fixed. One key, one value: a repeated key stays
+  refused, and `@` never appears outside the userinfo.
   `nightingale+discover://` resolves per stack, by SRV name
-  (`_nightingale-grpc._tcp`, `_nightingale-thrift._tcp`), when a cluster
+  (`_nightingale-grpc._tcp`, `_nightingale-signalr._tcp`), when a cluster
   needs it.
+- **gRPC-compatible derivatives, to look at when the contract is stable.**
+  The same proto files under another generator or framing, each checked for
+  a .NET server and client before it is counted on: Connect-RPC (gRPC,
+  gRPC-Web and its own protocol over HTTP/1.1 and HTTP/2, JSON or protobuf,
+  with browser, Go, Swift and Kotlin clients; no .NET server today, and its
+  clients already reach this server through gRPC-Web); Twirp (JSON or
+  protobuf over HTTP/1.1, no streaming at all, so no more than transcoding
+  gives); protovalidate (the request checks as constraints in the proto
+  instead of code in the services, if its runtime exists for .NET); Buf (the
+  proto toolchain: lint and breaking-change detection against the published
+  contract, which the repository has nothing for yet). Code-first stacks that
+  drop the proto run the other way and are not candidates: the proto is the
+  contract.
 
 ## Stream metadata
 
