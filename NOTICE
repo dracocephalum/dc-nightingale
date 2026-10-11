@@ -16,3 +16,10 @@ the License.
 The files under agentics/ and .claude/skills/ were initialized from
 dc-agentics (https://github.com/dracocephalum/dc-agentics), whose payload is
 offered under the Zero-Clause BSD licence (0BSD).
+
+The client API follows the shape of the KurrentDB .NET client
+(https://github.com/kurrent-io/KurrentDB-Client-Dotnet), Copyright Kurrent,
+Inc., offered under the Apache License, Version 2.0, which served as the
+reference for its contract and behaviour; no code or protocol file of it is
+included in this work. KurrentDB is a trademark of Kurrent, Inc. This project
+is not affiliated with, or endorsed by, Kurrent, Inc.

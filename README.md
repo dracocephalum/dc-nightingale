@@ -5,8 +5,8 @@
 > [`.agentics.yaml`](.agentics.yaml); open items are in [`TODO.md`](TODO.md).
 
 A .NET gRPC server and client for the Polecat event-sourcing framework,
-following the client pattern of the reference event store. Where the
-behaviour differs from it on purpose, [`VARIANCES.md`](VARIANCES.md) says how
+following the client pattern of KurrentDB, the reference event store. Where
+the behaviour differs from it on purpose, [`VARIANCES.md`](VARIANCES.md) says how
 and why; features deferred with their approach decided are in
 [`PENDING.md`](PENDING.md).
 
@@ -46,3 +46,8 @@ says.
 ## Licence
 
 Apache-2.0 — see [`LICENSE`](LICENSE). Copyright 2026 Chris Har.
+
+The client API's shape is taken from the KurrentDB .NET client, Apache-2.0,
+Copyright Kurrent, Inc.; the acknowledgement is in [`NOTICE`](NOTICE).
+KurrentDB is a trademark of Kurrent, Inc. This project is not affiliated
+with, or endorsed by, Kurrent, Inc.
