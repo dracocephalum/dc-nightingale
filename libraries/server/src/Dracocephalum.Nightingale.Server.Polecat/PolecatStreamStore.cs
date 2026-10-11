@@ -36,9 +36,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by whoever made this instance, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="contexts">Makes the gateway's own context, for the sequencer's progress.</param>
 /// <param name="ordinalsOf">The tenant whose sequence the sequencer's progress is read for, or <see langword="null"/> while the sequence is shared and the progress is one row.</param>
+/// <param name="appended">Pulsed after each append commits, so the tail looks at once instead of at its next poll.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, string? ordinalsOf, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
+internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, string? ordinalsOf, AppendSignal appended, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
 {
     /// <summary>SQL Server's error for a value longer than its column, naming the column.</summary>
     /// <summary>
@@ -137,6 +138,10 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
             throw new ValueTooLongException(DescribeColumn(exception), exception);
         }
 
+        // Committed, so the tail finds the rows the moment it looks; an append resolved as a
+        // retry of one that already happened pulsed when it happened. Deletes and tombstones
+        // move no head and do not pulse.
+        appended.Pulse();
         var last = (IEvent)wrapped[^1];
         return new AppendResult(last.Version - 1, last.Sequence);
     }

@@ -189,7 +189,13 @@ of `$all` or a subscription must stop at the store's high-water mark, which
 advances by polling; per-stream reads are unaffected because versions are
 dense under the stream lock. `PolecatStoreTail` is that mark as the process
 follows it: it runs the store's own high-water agent and nothing else of the
-daemon, and every subscription waits on it rather than polling. Under tenant
+daemon, and every subscription waits on it rather than polling. The agent
+polls on the store's cadence, but an append made through this process does
+not wait for it: every stream store pulses `AppendSignal` once its append has
+committed, and the tail waits on that signal between looks, the store's agent
+through the wake-up its daemon settings take and `PolecatTenantTails` in
+place of its interval. Only the appending instance is woken; the others find
+the event at their next poll (`TODO.md`). Under tenant
 partitioning there is no global sequence, each tenant has its own and its own
 mark, so the wildcard read across tenants is refused there and the tail is per
 tenant: `ITenantStores` hands a scope its tail beside its stores, the one tail
@@ -539,13 +545,16 @@ transports at once and of a client that can fall back between them.
 
 - `*.Tests` projects are unit tests and need nothing running: the service
   against a strict fake of the port and a tail a test moves by hand, the
-  per-tenant poller against positions a test writes, the client against a
+  per-tenant poller against positions a test writes, the append signal on a
+  clock a test moves, the client against a
   scripted call, the conversions, the marker comparison, the group store and
   the mirror's queries on the in-memory provider, and the model against the
   schema feature.
 - `*.Tests.Integration` projects need the local SQL Server and run only with
   `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
-  path, and the two guards above. Each creates its databases and drops them.
+  path, the two guards above, and the wake, proven by a host whose polling
+  interval is minutes long reaching its own append in seconds. Each creates
+  its databases and drops them.
 - `examples/` holds one program per backend that narrates each of its scenarios
   end to end, and a test per scenario that asserts the same run, against one
   database per run that the run's server creates and the run drops, with a

@@ -16,11 +16,14 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// never commit, the mark moving to the last position appended before the threshold, as the
 /// store's agent does. One round trip per interval finds which polled tenants moved, and only
 /// those are read; the interval is the store's fast one while something moved and its slow one
-/// when nothing did. A tenant is polled from the first time its tail is asked for, for the life
-/// of the process, as its stores are kept. A look that fails is logged and taken again at the next
-/// interval: the heads stay where they were, and whoever waits on them waits on.
+/// when nothing did, and an append made through this process cuts either short: the poller waits
+/// on the append signal, so the look follows the commit at once. A tenant is polled from the first
+/// time its tail is asked for, for the life of the process, as its stores are kept. A look that
+/// fails is logged and taken again at the next interval: the heads stay where they were, and
+/// whoever waits on them waits on.
 /// </summary>
 /// <param name="positions">The events table's positions, as the poller reads them.</param>
+/// <param name="appended">Pulsed after each append this process commits; a wait between looks ends at a pulse.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 /// <param name="fastInterval">How long the poller waits after a look that found movement; <see cref="FastInterval"/> when not given.</param>
@@ -28,6 +31,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="staleAfter">How long a gap holds a mark before it is given up; <see cref="StaleAfter"/> when not given.</param>
 internal sealed partial class PolecatTenantTails(
     ITenantEventPositions positions,
+    AppendSignal appended,
     TimeProvider timeProvider,
     ILogger<PolecatTenantTails> logger,
     TimeSpan? fastInterval = null,
@@ -184,7 +188,7 @@ internal sealed partial class PolecatTenantTails(
 
             try
             {
-                await Task.Delay(moved ? _fast : _slow, timeProvider, stopping).ConfigureAwait(false);
+                await appended.WaitAsync(moved ? _fast : _slow, stopping).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

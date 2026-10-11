@@ -49,13 +49,13 @@ undecided adds it here rather than mentioning it once in a conversation.
   revision that was no longer current. Close by: a conditional archive
   statement that carries the expected revision, which is asked for in
   `UPSTREAM.md`.
-- **Live delivery waits out a polling interval.** The tailer runs the store's
-  high-water agent, which polls on the store's cadence, so an event reaches a
-  live subscriber up to a quarter of a second after its append. The store's
-  daemon settings carry a wake-up hook the store never sets, and the gateway
-  is the writer, so it could wake the agent after its own appends. Close by:
-  implementing the hook once its surface is confirmed on the pinned store
-  version, and a test that a live event arrives well inside the interval.
+- **Only the appending instance's tail is woken.** An append wakes the tail of
+  the process it was made through; the other instances' tails find it at
+  their next poll, up to a quarter of a second later while events flow and a
+  second when they do not. A subscriber connected to another instance than
+  the writer waits that long. Close by: a signal across instances, which on
+  SQL Server is Service Broker or query notifications, once a measurement
+  shows the interval matters there.
 - **One query per stream subscription per advance.** A subscription to a plain
   stream wakes on every advance of the global head and re-reads its own
   stream, which is one cheap query per subscription per interval and scales
