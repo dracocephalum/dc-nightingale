@@ -263,19 +263,23 @@ own high-water agent, the part of its async daemon that finds that mark, and
 publishes every advance; each subscription waits on it instead of polling the
 store, so a thousand subscribers cost the store one poll per interval. A
 subscription confirms with the head, catches up in pages, says so, then
-delivers whatever each advance brings: an `$all` subscription reads the
-advanced range; a subscription to a plain stream takes its events from
-`StreamRouter`, one per tenant's store, which reads where the advanced range's
-events are once, their stream and revision without their bodies, and then the
-events of each followed stream that moved, so an advance costs reads in the
-number of events, not of subscriptions. A subscription follows the router
+delivers whatever each advance brings, through `StreamRouter`, one per
+tenant's store, which reads each advance once for every subscription that
+follows it. For the plain streams it reads where the advanced range's events
+are once, their stream and revision without their bodies, and then the events
+of each followed stream that moved, so an advance costs reads in the number of
+events, not of subscriptions; for `$all` and each followed virtual stream it
+reads the range under that predicate once, however many follow it, the
+predicate evaluated by the store so that a name matches live exactly as it
+matches on a read, whatever the collation. A subscription follows the router
 before its catch-up reads, so an event the reads do not see yet is one the
-router brings, and delivers only in revision order, reading its stream again
-when the router brings something ahead of its next revision; a follower that
-leaves too much unread lapses and reads its stream itself from where it
-stands, the reference server's own answer to a full live buffer. One router
-per tenant is the one shape that fits both tenant modes: a stream name is per
-tenant, and under a sequence per tenant so is the tail.
+router brings. A plain stream's subscription delivers only in revision order,
+reading its stream again when the router brings something ahead of its next
+revision; one by position skips what it delivered already. A follower that
+leaves too much unread lapses and catches up itself from where it stands, the
+reference server's own answer to a full live buffer. One router per tenant is
+the one shape that fits both tenant modes: a stream name is per tenant, and
+under a sequence per tenant so is the tail.
 Where now matters, a subscription from the end or a bounded read of `$all`,
 the tail refreshes itself first with one query through the committed rows that
 follow the mark without a gap, so an append that has returned is never on the

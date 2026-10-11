@@ -1,17 +1,19 @@
 namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
-/// Hands the events of plain streams to the subscriptions that follow them, one read of the store
-/// per advance of the tail for all of them. Without it each subscription re-reads its own stream
-/// at every advance, almost always for nothing, so an advance costs one query per subscription;
-/// with it an advance costs one read of where the new events are, their stream and revision
-/// without their bodies, and one read per followed stream that moved, so the cost follows the
-/// events, not the subscriptions. One router per tenant's store: a stream name is per tenant, and
-/// under a sequence per tenant so is the tail. The router starts at the head as it stands and
-/// routes every range the tail advances through; a subscription follows before it reads its stream
-/// for the catch-up, so an event the catch-up does not see is one the router brings, and delivers
-/// only in revision order, re-reading its stream when what the router brings is ahead of what it
-/// has delivered, which an append whose number landed above a gap can do.
+/// Hands the events of streams to the subscriptions that follow them, reading each advance of the
+/// tail once for all of them rather than once per subscription. For the plain streams an advance
+/// costs one read of where the new events are, their stream and revision without their bodies,
+/// and one read per followed stream that moved, so the cost follows the events, not the
+/// subscriptions; for <c>$all</c> and each followed virtual stream it costs one read of the
+/// advanced range under that predicate, however many follow it, with the predicate evaluated by
+/// the store, so a name matches live exactly as it matches on a read. One router per tenant's
+/// store: a stream name is per tenant, and under a sequence per tenant so is the tail. The router
+/// starts at the head as it stands and routes every range the tail advances through; a
+/// subscription follows before it reads for the catch-up, so an event the catch-up does not see is
+/// one the router brings. A plain stream's follower delivers only in revision order, re-reading
+/// its stream when what the router brings is ahead of what it has delivered, which an append whose
+/// number landed above a gap can do; a follower by position skips what it has delivered already.
 /// </summary>
 /// <remarks>
 /// A follower that leaves <see cref="FollowerBuffer"/> events unread lapses: the router does not
@@ -69,7 +71,7 @@ public sealed class StreamRouter : IAsyncDisposable
     }
 
     /// <summary>Follows a stream from now on: every event of it at a position beyond <see cref="Routed"/> is handed over, until the follower lapses or leaves.</summary>
-    /// <param name="stream">The stream name.</param>
+    /// <param name="stream">The stream name: a plain stream, <c>$all</c> or a virtual stream.</param>
     /// <returns>The follower's feed.</returns>
     /// <exception cref="InvalidOperationException">The router can route no more; the cause is the inner exception.</exception>
     public StreamFollowing Follow(string stream)
@@ -161,10 +163,34 @@ public sealed class StreamRouter : IAsyncDisposable
         }
     }
 
-    /// <summary>Routes the events at positions from one up to another, both inclusive: the pointers of the range, page by page, then the events of each followed stream that moved.</summary>
+    /// <summary>
+    /// Routes the events at positions from one up to another, both inclusive: for the plain streams
+    /// the pointers of the range, page by page, then the events of each followed stream that moved;
+    /// then the range under each followed virtual stream's predicate; then the range itself for
+    /// <c>$all</c>. Each only when someone follows it.
+    /// </summary>
     private async Task RouteRangeAsync(long from, long head, CancellationToken cancellationToken)
     {
-        while (from <= head && HasFollowers())
+        var (plain, virtuals, all) = DescribeFollowed();
+        if (plain)
+        {
+            await RoutePointersAsync(from, head, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var stream in virtuals)
+        {
+            await RouteByPositionAsync(stream.Name, (start, token) => _store.ReadVirtualAsync(stream, Direction.Forwards, start, head, PointerPage, token), head, from, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (all)
+        {
+            await RouteByPositionAsync(StreamNames.All, (start, token) => _store.ReadAllAsync(Direction.Forwards, start, head, PointerPage, token), head, from, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RoutePointersAsync(long from, long head, CancellationToken cancellationToken)
+    {
+        while (from <= head)
         {
             var pointers = await _store.ReadPointersAsync(from, head, PointerPage, cancellationToken).ConfigureAwait(false);
             foreach (var (stream, (first, count)) in GroupByStream(pointers))
@@ -182,6 +208,27 @@ public sealed class StreamRouter : IAsyncDisposable
             }
 
             from = pointers[^1].Position + 1;
+        }
+    }
+
+    /// <summary>The range under one predicate, page by page, to the followers of the name.</summary>
+    private async Task RouteByPositionAsync(string name, Func<long, CancellationToken, Task<IReadOnlyList<EventRecord>>> read, long head, long from, CancellationToken cancellationToken)
+    {
+        while (from <= head)
+        {
+            var page = await read(from, cancellationToken).ConfigureAwait(false);
+            var followers = GetFollowers(name);
+            foreach (var record in page)
+            {
+                Deliver(record, followers);
+            }
+
+            if (page.Count < PointerPage)
+            {
+                return;
+            }
+
+            from = page[^1].Position + 1;
         }
     }
 
@@ -213,13 +260,18 @@ public sealed class StreamRouter : IAsyncDisposable
 
         foreach (var record in page.Events)
         {
-            foreach (var following in followers)
+            Deliver(record, followers);
+        }
+    }
+
+    private void Deliver(EventRecord record, StreamFollowing[] followers)
+    {
+        foreach (var following in followers)
+        {
+            if (!following.Lapsed && !following.TryDeliver(record))
             {
-                if (!following.Lapsed && !following.TryDeliver(record))
-                {
-                    Leave(following);
-                    following.Lapse();
-                }
+                Leave(following);
+                following.Lapse();
             }
         }
     }
@@ -238,11 +290,31 @@ public sealed class StreamRouter : IAsyncDisposable
         return groups;
     }
 
-    private bool HasFollowers()
+    /// <summary>What is followed right now: whether any plain stream is, which virtual streams are, and whether <c>$all</c> is.</summary>
+    private (bool Plain, List<VirtualStreamName> Virtuals, bool All) DescribeFollowed()
     {
         lock (_gate)
         {
-            return _followers.Count > 0;
+            var plain = false;
+            var all = false;
+            var virtuals = new List<VirtualStreamName>();
+            foreach (var name in _followers.Keys)
+            {
+                if (name == StreamNames.All)
+                {
+                    all = true;
+                }
+                else if (StreamNames.TryParseVirtual(name, out var virtualStream))
+                {
+                    virtuals.Add(virtualStream);
+                }
+                else
+                {
+                    plain = true;
+                }
+            }
+
+            return (plain, virtuals, all);
         }
     }
 

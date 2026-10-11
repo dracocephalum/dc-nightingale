@@ -8,9 +8,9 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 
 /// <summary>
-/// The routers over the real store, one per tenant: a stream name is per tenant, so a follower
-/// of a name in one tenant gets that tenant's events and never another's, whether the tenants
-/// share a sequence or each have their own. Each case uses a database of its own.
+/// The routers over the real store, one per tenant: a stream name is per tenant, and so is a
+/// category, so a follower of either in one tenant gets that tenant's events and never another's,
+/// whether the tenants share a sequence or each have their own. Each case uses a database of its own.
 /// </summary>
 [Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
@@ -32,6 +32,8 @@ public sealed class StreamRouterTests
             await using var routers = new StreamRouters(stores);
             using var mine = routers.For(TenantScope.Default).Follow("orders-1");
             using var theirs = routers.For(acme).Follow("orders-1");
+            using var myCategory = routers.For(TenantScope.Default).Follow("$ce-orders");
+            using var theirCategory = routers.For(acme).Follow("$ce-orders");
 
             // Act: the other tenant's event of the name, then one of my own tenant on another
             // stream, so that my router is known to have routed past both.
@@ -40,6 +42,7 @@ public sealed class StreamRouterTests
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
             var toTheirs = await theirs.Events.ReadAsync(timeout.Token);
+            var toTheirCategory = await theirCategory.Events.ReadAsync(timeout.Token);
             while (routers.For(TenantScope.Default).Routed < marker.Position)
             {
                 await Task.Delay(50, timeout.Token);
@@ -48,7 +51,9 @@ public sealed class StreamRouterTests
             // Assert
             toTheirs.Stream.ShouldBe("orders-1");
             toTheirs.Position.ShouldBe(appended.Position);
+            toTheirCategory.Position.ShouldBe(appended.Position);
             mine.Events.TryRead(out _).ShouldBeFalse("the other tenant's orders-1 is not mine");
+            myCategory.Events.TryRead(out _).ShouldBeFalse("the other tenant's orders are not my category's");
             await host.StopAsync(TestContext.Current.CancellationToken);
         }
         finally

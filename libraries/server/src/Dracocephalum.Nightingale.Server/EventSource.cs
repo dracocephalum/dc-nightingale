@@ -35,14 +35,14 @@ internal static class EventSource
     {
         if (stream == StreamNames.All)
         {
-            return FollowAll(store, tail, null, from, pageSize, cancellationToken);
+            return FollowByPosition(store, tail, router, null, from, pageSize, cancellationToken);
         }
 
         if (StreamNames.TryParseVirtual(stream, out var virtualStream))
         {
             return numbering == Numbering.Ordinal
                 ? FollowOrdinal(store, tail, virtualStream, from, pageSize, timeProvider, cancellationToken)
-                : FollowAll(store, tail, virtualStream, from, pageSize, cancellationToken);
+                : FollowByPosition(store, tail, router, virtualStream, from, pageSize, cancellationToken);
         }
 
         return FollowStream(store, router, stream, from, pageSize, cancellationToken);
@@ -132,11 +132,17 @@ internal static class EventSource
         }
     }
 
-    private static async IAsyncEnumerable<EventRecord> FollowAll(IStreamStore store, IStoreTail tail, VirtualStreamName? virtualStream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
+    /// <summary>
+    /// <c>$all</c> or a virtual stream by position: followed at the router before the catch-up
+    /// reads up to the head as it stands, then what the router brings, skipping what the catch-up
+    /// delivered already. A lapse means catching up again from where the delivery stands.
+    /// </summary>
+    private static async IAsyncEnumerable<EventRecord> FollowByPosition(IStreamStore store, IStoreTail tail, StreamRouter router, VirtualStreamName? virtualStream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var head = tail.Head;
         while (true)
         {
+            using var following = router.Follow(virtualStream?.Name ?? StreamNames.All);
+            var head = tail.Head;
             while (head > 0 && next <= head)
             {
                 var page = virtualStream is { } name
@@ -150,7 +156,19 @@ internal static class EventSource
                 next = page.Count < pageSize ? head + 1 : page[^1].Position + 1;
             }
 
-            head = await tail.WaitForAdvanceAsync(head, cancellationToken).ConfigureAwait(false);
+            while (await following.Events.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (following.Events.TryRead(out var record))
+                {
+                    if (record.Position < next)
+                    {
+                        continue;
+                    }
+
+                    yield return record;
+                    next = record.Position + 1;
+                }
+            }
         }
     }
 

@@ -60,6 +60,34 @@ public sealed class StreamRouterTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Route_ShouldReadTheRangeOnceUnderEachFollowedPredicateHoweverManyFollowIt()
+    {
+        // Arrange: two followers of a category, one of $all, and nobody on any plain stream.
+        var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
+        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 1, 3, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 1), Record("orders-2", 0, 3)]);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 1, 3, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 1), Record("audit-1", 0, 2), Record("orders-2", 0, 3)]);
+        using var first = _sut.Follow("$ce-orders");
+        using var second = _sut.Follow("$ce-orders");
+        using var everything = _sut.Follow(StreamNames.All);
+
+        // Act
+        _tail.Advance(3);
+        var toFirst = await NextAsync(first, 2);
+        var toSecond = await NextAsync(second, 2);
+        var toEverything = await NextAsync(everything, 3);
+
+        // Assert: one read per predicate, none of the pointers.
+        toFirst.Select(record => record.Position).ShouldBe([1, 3]);
+        toSecond.Select(record => record.Position).ShouldBe([1, 3]);
+        toEverything.Select(record => record.Position).ShouldBe([1, 2, 3]);
+        A.CallTo(() => _store.ReadVirtualAsync(A<VirtualStreamName>._, A<Direction>._, A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _store.ReadAllAsync(A<Direction>._, A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _store.ReadPointersAsync(A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task Route_WhenNobodyFollows_ShouldReadNothingAndStillPassTheRange()
     {
         // Act
