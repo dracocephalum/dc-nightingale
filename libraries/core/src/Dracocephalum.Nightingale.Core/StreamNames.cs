@@ -25,6 +25,20 @@ public static class StreamNames
         return stream.Length > 0 && stream[0] == '$';
     }
 
+    /// <summary>
+    /// The category of a plain stream: its name up to the first hyphen, or the whole name when it
+    /// has none. The rule the store's persisted category column computes, so what is matched in
+    /// process is what a read by category matches.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <returns>The category.</returns>
+    public static string CategoryOf(string stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var hyphen = stream.IndexOf('-', StringComparison.Ordinal);
+        return hyphen < 0 ? stream : stream[..hyphen];
+    }
+
     /// <summary>Recognises a virtual stream name.</summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="virtualStream">The virtual stream, when the name is one with a non-empty key.</param>

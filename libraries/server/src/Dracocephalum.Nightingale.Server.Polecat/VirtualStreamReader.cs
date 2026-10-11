@@ -81,7 +81,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         return await PageAsync(FilterByPosition(QueryLive(context, null), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Where the live events of the tenant at positions within a range are: stream and revision, in position order, without bodies.</summary>
+    /// <summary>Where the live events of the tenant at positions within a range are: stream, revision and type, in position order, without bodies.</summary>
     /// <param name="from">The first position, inclusive.</param>
     /// <param name="head">The highest position the page may hold.</param>
     /// <param name="count">The most pointers to return.</param>
@@ -92,7 +92,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         await using var context = OpenContext();
         return await FilterByPosition(QueryLive(context, null), Direction.Forwards, from, head)
             .Take(count)
-            .Select(e => new EventPointer(e.StreamId, e.Version - 1, e.SeqId))
+            .Select(e => new EventPointer(e.StreamId, e.Version - 1, e.SeqId, e.Type))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
     }

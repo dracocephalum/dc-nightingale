@@ -22,6 +22,13 @@ public interface ITenantStores
     /// </summary>
     bool SupportsAllTenants { get; }
 
+    /// <summary>
+    /// Gets how the backend compares names: stream names, categories and event types, as its reads
+    /// compare them. What the router matches in process with, so that a name matches live as it
+    /// matches on a read. Ordinal unless the backend says otherwise.
+    /// </summary>
+    IEqualityComparer<string> NameComparer { get; }
+
     /// <summary>Gets the stream store of a scope.</summary>
     /// <param name="scope">The tenant the call works in, or all tenants.</param>
     /// <returns>The store.</returns>

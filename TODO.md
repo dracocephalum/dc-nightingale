@@ -56,17 +56,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   the writer waits that long. Close by: a signal across instances, which on
   SQL Server is Service Broker or query notifications, once a measurement
   shows the interval matters there.
-- **The router reads each followed predicate separately.** An advance costs
-  the router one read per followed virtual stream and one for `$all`, each
-  evaluated by the store, on top of the pointer read for the plain streams;
-  with many categories followed in one instance that is many small seeks per
-  advance, most of them empty. One read of the range with the category and
-  type of each event, matched in process, would replace them all, but the
-  match would then be ordinal where the store's is by collation: identical
-  under the default binary collation, not under a case-insensitive one, where
-  a catch-up read and the live feed could disagree on a name. Close by:
-  deciding whether to tie in-process matching to the collation, and then the
-  one read, once the number of followed predicates demands it.
 - **An ordinal subscription polls while the sequencer is behind.** After the
   tail advances, a subscription under ordinal numbering reads the numbered
   rows, and while the sequencer has not yet passed the head it woke for, it

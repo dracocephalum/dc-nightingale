@@ -338,6 +338,19 @@ provisioned by hand alike, unless the host sets
 database that already has another collation or a server too old to have a
 UTF-8 one, with the loss described below as its consequence.
 
+One place compares names in the server rather than in the database: the
+router, which matches each new event's stream, category and type against the
+names live subscriptions follow, in process, with a comparer built from the
+database's own collation as the server reads it at every start. Under a
+binary collation, the default, that comparer is ordinal and agrees with the
+database exactly. Under a linguistic collation it is the same flags, case,
+accents, kana, width, applied by .NET's comparison rather than SQL Server's,
+whose weights differ in corners: a pair of names that one engine holds equal
+and the other does not would match on a read and not live, or the reverse.
+Names in one script and one case never meet the corner; a host that has
+chosen a linguistic collation and names that only such a collation folds
+together should know it is there. `DESIGN.md` keeps the exact alternative.
+
 A name has a longest length, which the reference does not have in the same
 way: the event store's columns hold 250 bytes of a stream name and 500 of an
 event type, in UTF-8, so 250 characters of ASCII and fewer of a script that

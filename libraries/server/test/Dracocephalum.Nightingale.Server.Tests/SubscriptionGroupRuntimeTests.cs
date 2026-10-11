@@ -501,7 +501,7 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     private SubscriptionGroupRuntime Group(string stream, long checkpoint, int consumerBuffer, Func<GroupSettings, GroupSettings>? adjust = null)
     {
         var settings = (adjust ?? (defaults => defaults))(GroupSettings.Default);
-        _router ??= new StreamRouter(_store, _tail);
+        _router ??= new StreamRouter(_store, _tail, StringComparer.Ordinal);
         var runtime = new SubscriptionGroupRuntime(_store, _tail, _router, _groups, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint));
         _consumer = runtime.Join(consumerBuffer, "one");
         return runtime;

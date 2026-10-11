@@ -28,6 +28,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="supportsAllTenants">Whether positions are coherent across tenants, which they are while the sequence is shared.</param>
 /// <param name="tails">The tail of a tenant by the id the store keeps for it: the one tail of the process while the sequence is shared, the tenant's own under a sequence per tenant.</param>
 /// <param name="appended">What every stream store pulses after an append commits, to wake the tail.</param>
+/// <param name="names">How the database compares names, as near as the process can.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger the stream stores log through.</param>
 internal sealed class PolecatTenantStores(
@@ -40,6 +41,7 @@ internal sealed class PolecatTenantStores(
     bool supportsAllTenants,
     Func<string, IStoreTail> tails,
     AppendSignal appended,
+    NameComparison names,
     TimeProvider timeProvider,
     ILogger<PolecatStreamStore> logger) : ITenantStores, IDisposable, IAsyncDisposable
 {
@@ -49,6 +51,9 @@ internal sealed class PolecatTenantStores(
 
     /// <inheritdoc/>
     public bool SupportsAllTenants => supportsAllTenants;
+
+    /// <inheritdoc/>
+    public IEqualityComparer<string> NameComparer => names.Comparer;
 
     /// <inheritdoc/>
     public IStreamStore GetStreams(TenantScope scope)

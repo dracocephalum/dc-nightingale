@@ -84,8 +84,8 @@ public sealed class VirtualStreamReaderTests
         var bounded = await _sut.ReadPointersAsync(2, 6, 2, TestContext.Current.CancellationToken);
 
         // Assert: the deleted stream's event at 4 and the other tenant's at 5 are not pointed at.
-        all.ShouldBe([new EventPointer("orders-1", 0, 1), new EventPointer("shipments-1", 0, 2), new EventPointer("orders-1", 1, 3), new EventPointer("orders-4", 0, 6), new EventPointer("orders-4", 1, 7), new EventPointer("orders-4", 2, 8)]);
-        bounded.ShouldBe([new EventPointer("shipments-1", 0, 2), new EventPointer("orders-1", 1, 3)]);
+        all.ShouldBe([new EventPointer("orders-1", 0, 1, "order_placed"), new EventPointer("shipments-1", 0, 2, "shipment_sent"), new EventPointer("orders-1", 1, 3, "order_paid"), new EventPointer("orders-4", 0, 6, "order_placed"), new EventPointer("orders-4", 1, 7, "order_paid"), new EventPointer("orders-4", 2, 8, "order_shipped")]);
+        bounded.ShouldBe([new EventPointer("shipments-1", 0, 2, "shipment_sent"), new EventPointer("orders-1", 1, 3, "order_paid")]);
     }
 
     [Fact]

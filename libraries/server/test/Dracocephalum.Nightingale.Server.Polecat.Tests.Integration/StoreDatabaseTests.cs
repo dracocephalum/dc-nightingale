@@ -34,7 +34,11 @@ public sealed class StoreDatabaseTests : IAsyncLifetime
         database.Name.ShouldBe(_name);
         before.ShouldBeFalse();
         (await database.ExistsAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
-        (await database.ReadCollationAsync(TestContext.Current.CancellationToken)).ShouldBe((collation, Utf8));
+        var described = await database.ReadCollationAsync(TestContext.Current.CancellationToken);
+        described.Name.ShouldBe(collation);
+        described.CodePage.ShouldBe(Utf8);
+        described.ComparisonStyle.ShouldBe(1 + 65536 + 131072, "ignores case, and kana and width too, which a name that says nothing of them ignores");
+        described.Lcid.ShouldBe(1033);
         (await database.CountTablesAsync(TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
@@ -50,9 +54,9 @@ public sealed class StoreDatabaseTests : IAsyncLifetime
         await TestDatabases.ExecuteAsync(_name, "CREATE TABLE dbo.somebody_elses (id int)");
 
         // Assert
-        var (collation, codePage) = await database.ReadCollationAsync(TestContext.Current.CancellationToken);
-        collation.ShouldBe(serverDefault);
-        codePage.ShouldBe(await database.ReadCodePageAsync(serverDefault, TestContext.Current.CancellationToken));
+        var described = await database.ReadCollationAsync(TestContext.Current.CancellationToken);
+        described.Name.ShouldBe(serverDefault);
+        described.CodePage.ShouldBe(await database.ReadCodePageAsync(serverDefault, TestContext.Current.CancellationToken));
         (await database.CountTablesAsync(TestContext.Current.CancellationToken)).ShouldBe(1);
     }
 

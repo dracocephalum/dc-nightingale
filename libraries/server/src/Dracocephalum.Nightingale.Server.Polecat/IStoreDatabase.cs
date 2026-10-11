@@ -31,10 +31,10 @@ internal interface IStoreDatabase
     /// <returns>A task that completes when the database exists.</returns>
     Task CreateAsync(string? collation, CancellationToken cancellationToken);
 
-    /// <summary>The collation the database has, and its code page.</summary>
+    /// <summary>The collation the database has: its name, its code page, and what its comparison ignores.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The collation's name and its code page; the code page is <see langword="null"/> when the server reports none.</returns>
-    Task<(string Collation, int? CodePage)> ReadCollationAsync(CancellationToken cancellationToken);
+    /// <returns>The collation as the server describes it.</returns>
+    Task<DatabaseCollation> ReadCollationAsync(CancellationToken cancellationToken);
 
     /// <summary>How many tables the database holds, of anyone's.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>

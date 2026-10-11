@@ -23,11 +23,11 @@ public sealed class EventSourceTests
         // landed below the mark while revision 1's landed above it; the second catch-up finds both.
         var store = A.Fake<IStreamStore>(options => options.Strict());
         var tail = new FakeTail();
-        await using var router = new StreamRouter(store, tail);
+        await using var router = new StreamRouter(store, tail, StringComparer.Ordinal);
         A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 0, 10, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record(0, 10)]));
         A.CallTo(() => store.ReadPointersAsync(1, 20, StreamRouter.PointerPage, A<CancellationToken>._))
-            .Returns([new EventPointer("orders-1", 2, 20)]);
+            .Returns([new EventPointer("orders-1", 2, 20, "order_placed")]);
         A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 2, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record(2, 20)]));
         A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 1, 10, A<CancellationToken>._))
@@ -59,7 +59,7 @@ public sealed class EventSourceTests
         var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
         var store = A.Fake<IStreamStore>();
         var tail = new FakeTail();
-        await using var router = new StreamRouter(store, tail);
+        await using var router = new StreamRouter(store, tail, StringComparer.Ordinal);
         tail.Advance(20);
         var reads = 0;
         A.CallTo(() => store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsLazily(_ => Task.FromResult(Volatile.Read(ref reads) == 0 ? 19L : 20L));
