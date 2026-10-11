@@ -8,14 +8,16 @@ using Polecat;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// The one tailer of the process. It runs the store's own high-water agent, the piece of its
-/// async daemon that finds the position up to which every event is committed, and nothing else
-/// of the daemon, because the gateway registers no projections. The agent advances only through
-/// committed, gap-free sequence numbers, persists the mark in the store's progression table, and
-/// polls on the daemon's cadence: the fast interval while the head moves, the slow one when it is
-/// quiet. Every subscription in the process waits on this one tail rather than polling the store
-/// itself. Waking the agent the moment this process appends, instead of waiting out an interval,
-/// is recorded in TODO.md.
+/// The one tailer of the process over a shared sequence. It runs the store's own high-water
+/// agent, the piece of its async daemon that finds the position up to which every event is
+/// committed, and nothing else of the daemon, because the gateway registers no projections. The
+/// agent advances only through committed, gap-free sequence numbers, persists the mark in the
+/// store's progression table, and polls on the daemon's cadence: the fast interval while the head
+/// moves, the slow one when it is quiet. Every subscription in the process waits on this one tail
+/// rather than polling the store itself. Waking the agent the moment this process appends, instead
+/// of waiting out an interval, is recorded in TODO.md. Under a sequence per tenant the store's
+/// agent follows a mark that is nobody's, and <see cref="PolecatTenantTails"/> follows one per
+/// tenant instead.
 /// </summary>
 /// <param name="store">The store.</param>
 /// <param name="events">Makes the mirror of the store's events table, over the main connection.</param>
@@ -26,47 +28,20 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
     /// <summary>How many rows past the mark one refresh looks at.</summary>
     private const int RefreshWindow = 10_000;
 
-    private readonly Lock _gate = new();
+    private readonly FollowedHead _head = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly ILogger<PolecatStoreTail> _logger = loggerFactory.CreateLogger<PolecatStoreTail>();
-    private TaskCompletionSource _advanced = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IProjectionDaemon? _daemon;
     private Task? _loop;
-    private long _head;
-    private InvalidOperationException? _failure;
     private bool _stopped;
     private bool _disposed;
 
     /// <inheritdoc/>
-    public long Head => Volatile.Read(ref _head);
+    public long Head => _head.Head;
 
     /// <inheritdoc/>
-    public async ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken)
-    {
-        while (true)
-        {
-            Task advanced;
-            lock (_gate)
-            {
-                if (_head > beyond)
-                {
-                    return _head;
-                }
-
-                // A tail that has stopped following never advances again. Whoever waits on it
-                // is told so, now and from here on, rather than left waiting for good.
-                if (_failure is not null)
-                {
-                    throw _failure;
-                }
-
-                advanced = _advanced.Task;
-            }
-
-            await advanced.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-    }
+    public ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken) => _head.WaitForAdvanceAsync(beyond, cancellationToken);
 
     /// <inheritdoc/>
     public async ValueTask<long> RefreshAsync(CancellationToken cancellationToken)
@@ -83,7 +58,7 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
             .Take(RefreshWindow)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        Publish(ContiguousPrefix.Extend(mark, following));
+        _head.Publish(ContiguousPrefix.Extend(mark, following));
         return Head;
     }
 
@@ -93,7 +68,7 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
         var daemon = await ((DocumentStore)store).BuildProjectionDaemonAsync(logger: loggerFactory.CreateLogger<PolecatStoreTail>()).ConfigureAwait(false);
         await daemon.StartAllAsync().ConfigureAwait(false);
         _daemon = daemon;
-        Publish(daemon.Tracker.HighWaterMark);
+        _head.Publish(daemon.Tracker.HighWaterMark);
         _loop = FollowAsync(
             (beyond, stopping) => daemon.Tracker.WaitForHighWaterMark(beyond + 1, quietWait).WaitAsync(stopping),
             () => daemon.Tracker.HighWaterMark,
@@ -204,7 +179,7 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
                     // reason to stop following; the mark is read and the wait begun again.
                 }
 
-                Publish(mark());
+                _head.Publish(mark());
             }
         }
         catch (Exception) when (stopping.IsCancellationRequested)
@@ -217,41 +192,10 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
         }
     }
 
-    // The schema name comes from the store's options, never from a request; it is bracketed as an
-    // identifier all the same.
-    private string EventsTable =>
-        $"[{store.Options.DatabaseSchemaName.Replace("]", "]]", StringComparison.Ordinal)}].[pc_events]";
-
-    private void Publish(long mark)
-    {
-        TaskCompletionSource? advanced = null;
-        lock (_gate)
-        {
-            if (mark > _head)
-            {
-                Volatile.Write(ref _head, mark);
-                advanced = _advanced;
-                _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
-        }
-
-        advanced?.TrySetResult();
-    }
-
     private void Fail(Exception exception)
     {
         LogStoppedFollowing(exception);
-        var failure = new InvalidOperationException("The server has stopped following the store's head, so nothing appended from now on is delivered live or numbered. The cause is in the inner exception and in the server's log; the server needs a restart.", exception);
-        TaskCompletionSource advanced;
-        lock (_gate)
-        {
-            _failure = failure;
-            advanced = _advanced;
-        }
-
-        // Observed here, so that a tail nobody happened to be waiting on leaves no unobserved fault.
-        advanced.TrySetException(failure);
-        _ = advanced.Task.Exception;
+        _head.Fail(new InvalidOperationException("The server has stopped following the store's head, so nothing appended from now on is delivered live or numbered. The cause is in the inner exception and in the server's log; the server needs a restart.", exception));
     }
 
     [LoggerMessage(Level = LogLevel.Critical, Message = "The tail has stopped following the store's head without being stopped. Live delivery and ordinal numbering have ended; every call waiting on them fails with this cause. The server needs a restart.")]

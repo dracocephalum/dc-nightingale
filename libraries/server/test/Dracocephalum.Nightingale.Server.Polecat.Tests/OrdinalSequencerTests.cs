@@ -35,7 +35,7 @@ public sealed class OrdinalSequencerTests
                 askedTwice.TrySetResult();
                 return Task.FromResult<LeaseHolder?>(new LeaseHolder("another-instance", null));
             });
-        using var sut = new OrdinalSequencer(leases, A.Fake<IStoreTail>(), new SubscriptionGroupRegistry(), "Server=example;Database=nightingale", "dbo", "nightingale", time, NullLogger<OrdinalSequencer>.Instance);
+        using var sut = new OrdinalSequencer(leases, new SharedSequence(A.Fake<IStoreTail>()), new SubscriptionGroupRegistry(), "Server=example;Database=nightingale", "dbo", "nightingale", time, NullLogger<OrdinalSequencer>.Instance);
 
         // Act: the loop waits out the interval after the failure, then asks again.
         await sut.StartAsync(TestContext.Current.CancellationToken);

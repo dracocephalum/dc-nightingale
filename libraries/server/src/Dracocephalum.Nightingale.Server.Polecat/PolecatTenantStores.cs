@@ -26,6 +26,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned here, or <see langword="null"/>.</param>
 /// <param name="contexts">Makes the gateway's own context.</param>
 /// <param name="supportsAllTenants">Whether positions are coherent across tenants, which they are while the sequence is shared.</param>
+/// <param name="tails">The tail of a tenant by the id the store keeps for it: the one tail of the process while the sequence is shared, the tenant's own under a sequence per tenant.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger the stream stores log through.</param>
 internal sealed class PolecatTenantStores(
@@ -36,12 +37,13 @@ internal sealed class PolecatTenantStores(
     IDocumentStore? readOnlyStore,
     IDbContextFactory<NightingaleDbContext> contexts,
     bool supportsAllTenants,
+    Func<string, IStoreTail> tails,
     TimeProvider timeProvider,
     ILogger<PolecatStreamStore> logger) : ITenantStores, IDisposable, IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, PolecatStreamStore> _streams = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SubscriptionGroupStore> _groups = new(StringComparer.Ordinal);
-    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStore, contexts, timeProvider, logger));
+    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStore, contexts, null, timeProvider, logger));
 
     /// <inheritdoc/>
     public bool SupportsAllTenants => supportsAllTenants;
@@ -60,7 +62,8 @@ internal sealed class PolecatTenantStores(
             return _allTenants.Value;
         }
 
-        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStore, contexts, timeProvider, logger));
+        // Under a sequence per tenant, the sequencer keeps a progress row per tenant.
+        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStore, contexts, supportsAllTenants ? null : id, timeProvider, logger));
     }
 
     /// <inheritdoc/>
@@ -73,6 +76,19 @@ internal sealed class PolecatTenantStores(
         }
 
         return _groups.GetOrAdd(GetTenantId(scope), id => new SubscriptionGroupStore(contexts, id, timeProvider));
+    }
+
+    /// <inheritdoc/>
+    public IStoreTail GetTail(TenantScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.IsWildcard && !supportsAllTenants)
+        {
+            throw new ArgumentException("The store numbers each tenant on its own, so no one head spans all tenants.", nameof(scope));
+        }
+
+        // Under the wildcard the sequence is shared, and every tenant's tail is the one tail.
+        return tails(GetTenantId(scope));
     }
 
     /// <inheritdoc/>

@@ -110,9 +110,9 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     /// any other collation a character outside the code page is stored as a question mark, so
     /// two names in another script become one. The server refuses to create a database with
     /// another, and refuses a database provisioned by hand that has another. A database
-    /// provisioned by hand keeps the collation it has, and the setting must match it. Ordinals fit partitioning by tenant by
-    /// construction, and are refused with it only until the sequencer follows a high-water mark
-    /// per tenant, which the multi-tenancy work brings.
+    /// provisioned by hand keeps the collation it has, and the setting must match it. Ordinals
+    /// fit partitioning by tenant by construction: the sequencer then numbers each tenant's
+    /// sequence behind that tenant's own high-water mark.
     /// </summary>
     public sealed partial class StoreOptions : StoreSettings
     {
@@ -149,12 +149,6 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
             {
                 throw new InvalidOperationException(
                     $"Nightingale:Store:Partitioning {Partitioning} is not one of {string.Join(", ", Enum.GetNames<PartitioningMode>())}.");
-            }
-
-            if (AssignOrdinals && Partitioning == PartitioningMode.Tenant)
-            {
-                throw new InvalidOperationException(
-                    "Nightingale:Store:AssignOrdinals cannot be combined with Nightingale:Store:Partitioning Tenant yet: the sequencer follows one high-water mark, and a sequence per tenant has one per tenant.");
             }
 
             if (Collation is not null && !CollationNameRegex().IsMatch(Collation))

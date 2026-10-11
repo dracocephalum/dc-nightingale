@@ -497,9 +497,10 @@ proxies carry it unchanged; what is behind it differs.
 
 **Reference:** no tenancy.
 
-**Nightingale:** the store supports tenants in one database, and the gateway
-reserves a per-call tenant header. Single-tenant until the design in
-`PENDING.md` is done. Partitioning the events table by tenant is an
-initialization choice, `Nightingale:Store:Partitioning` set to `Tenant`; under it each
-tenant numbers its events from its own sequence, so positions are per tenant
-and the wildcard read across tenants is refused.
+**Nightingale:** tenants share one database, every data call works in the
+tenant it was authorized for, and the wildcard spans tenants on reads of
+`$all` and the virtual streams by position (`DESIGN.md`, seam 9). Partitioning
+the events table by tenant is an initialization choice,
+`Nightingale:Store:Partitioning` set to `Tenant`; under it each tenant numbers
+its events from its own sequence, so positions, the high-water mark and the
+ordinals are per tenant, and the wildcard read across tenants is refused.

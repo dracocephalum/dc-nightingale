@@ -30,16 +30,13 @@ public sealed class StoreSettingsTests
     }
 
     [Fact]
-    public void Validate_WhenOrdinalsMeetTenantPartitioning_ShouldRefuse()
+    public void Validate_WhenOrdinalsMeetTenantPartitioning_ShouldAccept()
     {
-        // Arrange: ordinals number one global sequence; a sequence per tenant has none.
+        // Arrange: the sequencer numbers each tenant's sequence behind that tenant's own mark.
         var sut = new NightingaleOptions.StoreOptions { AssignOrdinals = true, Partitioning = PartitioningMode.Tenant };
 
-        // Act
-        var exception = Should.Throw<InvalidOperationException>(sut.Validate);
-
-        // Assert
-        exception.Message.ShouldContain("cannot be combined");
+        // Act & Assert
+        Should.NotThrow(sut.Validate);
     }
 
     [Theory]

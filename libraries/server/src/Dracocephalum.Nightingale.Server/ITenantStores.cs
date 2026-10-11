@@ -3,13 +3,15 @@ using Dracocephalum.Nightingale.Server.Auth;
 namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
-/// The port a call resolves its stores through: the stream store and the group store of the
-/// tenant the call works in, which <see cref="Authorizer"/> decided. A backend keeps one of each
-/// per tenant it has served, over the one database and the one sequence, so a store is cheap to
-/// hand out and every read and write within it is the tenant's. The wildcard scope resolves to a
-/// stream store over all tenants, for <c>$all</c> and the virtual streams on a read; a stream
-/// name is per tenant and a group is per tenant, so neither is served under it. A host without
-/// a backend registers <see cref="TenantStores"/>, which hands every scope the one store it has.
+/// The port a call resolves its stores through: the stream store, the group store and the tail
+/// of the tenant the call works in, which <see cref="Authorizer"/> decided. A backend keeps one
+/// of each per tenant it has served, over the one database, so a store is cheap to hand out and
+/// every read and write within it is the tenant's. The tail is the one tail of the process while
+/// the sequence is shared, and the tenant's own under a sequence per tenant, where each tenant
+/// has a high-water mark of its own. The wildcard scope resolves to a stream store over all
+/// tenants, for <c>$all</c> and the virtual streams on a read; a stream name is per tenant and a
+/// group is per tenant, so neither is served under it. A host without a backend registers
+/// <see cref="TenantStores"/>, which hands every scope the one store and the one tail it has.
 /// </summary>
 public interface ITenantStores
 {
@@ -30,4 +32,10 @@ public interface ITenantStores
     /// <returns>The store.</returns>
     /// <exception cref="ArgumentException">The scope is the wildcard; groups are per tenant.</exception>
     ISubscriptionGroupStore GetGroups(TenantScope scope);
+
+    /// <summary>Gets the tail a scope's reads and subscriptions follow: the head of the sequence the scope's positions are numbered in.</summary>
+    /// <param name="scope">The tenant the call works in, or all tenants.</param>
+    /// <returns>The tail.</returns>
+    /// <exception cref="ArgumentException">The scope is the wildcard and the store numbers each tenant on its own, so no one head spans them.</exception>
+    IStoreTail GetTail(TenantScope scope);
 }
