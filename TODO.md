@@ -47,7 +47,8 @@ undecided adds it here rather than mentioning it once in a conversation.
   session; an append that lands between the two is archived with the rest,
   so the outcome is still a deleted stream, but the check passed on a
   revision that was no longer current. Close by: a conditional archive
-  statement that carries the expected revision, if the store grows one.
+  statement that carries the expected revision, which is asked for in
+  `UPSTREAM.md`.
 - **Live delivery waits out a polling interval.** The tailer runs the store's
   high-water agent, which polls on the store's cadence, so an event reaches a
   live subscriber up to a quarter of a second after its append. The store's
@@ -109,12 +110,3 @@ undecided adds it here rather than mentioning it once in a conversation.
   silences it; an operator has no record of what a startup applied. Close by:
   routing the migration logger to the host's logging, at warning level for
   changes, once the database class can reach a logger.
-- **Upstream requests to the store's maintainers.** Honour a caller-supplied
-  event type name on a prebuilt event; expose Weasel's ignored-index list or an
-  add-index call for the events table, or a first-class category column; note
-  that the event-store table ensurer bypasses the tenancy database; guard the
-  high-water mark's update so a lagging detector cannot lower it (several
-  gateway instances each run one); write an append in as many commands as
-  it needs inside its one transaction, since one command stops at the
-  database's 2100 parameters, 190 events. Close by: issues filed, links
-  recorded here.
