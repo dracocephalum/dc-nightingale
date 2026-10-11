@@ -8,12 +8,47 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Server.Tests;
 
 /// <summary>
-/// The feed a persistent-subscription group reads from, under ordinal numbering: what it does
-/// when the sequencer numbers an event at the very moment the feed is looking.
+/// The feed a persistent-subscription group reads from: on a plain stream, what it does with what
+/// the router brings out of order; under ordinal numbering, what it does when the sequencer
+/// numbers an event at the very moment the feed is looking.
 /// </summary>
 public sealed class EventSourceTests
 {
     private static readonly DateTimeOffset Created = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task FollowStream_WhenTheRouterBringsAnEventAheadOfTheNext_ShouldReadTheStreamAgainFromTheNextAndDeliverInOrder()
+    {
+        // Arrange: the catch-up finds revision 0; the router then brings revision 2, whose number
+        // landed below the mark while revision 1's landed above it; the second catch-up finds both.
+        var store = A.Fake<IStreamStore>(options => options.Strict());
+        var tail = new FakeTail();
+        await using var router = new StreamRouter(store, tail);
+        A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 0, 10, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record(0, 10)]));
+        A.CallTo(() => store.ReadPointersAsync(1, 20, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("orders-1", 2, 20)]);
+        A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 2, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record(2, 20)]));
+        A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 1, 10, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record(1, 22), Record(2, 20)]));
+        var feed = EventSource.FollowAsync(store, tail, router, "orders-1", 0, 10, Numbering.Global, TimeProvider.System, TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+
+        // Act
+        var delivered = new List<long>();
+        await feed.MoveNextAsync();
+        delivered.Add(feed.Current.Revision);
+        tail.Advance(20);
+        while (delivered.Count < 3 && await feed.MoveNextAsync())
+        {
+            delivered.Add(feed.Current.Revision);
+        }
+
+        await feed.DisposeAsync();
+
+        // Assert
+        delivered.ShouldBe([0, 1, 2]);
+    }
 
     [Fact]
     public async Task FollowByOrdinal_WhenAnEventIsNumberedBetweenTheReadAndTheWait_ShouldStillDeliverIt()
@@ -24,6 +59,7 @@ public sealed class EventSourceTests
         var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
         var store = A.Fake<IStreamStore>();
         var tail = new FakeTail();
+        await using var router = new StreamRouter(store, tail);
         tail.Advance(20);
         var reads = 0;
         A.CallTo(() => store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsLazily(_ => Task.FromResult(Volatile.Read(ref reads) == 0 ? 19L : 20L));
@@ -39,7 +75,7 @@ public sealed class EventSourceTests
         // the test holds, so the test moves the clock and waits for nothing. Six intervals are
         // five more than the feed needs; a feed that still has not delivered is waiting on
         // something no clock will bring, and is abandoned.
-        var feed = EventSource.FollowAsync(store, tail, "$ce-orders", 8, 10, Numbering.Ordinal, time, abandon.Token).GetAsyncEnumerator(abandon.Token);
+        var feed = EventSource.FollowAsync(store, tail, router, "$ce-orders", 8, 10, Numbering.Ordinal, time, abandon.Token).GetAsyncEnumerator(abandon.Token);
         var next = feed.MoveNextAsync().AsTask();
         for (var interval = 0; interval < 6 && !next.IsCompleted; interval++)
         {
@@ -55,4 +91,7 @@ public sealed class EventSourceTests
         delivered.ShouldNotBeNull().Ordinal.ShouldBe(8);
         delivered.Position.ShouldBe(20);
     }
+
+    private static EventRecord Record(long revision, long position) =>
+        new(Guid.NewGuid(), "orders-1", revision, position, "order_placed", Created, Encoding.UTF8.GetBytes("{}"), new JsonObject());
 }

@@ -14,7 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 /// then how several consumers share the events under each strategy, and what a consumer's
 /// leaving does to what it held.
 /// </summary>
-public sealed class SubscriptionGroupRuntimeTests
+public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
@@ -22,13 +22,17 @@ public sealed class SubscriptionGroupRuntimeTests
     private readonly IStreamStore _store = A.Fake<IStreamStore>(options => options.Strict());
     private readonly ISubscriptionGroupStore _groups = A.Fake<ISubscriptionGroupStore>();
     private readonly FakeTail _tail = new();
+    private readonly StreamRouter _router;
     private readonly FakeTimeProvider _time = new(Now);
     private SubscriptionConsumer? _consumer;
 
     public SubscriptionGroupRuntimeTests()
     {
+        _router = new StreamRouter(_store, _tail);
         A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<SubscriptionOutboxMessage>());
     }
+
+    public ValueTask DisposeAsync() => _router.DisposeAsync();
 
     [Fact]
     public async Task Delivery_ShouldStartAtTheCheckpointAndWriteItOnceEnoughIsAcknowledged()
@@ -492,7 +496,7 @@ public sealed class SubscriptionGroupRuntimeTests
     private SubscriptionGroupRuntime Group(string stream, long checkpoint, int consumerBuffer, Func<GroupSettings, GroupSettings>? adjust = null)
     {
         var settings = (adjust ?? (defaults => defaults))(GroupSettings.Default);
-        var runtime = new SubscriptionGroupRuntime(_store, _tail, _groups, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint));
+        var runtime = new SubscriptionGroupRuntime(_store, _tail, _router, _groups, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint));
         _consumer = runtime.Join(consumerBuffer, "one");
         return runtime;
     }

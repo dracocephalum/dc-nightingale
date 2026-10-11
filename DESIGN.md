@@ -263,8 +263,19 @@ own high-water agent, the part of its async daemon that finds that mark, and
 publishes every advance; each subscription waits on it instead of polling the
 store, so a thousand subscribers cost the store one poll per interval. A
 subscription confirms with the head, catches up in pages, says so, then
-delivers whatever each advance brings: a stream subscription re-reads its own
-stream from where it left off, an `$all` subscription reads the advanced range.
+delivers whatever each advance brings: an `$all` subscription reads the
+advanced range; a subscription to a plain stream takes its events from
+`StreamRouter`, one per tenant's store, which reads where the advanced range's
+events are once, their stream and revision without their bodies, and then the
+events of each followed stream that moved, so an advance costs reads in the
+number of events, not of subscriptions. A subscription follows the router
+before its catch-up reads, so an event the reads do not see yet is one the
+router brings, and delivers only in revision order, reading its stream again
+when the router brings something ahead of its next revision; a follower that
+leaves too much unread lapses and reads its stream itself from where it
+stands, the reference server's own answer to a full live buffer. One router
+per tenant is the one shape that fits both tenant modes: a stream name is per
+tenant, and under a sequence per tenant so is the tail.
 Where now matters, a subscription from the end or a bounded read of `$all`,
 the tail refreshes itself first with one query through the committed rows that
 follow the mark without a gap, so an append that has returned is never on the
@@ -545,8 +556,8 @@ transports at once and of a client that can fall back between them.
 
 - `*.Tests` projects are unit tests and need nothing running: the service
   against a strict fake of the port and a tail a test moves by hand, the
-  per-tenant poller against positions a test writes, the append signal on a
-  clock a test moves, the client against a
+  router against the same, the per-tenant poller against positions a test
+  writes, the append signal on a clock a test moves, the client against a
   scripted call, the conversions, the marker comparison, the group store and
   the mirror's queries on the in-memory provider, and the model against the
   schema feature.

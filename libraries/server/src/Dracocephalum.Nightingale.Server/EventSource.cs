@@ -23,6 +23,7 @@ internal static class EventSource
     /// <summary>Follows a stream, <c>$all</c> or a virtual stream from a position, inclusive, forever.</summary>
     /// <param name="store">The store.</param>
     /// <param name="tail">The tail.</param>
+    /// <param name="router">The router a plain stream's events come through once the feed has caught up.</param>
     /// <param name="stream">The stream name.</param>
     /// <param name="from">Where to begin, inclusive: a revision for a stream, a position otherwise, an ordinal under ordinal numbering.</param>
     /// <param name="pageSize">How many events one store call asks for.</param>
@@ -30,7 +31,7 @@ internal static class EventSource
     /// <param name="timeProvider">The clock an ordinal feed paces its looks with.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events, in order, without end.</returns>
-    public static IAsyncEnumerable<EventRecord> FollowAsync(IStreamStore store, IStoreTail tail, string stream, long from, int pageSize, Numbering numbering, TimeProvider timeProvider, CancellationToken cancellationToken)
+    public static IAsyncEnumerable<EventRecord> FollowAsync(IStreamStore store, IStoreTail tail, StreamRouter router, string stream, long from, int pageSize, Numbering numbering, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         if (stream == StreamNames.All)
         {
@@ -44,7 +45,7 @@ internal static class EventSource
                 : FollowAll(store, tail, virtualStream, from, pageSize, cancellationToken);
         }
 
-        return FollowStream(store, tail, stream, from, pageSize, cancellationToken);
+        return FollowStream(store, router, stream, from, pageSize, cancellationToken);
     }
 
     /// <summary>
@@ -77,27 +78,57 @@ internal static class EventSource
         return observed;
     }
 
-    private static async IAsyncEnumerable<EventRecord> FollowStream(IStreamStore store, IStoreTail tail, string stream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
+    /// <summary>
+    /// A plain stream: followed at the router before the catch-up reads, so an event the reads do
+    /// not see yet is one the router brings; then what the router brings, in revision order only.
+    /// What is behind the next revision was read already; what is ahead of it means the stream
+    /// is read again from the next revision, as it is when the follower has lapsed.
+    /// </summary>
+    private static async IAsyncEnumerable<EventRecord> FollowStream(IStreamStore store, StreamRouter router, string stream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         while (true)
         {
-            var observed = tail.Head;
-            var page = await store.ReadAsync(stream, Direction.Forwards, next, pageSize, cancellationToken).ConfigureAwait(false);
-            if (page is not null && page.Events.Count > 0)
+            using var following = router.Follow(stream);
+            while (true)
             {
+                var page = await store.ReadAsync(stream, Direction.Forwards, next, pageSize, cancellationToken).ConfigureAwait(false);
+                if (page is null || page.Events.Count == 0)
+                {
+                    break;
+                }
+
                 foreach (var record in page.Events)
                 {
                     yield return record;
                 }
 
                 next = page.Events[^1].Revision + 1;
-                if (page.Events.Count == pageSize)
+                if (page.Events.Count < pageSize)
                 {
-                    continue;
+                    break;
                 }
             }
 
-            await tail.WaitForAdvanceAsync(observed, cancellationToken).ConfigureAwait(false);
+            var ahead = false;
+            while (!ahead && await following.Events.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (following.Events.TryRead(out var record))
+                {
+                    if (record.Revision < next)
+                    {
+                        continue;
+                    }
+
+                    if (record.Revision > next)
+                    {
+                        ahead = true;
+                        break;
+                    }
+
+                    yield return record;
+                    next = record.Revision + 1;
+                }
+            }
         }
     }
 

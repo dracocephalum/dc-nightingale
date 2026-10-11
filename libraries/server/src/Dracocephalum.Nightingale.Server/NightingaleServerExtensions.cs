@@ -28,6 +28,7 @@ public static class NightingaleServerExtensions
         services.AddNightingaleGrpc();
         services.TryAddSingleton(provider => new Authorizer(provider.GetService<TenantDirectory>()));
         services.TryAddSingleton<ITenantStores>(provider => new TenantStores(provider.GetRequiredService<IStreamStore>(), provider.GetService<ISubscriptionGroupStore>(), provider.GetService<IStoreTail>()));
+        services.TryAddSingleton(provider => new StreamRouters(provider.GetRequiredService<ITenantStores>()));
         services.TryAddSingleton<CredentialManager>();
         services.TryAddSingleton<TenantManager>();
         services.TryAddSingleton(TimeProvider.System);
