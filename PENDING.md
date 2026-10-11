@@ -108,18 +108,23 @@ shape, decided so nothing here is re-derived:
   drop the proto run the other way and are not candidates: the proto is the
   contract.
 
-## The reference event store's own protocol, as a second gRPC adapter
+## KurrentDB's own protocol, as a second gRPC adapter
 
 Our own proto in the same shape is settled; this is an add-on, not a change of
-direction. The reference store's official clients would reach this server
-unmodified if it also spoke their protocol, and the ports-and-adapters shape
-makes that a sibling of `Protocols.Grpc` on the ladder above, not a rewrite:
-the reference's proto files, Apache-2.0 in its .NET client's repository under
+direction. KurrentDB's official clients would reach this server unmodified if
+it also spoke their protocol, and the ports-and-adapters shape makes that a
+sibling of `Protocols.Grpc` on the ladder above, not a rewrite: the proto
+files, Apache-2.0 in the KurrentDB .NET client's repository under
 `kurrentdb/protocol/v1` and `v2`, generate service bases that
-`Protocols.Grpc.Reference` and `Server.Grpc.Reference` implement over the
+`Protocols.Grpc.KurrentDB` and `Server.Grpc.KurrentDB` implement over the
 same managers and the same `Authorizer`, and gRPC routes by full service
-name, so both contracts sit on one Kestrel port. What it takes, read from the
-client's source at its 1.3.0 tag, so nothing here is re-derived:
+name, so both contracts sit on one Kestrel port. The copied proto files keep
+their license header and copyright, `NOTICE` names them, and the adapter
+says "compatible with", never more: the name is Kurrent, Inc.'s trademark,
+and the server is theirs; only the client and its protocol are Apache-2.0,
+and nothing of the server's source, which is under its own license, is read
+into this repository. What it takes, read from the client's source at its
+1.3.0 tag, so nothing here is re-derived:
 
 - **Services.** `event_store.client.streams.Streams`,
   `...persistent_subscriptions.PersistentSubscriptions`, `...gossip.Gossip`,
@@ -148,17 +153,15 @@ client's source at its 1.3.0 tag, so nothing here is re-derived:
   projections, operations such as scavenge, and user management beyond what
   the credentials table covers. The client refuses what the feature table
   does not advertise rather than degrading.
-- **Tenancy.** The reference client knows no tenant: a host binds the adapter
+- **Tenancy.** The KurrentDB client knows no tenant: a host binds the adapter
   to one tenant, or a credential carries its tenant.
 - **Testing.** The official client package against this server, the client's
   checkout as the reference for behaviour; its own test suite is the
   conformance suite where it can run against another server.
 - **Size.** Streams, reads and catch-up subscriptions are a mapping, since
   the shapes were mirrored from the start; persistent subscriptions, a duplex
-  of acknowledgements with the reference's settings, are the largest part;
-  features, gossip and errors are small. The product's name appears in the
-  proto package identifiers, which the repository otherwise keeps out; that
-  exception is decided when the adapter is built.
+  of acknowledgements with KurrentDB's settings, are the largest part;
+  features, gossip and errors are small.
 
 ## Stream metadata
 
