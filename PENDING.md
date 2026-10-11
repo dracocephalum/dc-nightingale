@@ -290,7 +290,7 @@ tables itself to get round it:
 - **Paging on the server.** The append is still received whole, then written
   in as many commands as it needs inside its one transaction, so one atomic
   append can carry more than one command holds. It needs the store to write
-  an append that way; that is an upstream request in `TODO.md`. Memory still
+  an append that way; that is a request in `UPSTREAM.md`. Memory still
   grows with the append, and the transaction with it, so a limit in bytes
   would come with it.
 - **Streaming.** Written as it arrives, so memory stays flat. The transaction

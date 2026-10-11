@@ -37,9 +37,9 @@ map of categories.
 `AGENTS.md` is the index. The rules under `agentics/rules/` are the toolkit's
 standard for code, tests, dependencies, pull requests, and review — for people
 as much as for agents — and a sync replaces that folder whole, so an edit
-there is lost. This repository adds no rules of its own yet; its two documents
-beyond the toolkit's, `VARIANCES.md` and `PENDING.md`, have their rows in
-`AGENTS.md` outside the generated block. The day a rule of its own exists, it
+there is lost. This repository adds no rules of its own yet; its documents
+beyond the toolkit's, `VARIANCES.md`, `PENDING.md` and `UPSTREAM.md`, have
+their rows in `AGENTS.md` outside the generated block. The day a rule of its own exists, it
 goes under `docs/rules/` with an index there, as `agentics/rules/layout.md`
 says.
 
