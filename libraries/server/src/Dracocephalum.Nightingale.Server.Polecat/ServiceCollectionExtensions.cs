@@ -80,10 +80,24 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddNightingaleOptions(options);
-        services.AddPolecat((StoreOptions store) =>
+
+        // The signal every append pulses, which whichever tail the host runs waits on: the store's
+        // high-water agent takes it as the daemon's wake-up, the per-tenant poller in place of its
+        // interval. The polling times stand as the store sets them unless a test lengthens them.
+        services.AddSingleton(provider => new AppendSignal(provider.GetService<TimeProvider>() ?? TimeProvider.System));
+        services.AddPolecat(provider =>
         {
+            var store = new StoreOptions();
             Configure(store, connectionString, options);
             store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals), connectionString);
+            store.Projections.Wakeup = provider.GetRequiredService<AppendSignal>();
+            if (options.TailPollingInterval is { } interval)
+            {
+                store.Projections.FastPollingTime = interval;
+                store.Projections.SlowPollingTime = interval;
+            }
+
+            return store;
         }).UseLightweightSessions();
 
         // The second store exists only for bounded reads of plain streams on the read-only
@@ -104,8 +118,11 @@ public static class ServiceCollectionExtensions
         {
             services.AddSingleton(provider => new PolecatTenantTails(
                 new EventRowPositions(provider.GetRequiredService<IDbContextFactory<EventsDbContext>>()),
+                provider.GetRequiredService<AppendSignal>(),
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
-                provider.GetService<ILogger<PolecatTenantTails>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatTenantTails>.Instance));
+                provider.GetService<ILogger<PolecatTenantTails>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatTenantTails>.Instance,
+                options.TailPollingInterval,
+                options.TailPollingInterval));
             services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatTenantTails>().For(JasperFx.StorageConstants.DefaultTenantId));
         }
         else
@@ -127,6 +144,7 @@ public static class ServiceCollectionExtensions
             partitionedByTenant
                 ? provider.GetRequiredService<PolecatTenantTails>().For
                 : _ => provider.GetRequiredService<IStoreTail>(),
+            provider.GetRequiredService<AppendSignal>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
         services.AddSingleton<ITenantStores>(provider => provider.GetRequiredService<PolecatTenantStores>());

@@ -20,11 +20,13 @@ public sealed class PolecatTenantTailsTests : IAsyncDisposable
 
     private readonly FakePositions _positions = new();
     private readonly FakeTimeProvider _time = new(Now);
+    private readonly AppendSignal _appended;
     private readonly PolecatTenantTails _sut;
 
     public PolecatTenantTailsTests()
     {
-        _sut = new PolecatTenantTails(_positions, _time, NullLogger<PolecatTenantTails>.Instance);
+        _appended = new AppendSignal(_time);
+        _sut = new PolecatTenantTails(_positions, _appended, _time, NullLogger<PolecatTenantTails>.Instance);
     }
 
     public ValueTask DisposeAsync() => _sut.DisposeAsync();
@@ -178,6 +180,28 @@ public sealed class PolecatTenantTailsTests : IAsyncDisposable
         // Assert
         (await waiting).ShouldBe(1);
         _positions.CeilingReads.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public async Task Poll_WhenAnAppendIsSignalled_ShouldLookAtOnceInsteadOfWaitingOutTheInterval()
+    {
+        // Arrange: the loop has looked once at a tenant with nothing in it and is waiting out
+        // the slow interval, on a clock that never moves.
+        var a = _sut.For("a");
+        await _sut.StartAsync(TestContext.Current.CancellationToken);
+        while (_positions.CeilingReads == 0)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        // Act: an append commits and says so.
+        _positions.Append("a", 1);
+        _appended.Pulse();
+        var head = await a.WaitForAdvanceAsync(0, TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await _sut.StopAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        head.ShouldBe(1);
     }
 
     /// <summary>The positions, by tenant, with when each was appended; what the poller reads, written by the test.</summary>

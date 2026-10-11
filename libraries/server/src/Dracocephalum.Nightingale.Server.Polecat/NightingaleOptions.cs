@@ -60,6 +60,15 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     internal TimeSpan TailQuietWait { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
+    /// Gets or sets how long the tail waits between looks at the store, whether or not the last
+    /// look found movement, in place of the store's own fast and slow polling times. Unset, the
+    /// store's times stand, for whichever tail the host runs. Not bound from configuration, like
+    /// <see cref="TailQuietWait"/>: it is here so that a test can make the interval far longer
+    /// than it waits, and so prove that an event reached the tail because the append woke it.
+    /// </summary>
+    internal TimeSpan? TailPollingInterval { get; set; }
+
+    /// <summary>
     /// Gets or sets how long the sequencer's lease lasts without renewal, after which another
     /// instance takes over the numbering. The holder renews, and a bystander asks again, at a
     /// third of it. Not bound from configuration, like <see cref="TailQuietWait"/>: it is here
