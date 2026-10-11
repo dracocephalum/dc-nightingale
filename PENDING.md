@@ -108,6 +108,58 @@ shape, decided so nothing here is re-derived:
   drop the proto run the other way and are not candidates: the proto is the
   contract.
 
+## The reference event store's own protocol, as a second gRPC adapter
+
+Our own proto in the same shape is settled; this is an add-on, not a change of
+direction. The reference store's official clients would reach this server
+unmodified if it also spoke their protocol, and the ports-and-adapters shape
+makes that a sibling of `Protocols.Grpc` on the ladder above, not a rewrite:
+the reference's proto files, Apache-2.0 in its .NET client's repository under
+`kurrentdb/protocol/v1` and `v2`, generate service bases that
+`Protocols.Grpc.Reference` and `Server.Grpc.Reference` implement over the
+same managers and the same `Authorizer`, and gRPC routes by full service
+name, so both contracts sit on one Kestrel port. What it takes, read from the
+client's source at its 1.3.0 tag, so nothing here is re-derived:
+
+- **Services.** `event_store.client.streams.Streams`,
+  `...persistent_subscriptions.PersistentSubscriptions`, `...gossip.Gossip`,
+  `...server_features.ServerFeatures`, `...operations.Operations`,
+  `...users.Users`, `...projections.Projections`, and the v2
+  `kurrentdb.protocol.v2.streams.StreamsService`. A connection string with
+  no gossip seeds never calls `Gossip`. `ServerFeatures.GetSupportedMethods`
+  is called at connect, and an `Unimplemented` answer means "an old server",
+  every optional feature off; the adapter advertises exactly what it carries
+  (batch append, persistent subscriptions to `$all`, get-info,
+  replay-parked, list, multi-stream append) and the client adapts.
+- **Errors.** Trailers, key `exception`, with `wrong-expected-version`,
+  `stream-not-found`, `stream-deleted`, `access-denied`,
+  `maximum-append-size-exceeded`, and `not-leader` with
+  `leader-endpoint-host` and `-port`: a one-to-one map from
+  `NightingaleErrors`, the redirect to a group's owner included. An append's
+  wrong expected version is a `oneof` in the response, not a status.
+- **Shapes.** UUIDs as two 64-bit halves or a string, the byte order to be
+  matched exactly; positions as commit-and-prepare pairs, both our one
+  sequence; revisions 0-based; a metadata map carrying `type`,
+  `content-type` and `created` in ticks; Basic credentials in
+  `authorization`, as ours; `connection-name` and `requires-leader` headers
+  read and ignored.
+- **Not carried, answered `Unimplemented` until the core has them:** filters
+  on `$all`, stream metadata (the `$$` streams), multi-stream append,
+  projections, operations such as scavenge, and user management beyond what
+  the credentials table covers. The client refuses what the feature table
+  does not advertise rather than degrading.
+- **Tenancy.** The reference client knows no tenant: a host binds the adapter
+  to one tenant, or a credential carries its tenant.
+- **Testing.** The official client package against this server, the client's
+  checkout as the reference for behaviour; its own test suite is the
+  conformance suite where it can run against another server.
+- **Size.** Streams, reads and catch-up subscriptions are a mapping, since
+  the shapes were mirrored from the start; persistent subscriptions, a duplex
+  of acknowledgements with the reference's settings, are the largest part;
+  features, gossip and errors are small. The product's name appears in the
+  proto package identifiers, which the repository otherwise keeps out; that
+  exception is decided when the adapter is built.
+
 ## Stream metadata
 
 `$maxAge`, `$maxCount` and `$tb` (truncate before) stored as one document per

@@ -82,9 +82,3 @@ undecided adds it here rather than mentioning it once in a conversation.
   commit-time check, and it would be a fourth value of
   `Nightingale:Store:Partitioning`, exclusive with the others like them. Close by: deciding when sizing demands it; see
   `PENDING.md`.
-- **Protocol compatibility or API compatibility.** Speaking the reference event store's
-  own protocol so its official client works unmodified means implementing server
-  features, gossip, the trailer error model and its UUID byte order exactly.
-  Default: our own proto in the same shape, with our own client. Close by:
-  confirming the default before the proto is written; it changes message
-  shapes.
