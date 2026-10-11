@@ -24,9 +24,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="database">The database: whether it is there, making it, its collation.</param>
 /// <param name="schema">Reports what the database needs, and applies it.</param>
 /// <param name="options">The host's options.</param>
+/// <param name="names">Told the database's collation, so that names are matched in process as the database compares them.</param>
 /// <param name="timeProvider">The clock the store's creation is stamped with.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSchema schema, NightingaleOptions options, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
+internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSchema schema, NightingaleOptions options, NameComparison names, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
 {
     /// <summary>The code page SQL Server reports for a UTF-8 collation.</summary>
     private const int Utf8CodePage = 65001;
@@ -134,10 +135,12 @@ internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSc
         await database.CreateAsync(collation, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>The database's collation, which must be a UTF-8 one whoever created the database.</summary>
+    /// <summary>The database's collation, which must be a UTF-8 one whoever created the database; whatever it is, names are compared by it from here on.</summary>
     private async Task<string> RequireUtf8CollationAsync(string name, CancellationToken cancellationToken)
     {
-        var (collation, codePage) = await database.ReadCollationAsync(cancellationToken).ConfigureAwait(false);
+        var described = await database.ReadCollationAsync(cancellationToken).ConfigureAwait(false);
+        names.Adopt(described);
+        var (collation, codePage) = (described.Name, described.CodePage);
         if (codePage != Utf8CodePage)
         {
             if (options.Store.IgnoreCollationCompatibility)

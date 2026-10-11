@@ -95,7 +95,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
                 if (all)
                 {
-                    await SubscribeAll(store, tail, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    await SubscribeAll(store, tail, routers.For(scope), request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else if (ordinal)
                 {
@@ -103,7 +103,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                 }
                 else if (isVirtual)
                 {
-                    await SubscribeVirtual(store, tail, virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    await SubscribeVirtual(store, tail, routers.For(scope), virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -506,46 +506,81 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     }
 
     /// <summary>
-    /// A subscription to <c>$all</c>: the same shape as a stream's, with the store's head as both
-    /// the bound of every page and the thing waited on.
+    /// A subscription to <c>$all</c>: the same shape as a stream's, with the store's head as the
+    /// bound of every catch-up page, then what the router brings, saying so after each batch with
+    /// the last position delivered. Followed before the head is taken, so an event the catch-up
+    /// does not see is one the router brings; what was delivered already is skipped. A lapse means
+    /// catching up again from where the delivery stands, under a fresh following.
     /// </summary>
-    private async Task SubscribeAll(IStreamStore store, IStoreTail tail, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task SubscribeAll(IStreamStore store, IStoreTail tail, StreamRouter router, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("D");
-
-        // From the end means after now, so the head is brought up to date first; from anywhere else
-        // the catch-up reads whatever the poller has seen and the live phase delivers the rest.
-        var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
-        var next = request.FromCase switch
+        var following = router.Follow(StreamNames.All);
+        try
         {
-            ReadRequest.FromOneofCase.Position => request.Position,
-            ReadRequest.FromOneofCase.End => head + 1,
-            _ => 0,
-        };
-        await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = head } }, cancellationToken).ConfigureAwait(false);
-
-        while (true)
-        {
-            var behind = false;
-            while (head > 0 && next <= head)
+            // From the end means after now, so the head is brought up to date first; from anywhere
+            // else the catch-up reads whatever the poller has seen and the router delivers the rest.
+            var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
+            var next = request.FromCase switch
             {
-                var page = await store.ReadAllAsync(Direction.Forwards, next, head, PageSize, cancellationToken).ConfigureAwait(false);
-                if (page.Count == PageSize && page[^1].Position < head && !behind)
+                ReadRequest.FromOneofCase.Position => request.Position,
+                ReadRequest.FromOneofCase.End => head + 1,
+                _ => 0,
+            };
+            await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = head } }, cancellationToken).ConfigureAwait(false);
+
+            while (true)
+            {
+                var behind = false;
+                while (head > 0 && next <= head)
                 {
-                    behind = true;
-                    await responseStream.WriteAsync(FellBehindAt(head, head - page[^1].Position, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    var page = await store.ReadAllAsync(Direction.Forwards, next, head, PageSize, cancellationToken).ConfigureAwait(false);
+                    if (page.Count == PageSize && page[^1].Position < head && !behind)
+                    {
+                        behind = true;
+                        await responseStream.WriteAsync(FellBehindAt(head, head - page[^1].Position, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    }
+
+                    foreach (var record in page)
+                    {
+                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    next = page.Count < PageSize ? head + 1 : page[^1].Position + 1;
                 }
 
-                foreach (var record in page)
+                await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+
+                while (await following.Events.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    var delivered = false;
+                    while (following.Events.TryRead(out var record))
+                    {
+                        if (record.Position < next)
+                        {
+                            continue;
+                        }
+
+                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        next = record.Position + 1;
+                        head = record.Position;
+                        delivered = true;
+                    }
+
+                    if (delivered)
+                    {
+                        await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    }
                 }
 
-                next = page.Count < PageSize ? head + 1 : page[^1].Position + 1;
+                following.Dispose();
+                following = router.Follow(StreamNames.All);
+                head = tail.Head;
             }
-
-            await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
-            head = await tail.WaitForAdvanceAsync(head, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            following.Dispose();
         }
     }
 
@@ -597,58 +632,93 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     }
 
     /// <summary>
-    /// A subscription to a virtual stream: the shape of <c>$all</c>'s, over the predicate. The head
-    /// it reports is always the stream's own last event, so a quiet category keeps a stable head
-    /// while the store moves on, and an advance of the store that brings it nothing is silent.
+    /// A subscription to a virtual stream: the shape of <c>$all</c>'s, over the predicate, which the
+    /// router evaluates through the store too. The head it reports is always the stream's own
+    /// last event, so a quiet category keeps a stable head while the store moves on, and an
+    /// advance of the store that brings it nothing is silent.
     /// </summary>
-    private async Task SubscribeVirtual(IStreamStore store, IStoreTail tail, VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task SubscribeVirtual(IStreamStore store, IStoreTail tail, StreamRouter router, VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("D");
-        var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
-        var bounds = await store.VirtualHeadAsync(stream, head, cancellationToken).ConfigureAwait(false);
-        var own = bounds?.Last ?? -1;
-        var next = request.FromCase switch
+        var following = router.Follow(stream.Name);
+        try
         {
-            ReadRequest.FromOneofCase.Position => request.Position,
-            ReadRequest.FromOneofCase.End => head + 1,
-            _ => 0,
-        };
-        await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = own } }, cancellationToken).ConfigureAwait(false);
-
-        var delivered = true;
-        while (true)
-        {
-            var behind = false;
-            while (head > 0 && next <= head)
+            var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
+            var bounds = await store.VirtualHeadAsync(stream, head, cancellationToken).ConfigureAwait(false);
+            var own = bounds?.Last ?? -1;
+            var next = request.FromCase switch
             {
-                var page = await store.ReadVirtualAsync(stream, Direction.Forwards, next, head, PageSize, cancellationToken).ConfigureAwait(false);
-                if (page.Count == PageSize && !behind)
+                ReadRequest.FromOneofCase.Position => request.Position,
+                ReadRequest.FromOneofCase.End => head + 1,
+                _ => 0,
+            };
+            await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = own } }, cancellationToken).ConfigureAwait(false);
+
+            // The first catch-up always says it is done, even with nothing to deliver; a catch-up
+            // after a lapse says so only when it delivered.
+            var delivered = true;
+            while (true)
+            {
+                var behind = false;
+                while (head > 0 && next <= head)
                 {
-                    var rest = await store.CountVirtualAsync(stream, page[^1].Position, head, cancellationToken).ConfigureAwait(false);
-                    if (rest > 0)
+                    var page = await store.ReadVirtualAsync(stream, Direction.Forwards, next, head, PageSize, cancellationToken).ConfigureAwait(false);
+                    if (page.Count == PageSize && !behind)
                     {
-                        behind = true;
-                        await responseStream.WriteAsync(FellBehindAt(own, rest + page.Count, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                        var rest = await store.CountVirtualAsync(stream, page[^1].Position, head, cancellationToken).ConfigureAwait(false);
+                        if (rest > 0)
+                        {
+                            behind = true;
+                            await responseStream.WriteAsync(FellBehindAt(own, rest + page.Count, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+
+                    foreach (var record in page)
+                    {
+                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        own = record.Position;
+                        delivered = true;
+                    }
+
+                    next = page.Count < PageSize ? head + 1 : page[^1].Position + 1;
+                }
+
+                if (delivered)
+                {
+                    await responseStream.WriteAsync(CaughtUpAt(own, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                }
+
+                while (await following.Events.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    delivered = false;
+                    while (following.Events.TryRead(out var record))
+                    {
+                        if (record.Position < next)
+                        {
+                            continue;
+                        }
+
+                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        own = record.Position;
+                        next = record.Position + 1;
+                        delivered = true;
+                    }
+
+                    if (delivered)
+                    {
+                        await responseStream.WriteAsync(CaughtUpAt(own, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
                     }
                 }
 
-                foreach (var record in page)
-                {
-                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
-                    own = record.Position;
-                    delivered = true;
-                }
-
-                next = page.Count < PageSize ? head + 1 : page[^1].Position + 1;
-            }
-
-            if (delivered)
-            {
-                await responseStream.WriteAsync(CaughtUpAt(own, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                following.Dispose();
+                following = router.Follow(stream.Name);
+                head = tail.Head;
                 delivered = false;
             }
-
-            head = await tail.WaitForAdvanceAsync(head, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            following.Dispose();
         }
     }
 

@@ -60,16 +60,20 @@ internal sealed class StoreDatabase(string connectionString) : IStoreDatabase
     }
 
     /// <inheritdoc/>
-    public async Task<(string Collation, int? CodePage)> ReadCollationAsync(CancellationToken cancellationToken)
+    public async Task<DatabaseCollation> ReadCollationAsync(CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), COLLATIONPROPERTY(CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), 'CodePage')";
+        command.CommandText = "DECLARE @collation varchar(128) = CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation'));"
+            + " SELECT @collation, COLLATIONPROPERTY(@collation, 'CodePage'), COLLATIONPROPERTY(@collation, 'ComparisonStyle'), COLLATIONPROPERTY(@collation, 'LCID')";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-        return (reader.GetString(0), reader.IsDBNull(1) ? null : Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture));
+        return new DatabaseCollation(reader.GetString(0), ReadInt(reader, 1), ReadInt(reader, 2), ReadInt(reader, 3));
     }
+
+    private static int? ReadInt(SqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc/>
     public async Task<int> CountTablesAsync(CancellationToken cancellationToken)

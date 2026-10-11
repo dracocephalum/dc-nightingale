@@ -27,7 +27,7 @@ public sealed class StreamRouters(ITenantStores stores) : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (!_routers.TryGetValue(store, out var router))
             {
-                router = new StreamRouter(store, stores.GetTail(scope));
+                router = new StreamRouter(store, stores.GetTail(scope), stores.NameComparer);
                 _routers[store] = router;
             }
 

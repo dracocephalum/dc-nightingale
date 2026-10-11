@@ -56,13 +56,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   the writer waits that long. Close by: a signal across instances, which on
   SQL Server is Service Broker or query notifications, once a measurement
   shows the interval matters there.
-- **A virtual-stream subscription scans each advanced range itself.** Every
-  subscription to `$ce-` or `$et-` reads the advanced range of its predicate
-  at every advance, so twenty subscribers to one category cost twenty reads
-  of the same range. The router already reads where the range's events are
-  once for the plain streams. Close by: routing the virtual streams through it
-  too, the category and type predicates evaluated in process over what it
-  reads, once the subscriber count demands it.
 - **An ordinal subscription polls while the sequencer is behind.** After the
   tail advances, a subscription under ordinal numbering reads the numbered
   rows, and while the sequencer has not yet passed the head it woke for, it

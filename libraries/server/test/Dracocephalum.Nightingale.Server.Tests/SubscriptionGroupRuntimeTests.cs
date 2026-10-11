@@ -22,17 +22,16 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     private readonly IStreamStore _store = A.Fake<IStreamStore>(options => options.Strict());
     private readonly ISubscriptionGroupStore _groups = A.Fake<ISubscriptionGroupStore>();
     private readonly FakeTail _tail = new();
-    private readonly StreamRouter _router;
     private readonly FakeTimeProvider _time = new(Now);
+    private StreamRouter? _router;
     private SubscriptionConsumer? _consumer;
 
     public SubscriptionGroupRuntimeTests()
     {
-        _router = new StreamRouter(_store, _tail);
         A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<SubscriptionOutboxMessage>());
     }
 
-    public ValueTask DisposeAsync() => _router.DisposeAsync();
+    public ValueTask DisposeAsync() => _router?.DisposeAsync() ?? ValueTask.CompletedTask;
 
     [Fact]
     public async Task Delivery_ShouldStartAtTheCheckpointAndWriteItOnceEnoughIsAcknowledged()
@@ -234,9 +233,11 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     [Fact]
     public async Task Delivery_OfAnAllGroupFromTheEnd_ShouldWaitForTheTailThenDeliverWhatItBrings()
     {
-        // Arrange: the head is 7 when the group starts, so the feed begins at 8.
+        // Arrange: the head is 7 when the group starts, so the feed begins at 8. What comes after
+        // is read either by the router, when the feed follows it before the advance, or by the
+        // feed's own catch-up, when the advance comes first; each on its own page size.
         _tail.Advance(7);
-        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 8, 9, 500, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 8, 9, A<int>._, A<CancellationToken>._))
             .Returns([Record("orders-3", 0, 9)]);
         await using var sut = Group("$all", -1, 1);
 
@@ -492,10 +493,15 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         }
     }
 
-    /// <summary>A running group with one consumer joined, the one <see cref="Next(SubscriptionGroupRuntime)"/> reads for.</summary>
+    /// <summary>
+    /// A running group with one consumer joined, the one <see cref="Next(SubscriptionGroupRuntime)"/>
+    /// reads for. The router is made with the group, so it starts at the head as the test has set
+    /// it, as a host's does at the first subscription.
+    /// </summary>
     private SubscriptionGroupRuntime Group(string stream, long checkpoint, int consumerBuffer, Func<GroupSettings, GroupSettings>? adjust = null)
     {
         var settings = (adjust ?? (defaults => defaults))(GroupSettings.Default);
+        _router ??= new StreamRouter(_store, _tail, StringComparer.Ordinal);
         var runtime = new SubscriptionGroupRuntime(_store, _tail, _router, _groups, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint));
         _consumer = runtime.Join(consumerBuffer, "one");
         return runtime;

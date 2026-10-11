@@ -263,19 +263,43 @@ own high-water agent, the part of its async daemon that finds that mark, and
 publishes every advance; each subscription waits on it instead of polling the
 store, so a thousand subscribers cost the store one poll per interval. A
 subscription confirms with the head, catches up in pages, says so, then
-delivers whatever each advance brings: an `$all` subscription reads the
-advanced range; a subscription to a plain stream takes its events from
-`StreamRouter`, one per tenant's store, which reads where the advanced range's
-events are once, their stream and revision without their bodies, and then the
-events of each followed stream that moved, so an advance costs reads in the
-number of events, not of subscriptions. A subscription follows the router
-before its catch-up reads, so an event the reads do not see yet is one the
-router brings, and delivers only in revision order, reading its stream again
-when the router brings something ahead of its next revision; a follower that
-leaves too much unread lapses and reads its stream itself from where it
-stands, the reference server's own answer to a full live buffer. One router
-per tenant is the one shape that fits both tenant modes: a stream name is per
-tenant, and under a sequence per tenant so is the tail.
+delivers whatever each advance brings, through `StreamRouter`, one per
+tenant's store, which reads each advance once for every subscription that
+follows it. It reads where the advanced range's events are once, their
+stream, revision and type without their bodies, matches them in process
+against every followed stream, category and type, and reads the events of
+each stream that matched something; when `$all` is followed, one read of the
+range with its bodies serves everyone instead. So an advance costs reads in
+the number of events, not of subscriptions nor of names followed. A
+subscription follows the router before its catch-up reads, so an event the
+reads do not see yet is one the router brings. A plain stream's subscription
+delivers only in revision order, reading its stream again when the router
+brings something ahead of its next revision; one by position skips what it
+delivered already. A follower that leaves too much unread lapses and catches
+up itself from where it stands, the reference server's own answer to a full
+live buffer. One router per tenant is the one shape that fits both tenant
+modes: a stream name is per tenant, and under a sequence per tenant so is
+the tail.
+
+Matching in process means the server compares names, which the database
+does everywhere else, so the two must agree. The category of a stream is one
+rule in two places, the store's persisted column and `StreamNames.CategoryOf`,
+held equal by an integration test. The comparison itself comes from the
+database: at every start the initializer reads the database's collation and
+what it ignores, `COLLATIONPROPERTY`'s comparison style and locale, and
+`NameComparison` builds the nearest comparer, which the router matches with.
+Under a binary collation, the default, that is ordinal and exact. Under a
+linguistic one it is the same flags, case, accents, kana, width, on .NET's
+engine rather than SQL Server's, whose weights differ in corners, so there a
+name could match on a read and not live or the reverse; `VARIANCES.md`
+records it. Should that corner ever matter, the exact alternative keeps its
+shape here: hand the store every followed name in one query, a table-valued
+parameter or an `OPENJSON` list joined to the range on stream, category and
+type, and let it return each event with the followed name it matched, spelled
+as the follower spelled it, so the server's part is a lookup and never a
+comparison. One range read per advance, exact under any collation, at the cost
+of a parameter list the in-process match does not need; both could coexist,
+chosen per host, if a collation ever demands it.
 Where now matters, a subscription from the end or a bounded read of `$all`,
 the tail refreshes itself first with one query through the committed rows that
 follow the mark without a gap, so an append that has returned is never on the
@@ -563,8 +587,9 @@ transports at once and of a client that can fall back between them.
   schema feature.
 - `*.Tests.Integration` projects need the local SQL Server and run only with
   `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
-  path, the two guards above, and the wake, proven by a host whose polling
-  interval is minutes long reaching its own append in seconds. Each creates
+  path, the two guards above, the wake, proven by a host whose polling
+  interval is minutes long reaching its own append in seconds, and the
+  category rule, the database's column against the server's. Each creates
   its databases and drops them.
 - `examples/` holds one program per backend that narrates each of its scenarios
   end to end, and a test per scenario that asserts the same run, against one

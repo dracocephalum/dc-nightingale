@@ -352,7 +352,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 0, 10, "a"), Record("orders-1", 1, 11, "b")]));
         A.CallTo(() => _store.ReadPointersAsync(1, 15, StreamRouter.PointerPage, A<CancellationToken>._))
-            .Returns([new EventPointer("shipments-1", 0, 14), new EventPointer("orders-1", 2, 15)]);
+            .Returns([new EventPointer("shipments-1", 0, 14, "shipment_sent"), new EventPointer("orders-1", 2, 15, "c")]);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 2, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 2, 15, "c")]));
         var client = new Streams.StreamsClient(_channel);
@@ -384,7 +384,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 1, StreamsService.PageSize, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 1, 22, "b"), Record("orders-1", 2, 20, "c")]));
         A.CallTo(() => _store.ReadPointersAsync(1, 20, StreamRouter.PointerPage, A<CancellationToken>._))
-            .Returns([new EventPointer("orders-1", 2, 20)]);
+            .Returns([new EventPointer("orders-1", 2, 20, "c")]);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 2, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 2, 20, "c")]));
         var client = new Streams.StreamsClient(_channel);
@@ -409,7 +409,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
             .Returns((StreamSlice?)null);
         A.CallTo(() => _store.ReadPointersAsync(1, 10, StreamRouter.PointerPage, A<CancellationToken>._))
-            .Returns([new EventPointer("orders-1", 0, 10)]);
+            .Returns([new EventPointer("orders-1", 0, 10, "a")]);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10, "a")]));
         var client = new Streams.StreamsClient(_channel);
@@ -434,7 +434,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, long.MaxValue, StreamsService.PageSize, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 4), []));
         A.CallTo(() => _store.ReadPointersAsync(1, 30, StreamRouter.PointerPage, A<CancellationToken>._))
-            .Returns([new EventPointer("orders-1", 5, 30)]);
+            .Returns([new EventPointer("orders-1", 5, 30, "f")]);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 5, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 5), [Record("orders-1", 5, 30, "f")]));
         var client = new Streams.StreamsClient(_channel);
@@ -516,19 +516,22 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     public async Task Read_WhenSubscribingToACategory_ShouldReportItsOwnHeadAndStaySilentWhenTheStoreMovesWithoutIt()
     {
         // Arrange: the store's head is 20 but the category's last event is at 17; an advance to 30
-        // brings the category nothing, and only the advance to 40 does. The two advances may be
-        // seen as one, so the range 21..40 is configured as well.
+        // brings the category nothing, another stream's event only, and only the advance to 40
+        // does. The two advances may be seen as one, so the range 21..40 is configured as well.
+        // The router matches the category in process from where the range's events are.
         var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
         _tail.Advance(20);
         A.CallTo(() => _store.VirtualHeadAsync(orders, 20, A<CancellationToken>._)).Returns(new StreamHead(5, 17));
         A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 0, 20, StreamsService.PageSize, A<CancellationToken>._))
             .Returns([Record("orders-1", 0, 5, "a"), Record("orders-1", 1, 17, "b")]);
-        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 21, 30, StreamsService.PageSize, A<CancellationToken>._))
-            .Returns([]);
-        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 31, 40, StreamsService.PageSize, A<CancellationToken>._))
-            .Returns([Record("orders-2", 0, 35, "c")]);
-        A.CallTo(() => _store.ReadVirtualAsync(orders, Direction.Forwards, 21, 40, StreamsService.PageSize, A<CancellationToken>._))
-            .Returns([Record("orders-2", 0, 35, "c")]);
+        A.CallTo(() => _store.ReadPointersAsync(21, 30, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("shipments-1", 0, 25, "shipment_sent")]);
+        A.CallTo(() => _store.ReadPointersAsync(31, 40, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("orders-2", 0, 35, "c")]);
+        A.CallTo(() => _store.ReadPointersAsync(21, 40, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("shipments-1", 0, 25, "shipment_sent"), new EventPointer("orders-2", 0, 35, "c")]);
+        A.CallTo(() => _store.ReadAsync("orders-2", Direction.Forwards, 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-2", 0, 35, "c")]));
         var client = new Streams.StreamsClient(_channel);
         using var call = client.Read(new ReadRequest { Stream = "$ce-orders", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
 

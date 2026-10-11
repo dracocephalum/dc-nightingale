@@ -57,7 +57,7 @@ public sealed class StoreInitializerTests
     {
         // Arrange
         _database.Exists = false;
-        _database.Collation = (NightingaleOptions.StoreOptions.DefaultCollation, Utf8);
+        _database.Collation = new(NightingaleOptions.StoreOptions.DefaultCollation, Utf8, null, null);
         _options.Store.Partitioning = PartitioningMode.Tenant;
         _options.Store.AssignOrdinals = true;
 
@@ -82,7 +82,7 @@ public sealed class StoreInitializerTests
     {
         // Arrange
         _database.Exists = false;
-        _database.Collation = ("Latin1_General_100_CI_AS_SC_UTF8", Utf8);
+        _database.Collation = new("Latin1_General_100_CI_AS_SC_UTF8", Utf8, null, null);
         _options.Store.Collation = null;
 
         // Act
@@ -132,7 +132,7 @@ public sealed class StoreInitializerTests
         // Arrange
         _database.Exists = false;
         _database.CodePages["Latin1_General_100_BIN2"] = Latin1;
-        _database.Collation = ("Latin1_General_100_BIN2", Latin1);
+        _database.Collation = new("Latin1_General_100_BIN2", Latin1, null, null);
         _options.Store.Collation = "Latin1_General_100_BIN2";
         _options.Store.IgnoreCollationCompatibility = true;
 
@@ -177,7 +177,7 @@ public sealed class StoreInitializerTests
     public async Task Initialize_WhenAProvisionedDatabaseIsNotUtf8_ShouldRefuseAndInitializeNothing()
     {
         // Arrange
-        _database.Collation = ("SQL_Latin1_General_CP1_CI_AS", Latin1);
+        _database.Collation = new("SQL_Latin1_General_CP1_CI_AS", Latin1, null, null);
 
         // Act
         var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync());
@@ -191,7 +191,7 @@ public sealed class StoreInitializerTests
     public async Task Initialize_WhenAProvisionedDatabaseHasAnotherCollationThanTheConfiguredOne_ShouldRefuse()
     {
         // Arrange
-        _database.Collation = ("Latin1_General_100_CI_AS_SC_UTF8", Utf8);
+        _database.Collation = new("Latin1_General_100_CI_AS_SC_UTF8", Utf8, null, null);
 
         // Act
         var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync());
@@ -238,7 +238,7 @@ public sealed class StoreInitializerTests
     {
         // Arrange
         _schema.Report = Initialized();
-        _database.Collation = ("SQL_Latin1_General_CP1_CI_AS", Latin1);
+        _database.Collation = new("SQL_Latin1_General_CP1_CI_AS", Latin1, null, null);
 
         // Act
         var refused = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync());
@@ -311,7 +311,7 @@ public sealed class StoreInitializerTests
     private static SchemaReport Initialized() => new(true, true, null, [], [], []);
 
     private StoreInitializer Initializer() =>
-        new(_database, _schema, _options, new FakeTimeProvider(Now), NullLogger<StoreInitializer>.Instance);
+        new(_database, _schema, _options, new NameComparison(), new FakeTimeProvider(Now), NullLogger<StoreInitializer>.Instance);
 
     private Task InitializeAsync(bool applyChanges = false, bool fastBoot = false) =>
         Initializer().InitializeAsync(applyChanges, fastBoot, TestContext.Current.CancellationToken);
@@ -325,7 +325,7 @@ public sealed class StoreInitializerTests
 
         public int Tables { get; set; }
 
-        public (string Collation, int? CodePage) Collation { get; set; } = (NightingaleOptions.StoreOptions.DefaultCollation, Utf8);
+        public DatabaseCollation Collation { get; set; } = new(NightingaleOptions.StoreOptions.DefaultCollation, Utf8, 0, 1033);
 
         public Dictionary<string, int?> CodePages { get; } = new(StringComparer.Ordinal) { [NightingaleOptions.StoreOptions.DefaultCollation] = Utf8 };
 
@@ -350,7 +350,7 @@ public sealed class StoreInitializerTests
             return Task.CompletedTask;
         }
 
-        public Task<(string Collation, int? CodePage)> ReadCollationAsync(CancellationToken cancellationToken)
+        public Task<DatabaseCollation> ReadCollationAsync(CancellationToken cancellationToken)
         {
             Calls.Add("collation");
             return Task.FromResult(Collation);

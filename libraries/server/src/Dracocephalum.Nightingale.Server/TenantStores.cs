@@ -16,6 +16,9 @@ public sealed class TenantStores(IStreamStore streams, ISubscriptionGroupStore? 
     public bool SupportsAllTenants => true;
 
     /// <inheritdoc/>
+    public IEqualityComparer<string> NameComparer => StringComparer.Ordinal;
+
+    /// <inheritdoc/>
     public IStreamStore GetStreams(TenantScope scope) => streams;
 
     /// <inheritdoc/>

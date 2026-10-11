@@ -85,6 +85,9 @@ public static class ServiceCollectionExtensions
         // high-water agent takes it as the daemon's wake-up, the per-tenant poller in place of its
         // interval. The polling times stand as the store sets them unless a test lengthens them.
         services.AddSingleton(provider => new AppendSignal(provider.GetService<TimeProvider>() ?? TimeProvider.System));
+
+        // How names are compared, as the initializer learns it from the database's collation.
+        services.AddSingleton<NameComparison>();
         services.AddPolecat(provider =>
         {
             var store = new StoreOptions();
@@ -145,6 +148,7 @@ public static class ServiceCollectionExtensions
                 ? provider.GetRequiredService<PolecatTenantTails>().For
                 : _ => provider.GetRequiredService<IStoreTail>(),
             provider.GetRequiredService<AppendSignal>(),
+            provider.GetRequiredService<NameComparison>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
         services.AddSingleton<ITenantStores>(provider => provider.GetRequiredService<PolecatTenantStores>());
@@ -162,6 +166,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IStoreDatabase>(),
             provider.GetRequiredService<StoreSchema>(),
             options,
+            provider.GetRequiredService<NameComparison>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<StoreInitializer>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StoreInitializer>.Instance));
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<StoreInitializer>());

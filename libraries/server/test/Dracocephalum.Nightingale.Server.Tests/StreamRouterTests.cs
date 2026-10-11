@@ -8,8 +8,8 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 
 /// <summary>
 /// The router against a strict fake of the store and a tail moved by hand: what one advance costs
-/// in reads, who gets what, what a follower that falls too far behind gets, what a deleted stream's
-/// followers get, and what a range that cannot be read does.
+/// in reads, who gets what, how names are matched, what a follower that falls too far behind
+/// gets, what a deleted stream's followers get, and what a range that cannot be read does.
 /// </summary>
 public sealed class StreamRouterTests : IAsyncDisposable
 {
@@ -22,41 +22,104 @@ public sealed class StreamRouterTests : IAsyncDisposable
 
     public StreamRouterTests()
     {
-        _sut = new StreamRouter(_store, _tail);
+        _sut = new StreamRouter(_store, _tail, StringComparer.Ordinal);
     }
 
     public ValueTask DisposeAsync() => _sut.DisposeAsync();
 
     [Fact]
-    public async Task Route_ShouldReadTheRangeOnceAndEachFollowedStreamThatMovedOnceAndHandEveryFollowerItsStreamsEvents()
+    public async Task Route_ShouldReadTheRangeOnceAndEachStreamThatMatchedOnceAndHandEveryFollowerWhatMatchesIt()
     {
-        // Arrange: three streams moved; two are followed, one by two followers; the third is nobody's.
-        A.CallTo(() => _store.ReadPointersAsync(1, 6, StreamRouter.PointerPage, A<CancellationToken>._))
-            .Returns([Pointer("orders-1", 0, 1), Pointer("orders-2", 0, 2), Pointer("orders-1", 1, 3), Pointer("audit-1", 0, 4), Pointer("orders-1", 2, 6)]);
+        // Arrange: four streams moved. One is followed by two, one is in a followed category,
+        // one has an event of a followed type, and one is nobody's. Each matched stream is read
+        // once, from the first revision pointed at, and each event goes to whoever it matches.
+        A.CallTo(() => _store.ReadPointersAsync(1, 7, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([Pointer("orders-1", 0, 1), Pointer("shipments-1", 0, 2), Pointer("orders-1", 1, 3), Pointer("audit-1", 0, 4), Pointer("invoices-1", 0, 5, "invoice_paid"), Pointer("orders-1", 2, 7, "order_paid")]);
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 3, A<CancellationToken>._))
-            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 0, 1), Record("orders-1", 1, 3), Record("orders-1", 2, 6)]));
-        A.CallTo(() => _store.ReadAsync("orders-2", Direction.Forwards, 0, 1, A<CancellationToken>._))
-            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-2", 0, 2)]));
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 0, 1), Record("orders-1", 1, 3), Record("orders-1", 2, 7, "order_paid")]));
+        A.CallTo(() => _store.ReadAsync("shipments-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("shipments-1", 0, 2)]));
+        A.CallTo(() => _store.ReadAsync("invoices-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("invoices-1", 0, 5, "invoice_paid")]));
         using var first = _sut.Follow("orders-1");
         using var second = _sut.Follow("orders-1");
-        using var other = _sut.Follow("orders-2");
-        using var idle = _sut.Follow("shipments-1");
+        using var shipments = _sut.Follow("$ce-shipments");
+        using var paid = _sut.Follow("$et-invoice_paid");
+        using var idle = _sut.Follow("returns-1");
 
         // Act
-        _tail.Advance(6);
+        _tail.Advance(7);
         var toFirst = await NextAsync(first, 3);
         var toSecond = await NextAsync(second, 3);
-        var toOther = await NextAsync(other, 1);
+        var toShipments = await NextAsync(shipments, 1);
+        var toPaid = await NextAsync(paid, 1);
 
         // Assert
         toFirst.Select(record => record.Revision).ShouldBe([0, 1, 2]);
         toSecond.Select(record => record.Revision).ShouldBe([0, 1, 2]);
-        toOther.Single().Stream.ShouldBe("orders-2");
+        toShipments.Single().Stream.ShouldBe("shipments-1");
+        toPaid.Single().Type.ShouldBe("invoice_paid");
         idle.Events.TryRead(out _).ShouldBeFalse();
-        _sut.Routed.ShouldBe(6);
-        _sut.FollowerCount.ShouldBe(4);
+        _sut.Routed.ShouldBe(7);
+        _sut.FollowerCount.ShouldBe(5);
         A.CallTo(() => _store.ReadPointersAsync(A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         A.CallTo(() => _store.ReadAsync("audit-1", A<Direction>._, A<long?>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Route_WhenAllIsFollowed_ShouldReadTheRangeWithItsBodiesOnceAndServeEveryoneFromIt()
+    {
+        // Arrange: two followers of $all, one of a category, one of a stream; no pointers read.
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 1, 3, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 1), Record("audit-1", 0, 2), Record("orders-2", 0, 3)]);
+        using var everything = _sut.Follow(StreamNames.All);
+        using var everythingToo = _sut.Follow(StreamNames.All);
+        using var orders = _sut.Follow("$ce-orders");
+        using var audit = _sut.Follow("audit-1");
+
+        // Act
+        _tail.Advance(3);
+        var toEverything = await NextAsync(everything, 3);
+        var toEverythingToo = await NextAsync(everythingToo, 3);
+        var toOrders = await NextAsync(orders, 2);
+        var toAudit = await NextAsync(audit, 1);
+
+        // Assert
+        toEverything.Select(record => record.Position).ShouldBe([1, 2, 3]);
+        toEverythingToo.Select(record => record.Position).ShouldBe([1, 2, 3]);
+        toOrders.Select(record => record.Position).ShouldBe([1, 3]);
+        toAudit.Single().Position.ShouldBe(2);
+        A.CallTo(() => _store.ReadAllAsync(A<Direction>._, A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _store.ReadPointersAsync(A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _store.ReadAsync(A<string>._, A<Direction>._, A<long?>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Route_ShouldMatchNamesWithTheBackendsComparer()
+    {
+        // Arrange: a backend that compares names without regard to case, as a case-insensitive
+        // collation does; the followers spell the names otherwise than the store does.
+        await using var sut = new StreamRouter(_store, _tail, StringComparer.OrdinalIgnoreCase);
+        A.CallTo(() => _store.ReadPointersAsync(1, 2, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([Pointer("orders-1", 0, 1, "Order_Placed"), Pointer("Orders-2", 0, 2)]);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 1, "Order_Placed")]));
+        A.CallTo(() => _store.ReadAsync("Orders-2", Direction.Forwards, 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("Orders-2", 0, 2)]));
+        using var stream = sut.Follow("ORDERS-1");
+        using var category = sut.Follow("$ce-Orders");
+        using var type = sut.Follow("$et-order_placed");
+
+        // Act
+        _tail.Advance(2);
+        var toStream = await NextAsync(stream, 1);
+        var toCategory = await NextAsync(category, 2);
+        var toType = await NextAsync(type, 2);
+
+        // Assert
+        toStream.Single().Stream.ShouldBe("orders-1");
+        toCategory.Select(record => record.Stream).ShouldBe(["orders-1", "Orders-2"]);
+        toType.Select(record => record.Position).ShouldBe([1, 2]);
     }
 
     [Fact]
@@ -168,7 +231,7 @@ public sealed class StreamRouterTests : IAsyncDisposable
         var cause = new InvalidOperationException("The server has stopped following the store's head.");
         A.CallTo(() => tail.Head).Returns(0L);
         A.CallTo(() => tail.WaitForAdvanceAsync(A<long>._, A<CancellationToken>._)).Throws(cause);
-        await using var sut = new StreamRouter(_store, tail);
+        await using var sut = new StreamRouter(_store, tail, StringComparer.Ordinal);
         using var present = sut.Follow("orders-1");
 
         // Act
@@ -180,10 +243,10 @@ public sealed class StreamRouterTests : IAsyncDisposable
         later.ShouldBeSameAs(cause);
     }
 
-    private static EventPointer Pointer(string stream, long revision, long position) => new(stream, revision, position);
+    private static EventPointer Pointer(string stream, long revision, long position, string type = "order_placed") => new(stream, revision, position, type);
 
-    private static EventRecord Record(string stream, long revision, long position) =>
-        new(Guid.NewGuid(), stream, revision, position, "order_placed", Created, Encoding.UTF8.GetBytes("{}"), new JsonObject());
+    private static EventRecord Record(string stream, long revision, long position, string type = "order_placed") =>
+        new(Guid.NewGuid(), stream, revision, position, type, Created, Encoding.UTF8.GetBytes("{}"), new JsonObject());
 
     private static async Task<List<EventRecord>> NextAsync(StreamFollowing following, int count)
     {
