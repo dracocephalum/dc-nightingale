@@ -7,7 +7,7 @@
   Delete this comment block, then confirm no double-brace token remains
   anywhere in the file.
 
-  Named AGENTS.template.md rather than AGENTS.md so it is not picked up as live
+  Named root-AGENTS.md rather than AGENTS.md so it is not picked up as live
   agent instructions - by the toolkit, or by any tool that reads a nested
   AGENTS.md as directory-scoped instructions. Keep the suffix.
 
@@ -125,7 +125,9 @@ This block is generated: the toolkit's rows, then the rows of every index the
 sync rewrites it. A rule of this repository's own is a file under `docs/rules/`
 and a row in that index, never a row typed here — one typed here is gone at
 the next sync. Everything outside the block is this repository's and no sync
-touches it. A document nobody is pointed at will not be read. A local rule
+touches it: a row that only points at a document of this repository's own,
+with no rule behind it, is a second table there, right after the block. A
+document nobody is pointed at will not be read. A local rule
 that disagrees with a toolkit rule has no referee: replace by excluding, amend
 by saying so in the document — *Precedence* in
 [`agentics/rules/layout.md`](agentics/rules/layout.md).

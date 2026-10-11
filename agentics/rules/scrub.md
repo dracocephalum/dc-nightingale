@@ -59,9 +59,9 @@ contains link-shaped text that is not a link — this file does, and without the
 filter it reports itself. Any repository whose documentation quotes a path in
 backticks hits the same thing.
 
-Template files are the other exception: `agentics/templates/*` and any
-`*.template.md` link into the repository they are copied into, not the place
-they sit. Note them and move on.
+Template files are the other exception: `agentics/templates/*` link into the
+repository they are copied into, not the place they sit. Note them and move
+on.
 
 ### 3. No unfilled placeholders
 

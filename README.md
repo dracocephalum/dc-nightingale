@@ -27,7 +27,7 @@ map of categories.
   are changing.
 - `agentics/` and the toolkit's shims under `.claude/skills/` are managed by
   the toolkit and replaced whole by a sync, a shim of the same name included;
-  this repository's own rules live in `docs/rules/`.
+  the rest of `AGENTS.md` is this repository's.
 - Build configuration is inherited from the root by every component.
 - Every component has its own `README.md`: what it is, how to run it, how to
   test it.
@@ -37,8 +37,11 @@ map of categories.
 `AGENTS.md` is the index. The rules under `agentics/rules/` are the toolkit's
 standard for code, tests, dependencies, pull requests, and review — for people
 as much as for agents — and a sync replaces that folder whole, so an edit
-there is lost. The rules this repository adds are under `docs/rules/`, with
-their own index there.
+there is lost. This repository adds no rules of its own yet; its two documents
+beyond the toolkit's, `VARIANCES.md` and `PENDING.md`, have their rows in
+`AGENTS.md` outside the generated block. The day a rule of its own exists, it
+goes under `docs/rules/` with an index there, as `agentics/rules/layout.md`
+says.
 
 ## Licence
 

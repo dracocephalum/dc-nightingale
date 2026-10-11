@@ -19,7 +19,7 @@ exist.
 | `libraries/` | packages published to NuGet |
 | `examples/` | end-to-end sample programs that double as integration tests |
 | `agentics/` | the toolkit's — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/`; replaced whole by a sync, never edited in place |
-| `docs/rules/` | this repository's own rules, and `AGENTS.md` there is their index — started from `agentics/templates/rules-AGENTS.md`; the sync copies its rows into the table below |
+| `docs/rules/` | this repository's own rules, the day it has one — not present yet; `AGENTS.md` there is then their index, started from `agentics/templates/rules-AGENTS.md`, and the sync copies its rows into the table below |
 | `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync, a shim of the same name included |
 
 Build configuration lives **once, at the repository root** — `Directory.Build.props`,
@@ -61,8 +61,6 @@ makes it selectable from a plain-language request.
 | Understanding how the pieces fit, or why the code is shaped the way it is | `DESIGN.md` at the root — the seams and the reasons; type comments say what, it says why. Written the day a reader could not infer it; see *Root documents* in [`agentics/rules/layout.md`](agentics/rules/layout.md) |
 | Starting any source-control action, or asked what this repository's settings and defaults are | [`.agentics.yaml`](.agentics.yaml) — the mode the agent works in (`auto`, `local`, `manual`) and every choice made at initialization |
 | Leaving something unfinished, blocked, or undecided — or asked what is still open | [`TODO.md`](TODO.md) — add it there; a remark in a conversation is lost |
-| Making the API behave differently from the reference event store on purpose, or asked why it differs | [`VARIANCES.md`](VARIANCES.md) — record the difference and the reason there |
-| Deferring a product feature with its approach already decided | [`PENDING.md`](PENDING.md) — record it there; `TODO.md` is for what is owed soon |
 
 The documents above are the substance, for every tool. In Claude Code some
 are also invocable through a shim in `.claude/skills/` -
@@ -80,12 +78,25 @@ This block is generated: the toolkit's rows, then the rows of every index the
 sync rewrites it. A rule of this repository's own is a file under `docs/rules/`
 and a row in that index, never a row typed here — one typed here is gone at
 the next sync. Everything outside the block is this repository's and no sync
-touches it. A document nobody is pointed at will not be read. A local rule
+touches it: a row that only points at a document of this repository's own,
+with no rule behind it, is a second table there, right after the block. A
+document nobody is pointed at will not be read. A local rule
 that disagrees with a toolkit rule has no referee: replace by excluding, amend
 by saying so in the document — *Precedence* in
 [`agentics/rules/layout.md`](agentics/rules/layout.md).
 
 <!-- /agentics:guidelines -->
+
+## This repository's own documents
+
+Two root documents the toolkit's table does not know, in its columns; they sit
+outside the generated block, where a sync never reaches, because they are
+documents of the repository and not rules.
+
+| When you are | Read |
+|---|---|
+| Making the API behave differently from the reference event store on purpose, or asked why it differs | [`VARIANCES.md`](VARIANCES.md) — record the difference and the reason there |
+| Deferring a product feature with its approach already decided | [`PENDING.md`](PENDING.md) — record it there; `TODO.md` is for what is owed soon |
 
 ## Conventions
 

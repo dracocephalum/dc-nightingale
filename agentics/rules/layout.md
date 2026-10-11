@@ -232,6 +232,14 @@ generated block of the root `AGENTS.md`, after the toolkit's, so adding a rule
 is a file and a row in the index and never an edit of the root. A shim of the
 repository's own keeps a name no toolkit shim has.
 
+A row with no rule behind it is not a rule and does not open the folder: one
+that only sends the reader to a document of the repository's own —
+`VARIANCES.md`, `PENDING.md`, a folder's README — goes in the root `AGENTS.md`
+outside the block, a second table in the same columns right after it, which no
+sync touches. The index is for rules; its links resolve only once its rows are
+in the block, so an index that holds nothing else is a broken file wherever it
+is read in place.
+
 Opting out of a toolkit rule is declared: its path under `agentics/rules/` in
 `rules.excluded`. The sync removes the file and its row; a link to it from
 another toolkit document then fails the link check, which is the honest
@@ -283,7 +291,9 @@ reasons, not a restatement of the type comments, which already say what. It
 is the page an agent reads before changing anything, so `AGENTS.md` points at
 it. A repository that mirrors a reference product may add `VARIANCES.md` for
 the deliberate differences and `PENDING.md` for features deferred with their
-approach decided; both leave `TODO.md` for what is owed soon.
+approach decided; both leave `TODO.md` for what is owed soon, and their rows
+go in `AGENTS.md` outside the generated block, not in a local rules index —
+*The toolkit's rules and the repository's* above.
 
 ## Creating a component
 
