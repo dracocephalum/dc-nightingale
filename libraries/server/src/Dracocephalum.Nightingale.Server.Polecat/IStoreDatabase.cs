@@ -2,7 +2,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
 /// The database itself, apart from anything in it: whether it is there, making it, what its
-/// collation is and whether it holds any table. <see cref="StoreInitializer"/> decides from the
+/// collation is and which tables it holds. <see cref="StoreInitializer"/> decides from the
 /// answers; what the tables should be is <see cref="IStoreSchema"/>'s.
 /// </summary>
 internal interface IStoreDatabase
@@ -36,8 +36,8 @@ internal interface IStoreDatabase
     /// <returns>The collation as the server describes it.</returns>
     Task<DatabaseCollation> ReadCollationAsync(CancellationToken cancellationToken);
 
-    /// <summary>How many tables the database holds, of anyone's.</summary>
+    /// <summary>The tables the database holds, of anyone's, and whether each holds a row.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The number of tables.</returns>
-    Task<int> CountTablesAsync(CancellationToken cancellationToken);
+    /// <returns>The tables, by schema and name; empty for an empty database.</returns>
+    Task<IReadOnlyList<DatabaseTable>> ListTablesAsync(CancellationToken cancellationToken);
 }

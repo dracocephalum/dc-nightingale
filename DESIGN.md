@@ -142,7 +142,17 @@ default host's switches and a host's own code all go through it.
   fast boot on; one test holds a store made that way equal to one the server
   initialized, catalog and recorded rows.
 - A database with tables and none of the gateway's migrations is refused
-  outright: it is not ours.
+  outright, it is not ours, unless every table is one the server creates and
+  every one is empty: that is what a start that died between the store's
+  tables and the gateway's migrations leaves, and both halves apply only what
+  is missing, so the next start initializes it the rest of the way, with a
+  warning. A table that is not the server's, or one with rows, still refuses.
+- What a start applies is logged, each half under its own category at the
+  same levels: the gateway's migrations by Entity Framework, the store's
+  script by the schema tooling's logger routed to the host's logging under
+  `StoreSchema`'s category, one entry per table or schema it changes and an
+  error naming the statements when one fails. The server's README says
+  which keys turn each on.
 
 The same report and the same apply are there without starting the server:
 `--schema-report` on the default host prints what the database needs and

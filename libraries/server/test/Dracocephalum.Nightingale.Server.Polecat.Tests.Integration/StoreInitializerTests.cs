@@ -1,6 +1,9 @@
 using System.Text;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Testing;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
@@ -31,23 +34,53 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     public async ValueTask DisposeAsync() => await TestDatabases.DropAsync(_name);
 
     [Fact]
-    public async Task Start_WhenDatabaseIsMissing_ShouldCreateItInitializeItAndServeItAgain()
+    public async Task Start_WhenDatabaseIsMissing_ShouldCreateItInitializeItLogWhatItAppliedAndServeItAgain()
     {
         // Arrange & Act
+        List<FakeLogRecord> firstApplied;
         using (var first = await TestDatabases.StartHostAsync(_name))
         {
+            firstApplied = StoreSchemaEntries(first);
             await first.StopAsync(TestContext.Current.CancellationToken);
         }
 
         using var second = await TestDatabases.StartHostAsync(_name);
 
         // Assert: one row per setting, recording what shaped the store and the database's actual
-        // collation, and the gateway's migrations recorded in its own schema.
+        // collation, and the gateway's migrations recorded in its own schema. The statements that
+        // made the store's tables are in the first start's log, one entry per table, at the level
+        // the migrations are logged at, and the second start, which applied nothing, logged none.
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Collation'")).ShouldNotBeNullOrWhiteSpace();
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Partitioning'")).ShouldBe("None");
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.__EFMigrationsHistory")).ShouldBeGreaterThan(0);
+        firstApplied.ShouldNotBeEmpty();
+        firstApplied.ShouldAllBe(entry => entry.Level == LogLevel.Information);
+        firstApplied.ShouldAllBe(entry => entry.Message.Contains($"database {_name}", StringComparison.Ordinal));
+        firstApplied.ShouldContain(entry => entry.Message.Contains("CREATE TABLE dbo.pc_events", StringComparison.Ordinal));
+        StoreSchemaEntries(second).ShouldBeEmpty();
         await second.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Start_WhenAnEarlierStartDiedBetweenTheStoresTablesAndTheGatewaysMigrations_ShouldInitializeTheRestOfTheWay()
+    {
+        // Arrange: the store's tables from the creation script and nothing of the gateway's, as
+        // such a start leaves the database.
+        await TestDatabases.CreateEmptyAsync(_name);
+        await TestDatabases.CreateStoreTablesAsync(_name);
+
+        // Act
+        using var host = await TestDatabases.StartHostAsync(_name);
+
+        // Assert: served, with the gateway's half and the record of the store complete, and the
+        // start said what it found.
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.__EFMigrationsHistory")).ShouldBeGreaterThan(0);
+        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        appended.Revision.ShouldBe(0);
+        host.Logged().ShouldContain(entry => entry.Level == LogLevel.Warning && entry.Message.Contains("initializing it the rest of the way", StringComparison.Ordinal));
+        await host.StopAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -73,7 +106,11 @@ public sealed class StoreInitializerTests : IAsyncLifetime
 
         // Assert
         exception.Message.ShouldContain("not initialized by Nightingale");
+        exception.Message.ShouldContain("dbo.somebody_elses are not tables this server creates");
     }
+
+    private static List<FakeLogRecord> StoreSchemaEntries(IHost host) =>
+        host.Logged().Where(entry => string.Equals(entry.Category, typeof(StoreSchema).FullName, StringComparison.Ordinal)).ToList();
 
     [Fact]
     public async Task Start_WhenSettingsDifferFromWhatTheStoreWasInitializedWith_ShouldRefuse()

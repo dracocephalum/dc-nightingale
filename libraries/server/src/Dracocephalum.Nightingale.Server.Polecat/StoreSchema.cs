@@ -8,6 +8,7 @@ using JasperFx;
 using Microsoft.EntityFrameworkCore;
 using Polecat;
 using Weasel.Core.Migrations;
+using Weasel.SqlServer.Tables;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
@@ -102,6 +103,31 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(script.ToString())));
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlySet<TableName>> ListOwnTablesAsync(CancellationToken cancellationToken)
+    {
+        var tables = new HashSet<TableName>();
+        foreach (var tenant in await store.Options.Tenancy!.BuildDatabasesAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var table in tenant.AllObjects().OfType<Table>())
+            {
+                tables.Add(new TableName(table.Identifier.Schema, table.Identifier.Name));
+            }
+        }
+
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var entity in context.Model.GetEntityTypes())
+        {
+            if (entity.GetTableName() is { } table)
+            {
+                tables.Add(new TableName(entity.GetSchema() ?? NightingaleSchema.Default, table));
+            }
+        }
+
+        tables.Add(new TableName(options.Schema, NightingaleSchema.HistoryTable));
+        return tables;
     }
 
     /// <inheritdoc/>

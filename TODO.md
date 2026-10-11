@@ -63,14 +63,16 @@ undecided adds it here rather than mentioning it once in a conversation.
   interval, only during the sequencer's lag, which is about one tail interval.
   Close by: the sequencer publishing its progress in-process, and one poller
   per process for the other instances, once the subscription count demands it.
-- **An initialization interrupted between its two halves leaves a database the
-  server refuses.** An empty database gets the event store's tables first and
-  the gateway's migrations after; a process that dies between the two leaves
-  tables and none of the gateway's migrations, which the next start reads as a
-  database that is not Nightingale's. Nothing is lost, the database held no
-  data, and dropping it is the way out. Close by: recognizing a database that
-  holds only the store's own tables, all empty, as one to carry on
-  initializing.
+- **An initialization interrupted after the gateway's migrations and before
+  the settings rows is not recognized.** A start that dies between the two
+  halves is carried on by the next, which finds only the server's own tables,
+  all empty; one that dies after the migrations' transaction committed and
+  before the settings rows were written leaves an initialized store with no
+  record of its settings, which the next start reads as a store initialized
+  with the defaults: served when the configuration is the defaults, refused
+  as a settings conflict when it is not. The window is a few row writes wide.
+  Close by: writing the settings rows in the migration's own transaction, or
+  recognizing a store whose property table is empty as one to finish.
 - **Range partitioning of the events table is not a store feature.** The
   store partitions events by tenant or by the archived flag only, and adds
   the partition column to its unique stream-and-version index when it does.
@@ -86,17 +88,3 @@ undecided adds it here rather than mentioning it once in a conversation.
   Default: our own proto in the same shape, with our own client. Close by:
   confirming the default before the proto is written; it changes message
   shapes.
-- **Event identity and idempotent retries.** The reference event store de-duplicates by
-  client-supplied event id within a stream, which makes an append safe to
-  retry after a timeout. Default: honour client ids and enforce uniqueness
-  per stream, which needs a unique index on the event id in the patched
-  schema. Close by: deciding, then adding the index and the retry semantics
-  to the contract.
-
-## Owed before the first server code
-
-- **Migration DDL is not logged.** The store's default migration logger
-  writes every statement to the console, so the gateway's database class
-  silences it; an operator has no record of what a startup applied. Close by:
-  routing the migration logger to the host's logging, at warning level for
-  changes, once the database class can reach a logger.

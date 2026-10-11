@@ -17,14 +17,12 @@ internal sealed class AugmentedPolecatDatabase : PolecatDatabase
     /// <summary>Initializes a new instance of the <see cref="AugmentedPolecatDatabase"/> class.</summary>
     /// <param name="options">The store options this database belongs to.</param>
     /// <param name="ordinals">Whether the events table carries the ordinal columns.</param>
-    public AugmentedPolecatDatabase(StoreOptions options, bool ordinals)
+    /// <param name="migrationLogger">Where the schema tooling writes what it applies; the store's own writes to the console, which a host's output is not the place for.</param>
+    public AugmentedPolecatDatabase(StoreOptions options, bool ordinals, IMigrationLogger migrationLogger)
         : base(options)
     {
         _ordinals = ordinals;
-
-        // The store's default logger writes every DDL statement it runs to the console, which a
-        // host's output is not the place for. Failures still surface as exceptions.
-        MigrationLogger = new DefaultMigrationLogger(TextWriter.Null);
+        MigrationLogger = migrationLogger;
     }
 
     /// <inheritdoc/>
