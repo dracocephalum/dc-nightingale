@@ -92,7 +92,10 @@ public static class ServiceCollectionExtensions
         {
             var store = new StoreOptions();
             Configure(store, connectionString, options);
-            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals), connectionString);
+            var migrations = new StoreMigrationLogger(
+                provider.GetService<ILogger<StoreSchema>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StoreSchema>.Instance,
+                provider.GetRequiredService<IStoreDatabase>().Name);
+            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals, migrations), connectionString);
             store.Projections.Wakeup = provider.GetRequiredService<AppendSignal>();
             if (options.TailPollingInterval is { } interval)
             {

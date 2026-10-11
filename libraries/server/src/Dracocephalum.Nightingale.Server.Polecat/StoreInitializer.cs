@@ -15,7 +15,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// configuration contradicts the settings it was initialized with; when its tables are behind
 /// what this server expects it is refused too, naming what would be applied, unless the host
 /// said to apply it. A database with tables that the gateway never initialized is refused
-/// outright: it is not ours. The store's own schema management stays off throughout, because its
+/// outright, it is not ours, unless the tables are all the server's own and all empty, which is
+/// what an initialization that died halfway leaves: that one is initialized the rest of the way.
+/// The store's own schema management stays off throughout, because its
 /// table ensurer would rebuild the events table from the unpatched definition on first use.
 /// What is pending and how it is applied is <see cref="IStoreSchema"/>'s, and the database
 /// itself is <see cref="IStoreDatabase"/>'s; this decides when, and holds no connection of its
@@ -158,11 +160,11 @@ internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSc
 
     private async Task InitializeEmptyDatabaseAsync(string name, CancellationToken cancellationToken)
     {
-        var tables = await database.CountTablesAsync(cancellationToken).ConfigureAwait(false);
-        if (tables > 0)
+        var tables = await database.ListTablesAsync(cancellationToken).ConfigureAwait(false);
+        if (tables.Count > 0)
         {
-            throw new StoreInitializationException(
-                $"Database {name} holds {tables} tables and none of Nightingale's migrations, so it was not initialized by Nightingale. The server only initializes an empty database; point it at one, or at a database it initialized.");
+            await RequireEmptyTablesOfOursAsync(name, tables, cancellationToken).ConfigureAwait(false);
+            LogResumingInitialization(name, tables.Count);
         }
 
         var collation = await RequireUtf8CollationAsync(name, cancellationToken).ConfigureAwait(false);
@@ -190,6 +192,34 @@ internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSc
 
         LogInitializedStore(name, options.Store.Schema, options.Schema, collation, options.Store.Partitioning, options.Store.AssignOrdinals);
     }
+
+    /// <summary>
+    /// A database with tables and none of the gateway's migrations is not ours, unless every
+    /// table is one this server creates and every one is empty: that is what an initialization
+    /// that died between the event store's tables and the gateway's migrations leaves, and it is
+    /// carried on from there, since both halves apply what is missing. Anything else is refused.
+    /// </summary>
+    private async Task RequireEmptyTablesOfOursAsync(string name, IReadOnlyList<DatabaseTable> tables, CancellationToken cancellationToken)
+    {
+        const string onlyEmpty = "The server only initializes an empty database; point it at one, or at a database it initialized.";
+        var ours = await schema.ListOwnTablesAsync(cancellationToken).ConfigureAwait(false);
+        var foreign = tables.Where(table => !ours.Contains(table.Name)).Select(table => table.Name.ToString()).ToList();
+        if (foreign.Count > 0)
+        {
+            throw new StoreInitializationException(
+                $"Database {name} holds {tables.Count} tables and none of Nightingale's migrations, so it was not initialized by Nightingale; {string.Join(", ", foreign)} are not tables this server creates. {onlyEmpty}");
+        }
+
+        var holdingRows = tables.Where(table => table.HasRows).Select(table => table.Name.ToString()).ToList();
+        if (holdingRows.Count > 0)
+        {
+            throw new StoreInitializationException(
+                $"Database {name} holds only tables this server creates and none of Nightingale's migrations, as an initialization that did not finish leaves it, but {string.Join(", ", holdingRows)} hold rows, which such an initialization never writes. {onlyEmpty}");
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Database {Database} holds {Tables} empty tables this server creates and none of its migrations, as an initialization that did not finish leaves it; initializing it the rest of the way.")]
+    private partial void LogResumingInitialization(string database, int tables);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Database {Database} has collation {Collation}, which is not UTF-8, and the host chose to use it: a character of a name outside its code page is stored as a question mark, so two such names can become one.")]
     private partial void LogCollationNotUtf8(string database, string collation);

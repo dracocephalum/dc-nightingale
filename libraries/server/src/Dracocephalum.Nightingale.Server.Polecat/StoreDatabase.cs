@@ -76,12 +76,28 @@ internal sealed class StoreDatabase(string connectionString) : IStoreDatabase
         reader.IsDBNull(ordinal) ? null : Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc/>
-    public async Task<int> CountTablesAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<DatabaseTable>> ListTablesAsync(CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        // Whether a table holds a row is asked of the table, one statement each built from the
+        // catalog with every name quoted; the row count the catalog keeps is an estimate. The
+        // batch is empty, and answers nothing, when the database holds no table.
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped = 0";
-        return (int)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        command.CommandText =
+            "DECLARE @sql nvarchar(max) = (SELECT STRING_AGG(CONVERT(nvarchar(max),"
+            + " N'SELECT ' + QUOTENAME(s.name, '''') + N', ' + QUOTENAME(t.name, '''')"
+            + " + N', CASE WHEN EXISTS (SELECT 1 FROM ' + QUOTENAME(s.name) + N'.' + QUOTENAME(t.name) + N') THEN 1 ELSE 0 END'), N' UNION ALL ')"
+            + " FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id WHERE t.is_ms_shipped = 0);"
+            + " IF @sql IS NOT NULL EXEC sp_executesql @sql;";
+        var tables = new List<DatabaseTable>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            tables.Add(new DatabaseTable(new TableName(reader.GetString(0), reader.GetString(1)), reader.GetInt32(2) == 1));
+        }
+
+        return tables.OrderBy(table => table.Name.Schema, StringComparer.Ordinal).ThenBy(table => table.Name.Name, StringComparer.Ordinal).ToList();
     }
 }

@@ -16,6 +16,15 @@ internal interface IStoreSchema
     /// <returns>The report.</returns>
     Task<SchemaReport> ReportAsync(bool trustStoreHash, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The tables this server creates, in both halves: the event store's, with the gateway's
+    /// additions, and the gateway's own with its migrations history. Read from the definitions,
+    /// not the database.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The tables, by schema and name.</returns>
+    Task<IReadOnlySet<TableName>> ListOwnTablesAsync(CancellationToken cancellationToken);
+
     /// <summary>Applies what is pending: the event store's tables first, then the gateway's migrations.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the database is current.</returns>

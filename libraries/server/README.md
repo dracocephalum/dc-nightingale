@@ -128,5 +128,18 @@ settings ask for, the metadata columns the contract maps, and the store's own
 schema management off. The initializer applies the schema through the
 gateway's own database class, which declares a computed `category` column,
 two filtered indexes on the events table, and the `nightingale_store` marker
-table; the type comments say why each is the way it is. Migration DDL is not
-logged. References Core as a project until a package feed exists; see TODO.md.
+table; the type comments say why each is the way it is. References Core as a
+project until a package feed exists; see TODO.md.
+
+What a start applies is logged, each half under its own category and at the
+same levels. The gateway's migrations are logged by Entity Framework:
+`Microsoft.EntityFrameworkCore.Migrations` says which migration, and
+`Microsoft.EntityFrameworkCore.Database.Command` carries each statement, both
+at `Information`. The event store's script is logged under
+`Dracocephalum.Nightingale.Server.Polecat.StoreSchema`, one entry per table
+or schema it changes at `Information`, and one that fails at `Error`. The
+keys under `Logging:LogLevel` turn either on or off. Note that
+`Database.Command` also carries every query the gateway runs, so a host that
+lowers it to `Warning` for production silences the gateway's migration DDL
+with it; the migration names and the store's script stay. Raise it for a
+start that applies changes when the statements matter.

@@ -5,6 +5,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Testing;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 
@@ -79,7 +80,10 @@ internal static class TestDatabases
             name));
     }
 
-    /// <summary>Hosts the backend against a database exactly as a production host would, through the same registration.</summary>
+    /// <summary>
+    /// Hosts the backend against a database exactly as a production host would, through the same
+    /// registration. What the host logs is kept, not printed: <see cref="Logged"/> reads it.
+    /// </summary>
     /// <param name="name">The database name.</param>
     /// <param name="configure">Adjusts the options.</param>
     /// <returns>The started host; stop and dispose it when done.</returns>
@@ -87,6 +91,7 @@ internal static class TestDatabases
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Logging.ClearProviders();
+        builder.Logging.AddFakeLogging();
         builder.Services.AddNightingalePolecat(ConnectionStringFor(name), TestAuth.Off(configure));
         var host = builder.Build();
         try
@@ -121,15 +126,8 @@ internal static class TestDatabases
         var collation = options.Store.Collation ?? NightingaleOptions.StoreOptions.DefaultCollation;
         await CreateEmptyAsync(name, collation);
 
-        var services = new ServiceCollection();
-        services.AddNightingalePolecat(ConnectionStringFor(name), TestAuth.Off(configure));
-        await using var provider = services.BuildServiceProvider();
-        var store = provider.GetRequiredService<global::Polecat.IDocumentStore>();
-        foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync())
-        {
-            await ExecuteAsync(name, database.ToDatabaseScript());
-        }
-
+        await using var provider = Backend(name, configure);
+        await CreateStoreTablesAsync(name, provider);
         var schema = provider.GetRequiredService<StoreSchema>();
         await schema.MigrateAsync(CancellationToken.None);
         await schema.WriteInitializationAsync(
@@ -167,10 +165,46 @@ internal static class TestDatabases
         options.FastBoot = true;
     };
 
+    /// <summary>
+    /// The first half of an initialization alone, in a database that exists and is empty: the
+    /// event store's tables from its creation script and nothing of the gateway's. What a start
+    /// that died before the gateway's migrations leaves behind.
+    /// </summary>
+    /// <param name="name">The database name.</param>
+    /// <param name="configure">Adjusts the options, as for the host that will serve the store.</param>
+    /// <returns>A task that completes when the store's tables are there.</returns>
+    public static async Task CreateStoreTablesAsync(string name, Action<NightingaleOptions>? configure = null)
+    {
+        await using var provider = Backend(name, configure);
+        await CreateStoreTablesAsync(name, provider);
+    }
+
     /// <summary>The store a host registered.</summary>
     /// <param name="host">The host.</param>
     /// <returns>The store.</returns>
     public static IStreamStore Store(this IHost host) => host.Services.GetRequiredService<IStreamStore>();
+
+    /// <summary>What a host started by <see cref="StartHostAsync"/> has logged so far, oldest first.</summary>
+    /// <param name="host">The host.</param>
+    /// <returns>The entries.</returns>
+    public static IReadOnlyList<FakeLogRecord> Logged(this IHost host) => host.Services.GetRequiredService<FakeLogCollector>().GetSnapshot();
+
+    /// <summary>The backend's services registered against a database, without a host around them.</summary>
+    private static ServiceProvider Backend(string name, Action<NightingaleOptions>? configure)
+    {
+        var services = new ServiceCollection();
+        services.AddNightingalePolecat(ConnectionStringFor(name), TestAuth.Off(configure));
+        return services.BuildServiceProvider();
+    }
+
+    private static async Task CreateStoreTablesAsync(string name, ServiceProvider provider)
+    {
+        var store = provider.GetRequiredService<global::Polecat.IDocumentStore>();
+        foreach (var database in await store.Options.Tenancy!.BuildDatabasesAsync())
+        {
+            await ExecuteAsync(name, database.ToDatabaseScript());
+        }
+    }
 
     private static async Task ExecuteOnMasterAsync(string sql)
     {

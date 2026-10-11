@@ -39,25 +39,30 @@ public sealed class StoreDatabaseTests : IAsyncLifetime
         described.CodePage.ShouldBe(Utf8);
         described.ComparisonStyle.ShouldBe(1 + 65536 + 131072, "ignores case, and kana and width too, which a name that says nothing of them ignores");
         described.Lcid.ShouldBe(1033);
-        (await database.CountTablesAsync(TestContext.Current.CancellationToken)).ShouldBe(0);
+        (await database.ListTablesAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Create_WithoutACollation_ShouldTakeTheServersDefaultAndCountTheTablesItIsGiven()
+    public async Task Create_WithoutACollation_ShouldTakeTheServersDefaultAndListTheTablesItIsGivenSayingWhichHoldRows()
     {
         // Arrange
         var database = new StoreDatabase(TestDatabases.ConnectionStringFor(_name));
         var serverDefault = await TestDatabases.ScalarAsync<string>("master", "SELECT CONVERT(varchar(128), SERVERPROPERTY('Collation'))");
 
-        // Act
+        // Act: a table with a row, an empty one in a schema of its own, and one whose name needs quoting.
         await database.CreateAsync(collation: null, TestContext.Current.CancellationToken);
-        await TestDatabases.ExecuteAsync(_name, "CREATE TABLE dbo.somebody_elses (id int)");
+        await TestDatabases.ExecuteAsync(_name, "CREATE SCHEMA theirs");
+        await TestDatabases.ExecuteAsync(_name, "CREATE TABLE dbo.somebody_elses (id int); INSERT INTO dbo.somebody_elses VALUES (1); CREATE TABLE theirs.[odd name] (id int); CREATE TABLE theirs.[it's] (id int);");
 
         // Assert
         var described = await database.ReadCollationAsync(TestContext.Current.CancellationToken);
         described.Name.ShouldBe(serverDefault);
         described.CodePage.ShouldBe(await database.ReadCodePageAsync(serverDefault, TestContext.Current.CancellationToken));
-        (await database.CountTablesAsync(TestContext.Current.CancellationToken)).ShouldBe(1);
+        (await database.ListTablesAsync(TestContext.Current.CancellationToken)).ShouldBe([
+            new DatabaseTable(new("dbo", "somebody_elses"), HasRows: true),
+            new DatabaseTable(new("theirs", "it's"), HasRows: false),
+            new DatabaseTable(new("theirs", "odd name"), HasRows: false),
+        ]);
     }
 
     [Theory]

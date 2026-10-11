@@ -66,7 +66,7 @@ public sealed class StoreInitializerTests
 
         // Assert: the collation is checked before it is used, the store's tables come before the
         // record of what shaped them, and the record holds what is configured.
-        _database.Calls.ShouldBe(["exists", $"code page of {NightingaleOptions.StoreOptions.DefaultCollation}", $"create {NightingaleOptions.StoreOptions.DefaultCollation}", "count tables", "collation"]);
+        _database.Calls.ShouldBe(["exists", $"code page of {NightingaleOptions.StoreOptions.DefaultCollation}", $"create {NightingaleOptions.StoreOptions.DefaultCollation}", "list tables", "collation"]);
         _schema.Calls.ShouldBe(["report", "apply", "write initialization"]);
         var written = _schema.Initialization.ShouldNotBeNull();
         written.Settings.Schema.ShouldBe(_options.Store.Schema);
@@ -89,7 +89,7 @@ public sealed class StoreInitializerTests
         await InitializeAsync();
 
         // Assert
-        _database.Calls.ShouldBe(["exists", "create (server default)", "count tables", "collation"]);
+        _database.Calls.ShouldBe(["exists", "create (server default)", "list tables", "collation"]);
         _schema.Initialization.ShouldNotBeNull().Settings.Collation.ShouldBe("Latin1_General_100_CI_AS_SC_UTF8");
     }
 
@@ -154,15 +154,17 @@ public sealed class StoreInitializerTests
         await InitializeAsync();
 
         // Assert
-        _database.Calls.ShouldBe(["exists", "count tables", "collation"]);
+        _database.Calls.ShouldBe(["exists", "list tables", "collation"]);
         _schema.Calls.ShouldBe(["report", "apply", "write initialization"]);
     }
 
     [Fact]
-    public async Task Initialize_WhenTheDatabaseHoldsTablesAndNoneOfTheGatewaysMigrations_ShouldRefuse()
+    public async Task Initialize_WhenTheDatabaseHoldsATableThatIsNotTheServersAndNoneOfTheGatewaysMigrations_ShouldRefuse()
     {
-        // Arrange
-        _database.Tables = 3;
+        // Arrange: two of the server's own tables, empty, and one that is nobody's.
+        _database.Tables.Add(new(new("dbo", "pc_events"), HasRows: false));
+        _database.Tables.Add(new(new("dbo", "pc_streams"), HasRows: false));
+        _database.Tables.Add(new(new("dbo", "somebody_elses"), HasRows: false));
 
         // Act
         var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync());
@@ -170,7 +172,40 @@ public sealed class StoreInitializerTests
         // Assert
         exception.Message.ShouldContain("holds 3 tables");
         exception.Message.ShouldContain("not initialized by Nightingale");
-        _schema.Calls.ShouldBe(["report"]);
+        exception.Message.ShouldContain("dbo.somebody_elses are not tables this server creates");
+        _schema.Calls.ShouldBe(["report", "own tables"]);
+    }
+
+    [Fact]
+    public async Task Initialize_WhenTheDatabaseHoldsOnlyEmptyTablesOfTheServers_ShouldInitializeItTheRestOfTheWay()
+    {
+        // Arrange: what a start that died between the store's tables and the gateway's migrations
+        // leaves, here with the migrations' history table made and nothing in it.
+        _database.Tables.Add(new(new("dbo", "pc_events"), HasRows: false));
+        _database.Tables.Add(new(new("nightingale", "__EFMigrationsHistory"), HasRows: false));
+
+        // Act
+        await InitializeAsync();
+
+        // Assert
+        _database.Calls.ShouldBe(["exists", "list tables", "collation"]);
+        _schema.Calls.ShouldBe(["report", "own tables", "apply", "write initialization"]);
+    }
+
+    [Fact]
+    public async Task Initialize_WhenATableOfTheServersHoldsRowsAndNoneOfTheGatewaysMigrations_ShouldRefuse()
+    {
+        // Arrange
+        _database.Tables.Add(new(new("dbo", "pc_events"), HasRows: true));
+        _database.Tables.Add(new(new("dbo", "pc_streams"), HasRows: false));
+
+        // Act
+        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync());
+
+        // Assert
+        exception.Message.ShouldContain("dbo.pc_events hold rows");
+        exception.Message.ShouldContain("only initializes an empty database");
+        _schema.Calls.ShouldBe(["report", "own tables"]);
     }
 
     [Fact]
@@ -323,7 +358,7 @@ public sealed class StoreInitializerTests
 
         public bool Exists { get; set; } = true;
 
-        public int Tables { get; set; }
+        public List<DatabaseTable> Tables { get; } = [];
 
         public DatabaseCollation Collation { get; set; } = new(NightingaleOptions.StoreOptions.DefaultCollation, Utf8, 0, 1033);
 
@@ -356,17 +391,19 @@ public sealed class StoreInitializerTests
             return Task.FromResult(Collation);
         }
 
-        public Task<int> CountTablesAsync(CancellationToken cancellationToken)
+        public Task<IReadOnlyList<DatabaseTable>> ListTablesAsync(CancellationToken cancellationToken)
         {
-            Calls.Add("count tables");
-            return Task.FromResult(Tables);
+            Calls.Add("list tables");
+            return Task.FromResult<IReadOnlyList<DatabaseTable>>(Tables);
         }
     }
 
-    /// <summary>A schema that reports what the test set and records what it was asked. It reports a database that is not initialized unless said otherwise.</summary>
+    /// <summary>A schema that reports what the test set and records what it was asked. It reports a database that is not initialized unless said otherwise, and owns the store's two tables and the migrations' history.</summary>
     private sealed class FakeSchema : IStoreSchema
     {
         public SchemaReport Report { get; set; } = new(true, false, null, ["20260101000000_Initial"], [], []);
+
+        public HashSet<TableName> OwnTables { get; } = [new("dbo", "pc_events"), new("dbo", "pc_streams"), new("nightingale", "__EFMigrationsHistory")];
 
         public List<string> Calls { get; } = [];
 
@@ -379,6 +416,12 @@ public sealed class StoreInitializerTests
             Calls.Add("report");
             TrustedStoreHash = trustStoreHash;
             return Task.FromResult(Report);
+        }
+
+        public Task<IReadOnlySet<TableName>> ListOwnTablesAsync(CancellationToken cancellationToken)
+        {
+            Calls.Add("own tables");
+            return Task.FromResult<IReadOnlySet<TableName>>(OwnTables);
         }
 
         public Task ApplyAsync(CancellationToken cancellationToken)

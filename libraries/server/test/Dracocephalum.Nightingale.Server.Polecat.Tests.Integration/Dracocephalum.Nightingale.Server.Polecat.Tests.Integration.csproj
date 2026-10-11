@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- FakeLogger, so a test reads what a start logged. -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
   </ItemGroup>
 

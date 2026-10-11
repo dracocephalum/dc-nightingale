@@ -7,6 +7,8 @@
   <ItemGroup>
     <!-- The reader's queries run on the in-memory provider; SQL Server's part is the integration suite's. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <!-- FakeLogger, for what the store's schema tooling is told to log. -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.Testing" />
   </ItemGroup>
 
   <ItemGroup>
