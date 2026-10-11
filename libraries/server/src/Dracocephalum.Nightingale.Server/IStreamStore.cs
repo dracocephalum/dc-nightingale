@@ -70,6 +70,20 @@ public interface IStreamStore
     Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Reads where the live events of a range of <c>$all</c> are, in position order, without
+    /// their bodies: the stream and revision of each event at positions from <paramref name="from"/>
+    /// up to <paramref name="head"/>, both inclusive. What <see cref="StreamRouter"/> reads of each
+    /// advance of the tail, once for every subscription to a plain stream, before it reads the
+    /// events of the streams that moved and are followed.
+    /// </summary>
+    /// <param name="from">The first position, inclusive.</param>
+    /// <param name="head">The highest position the page may hold.</param>
+    /// <param name="count">The most pointers to return. Positive.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The pointers of the page, in position order; fewer than asked means the end was reached.</returns>
+    Task<IReadOnlyList<EventPointer>> ReadPointersAsync(long from, long head, int count, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Finds the bounds of a virtual stream: the positions of its first and last live events at or
     /// below <paramref name="head"/>. Its last event is its head; the global head is never reported
     /// as a virtual stream's.

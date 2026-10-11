@@ -347,9 +347,13 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     public async Task Read_WhenSubscribingToAStream_ShouldConfirmCatchUpThenDeliverWhatTheTailBrings()
     {
         // Arrange
+        // Arrange: the live event comes through the router, which reads where the advanced range's
+        // events are, then the stream's own events from the first revision pointed at.
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 0, 10, "a"), Record("orders-1", 1, 11, "b")]));
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 2, StreamsService.PageSize, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadPointersAsync(1, 15, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("shipments-1", 0, 14), new EventPointer("orders-1", 2, 15)]);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 2, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 2, 15, "c")]));
         var client = new Streams.StreamsClient(_channel);
         using var call = client.Read(new ReadRequest { Stream = "orders-1", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
@@ -359,7 +363,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         _tail.Advance(15);
         var live = await Next(call, 2);
 
-        // Assert
+        // Assert: the other stream's event was pointed at and never read.
         catchUp[0].Confirmed.Head.ShouldBe(1);
         catchUp[0].Confirmed.SubscriptionId.ShouldNotBeNullOrEmpty();
         catchUp[1].Event.Revision.ShouldBe(0);
@@ -367,6 +371,35 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         catchUp[3].CaughtUp.Head.ShouldBe(1);
         live[0].Event.Revision.ShouldBe(2);
         live[1].CaughtUp.Head.ShouldBe(2);
+        A.CallTo(() => _store.ReadAsync("shipments-1", A<Direction>._, A<long?>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task Read_WhenTheRouterBringsAnEventAheadOfTheNextRevision_ShouldReadTheStreamAgainAndDeliverInOrder()
+    {
+        // Arrange: revision 2 took a number below the mark and revision 1 one above it, which an
+        // append whose number landed past a gap does; the router brings 2 first.
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10, "a")]));
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 1, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 1, 22, "b"), Record("orders-1", 2, 20, "c")]));
+        A.CallTo(() => _store.ReadPointersAsync(1, 20, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("orders-1", 2, 20)]);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 2, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 2, 20, "c")]));
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(new ReadRequest { Stream = "orders-1", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var catchUp = await Next(call, 3);
+        _tail.Advance(20);
+        var live = await Next(call, 3);
+
+        // Assert: nothing out of order, nothing twice.
+        catchUp[2].CaughtUp.Head.ShouldBe(0);
+        live[0].Event.Revision.ShouldBe(1);
+        live[1].Event.Revision.ShouldBe(2);
+        live[2].CaughtUp.Head.ShouldBe(2);
     }
 
     [Fact]
@@ -374,8 +407,11 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     {
         // Arrange
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
-            .Returns((StreamSlice?)null).Once()
-            .Then.Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10, "a")]));
+            .Returns((StreamSlice?)null);
+        A.CallTo(() => _store.ReadPointersAsync(1, 10, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("orders-1", 0, 10)]);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10, "a")]));
         var client = new Streams.StreamsClient(_channel);
         using var call = client.Read(new ReadRequest { Stream = "orders-1", Start = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -397,7 +433,9 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         // Arrange
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, long.MaxValue, StreamsService.PageSize, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 4), []));
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 5, StreamsService.PageSize, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadPointersAsync(1, 30, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("orders-1", 5, 30)]);
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 5, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 5), [Record("orders-1", 5, 30, "f")]));
         var client = new Streams.StreamsClient(_channel);
         using var call = client.Read(new ReadRequest { Stream = "orders-1", End = new(), Subscription = new SubscriptionOptions() }, cancellationToken: TestContext.Current.CancellationToken);

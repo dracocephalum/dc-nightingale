@@ -252,6 +252,21 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     }
 
     /// <inheritdoc/>
+    public Task<IReadOnlyList<EventPointer>> ReadPointersAsync(long from, long head, int count, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        // Always the main connection: the router routes what the tail says is committed, and
+        // a replica may not hold it yet.
+        if (tenantId is null)
+        {
+            throw new InvalidOperationException("A stream name is per tenant, so the wildcard tenant has no streams to route.");
+        }
+
+        return _virtual.ReadPointersAsync(from, head, count, cancellationToken);
+    }
+
+    /// <inheritdoc/>
     public Task<StreamHead?> VirtualHeadAsync(VirtualStreamName stream, long head, CancellationToken cancellationToken) =>
         _virtual.HeadAsync(stream, head, cancellationToken);
 

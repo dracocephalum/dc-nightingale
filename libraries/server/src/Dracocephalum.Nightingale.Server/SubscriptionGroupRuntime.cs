@@ -27,6 +27,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
 {
     private readonly IStreamStore _store;
     private readonly IStoreTail _tail;
+    private readonly StreamRouter _router;
     private readonly ISubscriptionGroupStore _groups;
     private readonly TimeProvider _time;
     private readonly SubscriptionGroupDefinition _definition;
@@ -62,13 +63,15 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     /// <summary>Initializes a new instance of the <see cref="SubscriptionGroupRuntime"/> class and starts reading; delivery begins when a consumer joins.</summary>
     /// <param name="store">The store.</param>
     /// <param name="tail">The tail.</param>
+    /// <param name="router">The router a plain stream's events come through once the group has caught up.</param>
     /// <param name="groups">The group store.</param>
     /// <param name="time">The clock.</param>
     /// <param name="definition">The group as read from the store.</param>
-    public SubscriptionGroupRuntime(IStreamStore store, IStoreTail tail, ISubscriptionGroupStore groups, TimeProvider time, SubscriptionGroupDefinition definition)
+    public SubscriptionGroupRuntime(IStreamStore store, IStoreTail tail, StreamRouter router, ISubscriptionGroupStore groups, TimeProvider time, SubscriptionGroupDefinition definition)
     {
         _store = store;
         _tail = tail;
+        _router = router;
         _groups = groups;
         _time = time;
         _definition = definition;
@@ -518,7 +521,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         {
             await DrainOutboxAsync(cancellationToken).ConfigureAwait(false);
             var from = _from ?? await HeadAsync(cancellationToken).ConfigureAwait(false) + 1;
-            await foreach (var record in EventSource.FollowAsync(_store, _tail, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, _time, cancellationToken).ConfigureAwait(false))
+            await foreach (var record in EventSource.FollowAsync(_store, _tail, _router, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, _time, cancellationToken).ConfigureAwait(false))
             {
                 await _live.Writer.WriteAsync(record, cancellationToken).ConfigureAwait(false);
             }

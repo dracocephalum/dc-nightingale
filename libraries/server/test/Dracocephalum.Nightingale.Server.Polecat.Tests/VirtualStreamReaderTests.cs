@@ -77,6 +77,18 @@ public sealed class VirtualStreamReaderTests
     }
 
     [Fact]
+    public async Task ReadPointersAsync_ShouldPointAtTheTenantsLiveEventsInPositionOrderWithinTheBounds()
+    {
+        // Act
+        var all = await _sut.ReadPointersAsync(1, 100, 10, TestContext.Current.CancellationToken);
+        var bounded = await _sut.ReadPointersAsync(2, 6, 2, TestContext.Current.CancellationToken);
+
+        // Assert: the deleted stream's event at 4 and the other tenant's at 5 are not pointed at.
+        all.ShouldBe([new EventPointer("orders-1", 0, 1), new EventPointer("shipments-1", 0, 2), new EventPointer("orders-1", 1, 3), new EventPointer("orders-4", 0, 6), new EventPointer("orders-4", 1, 7), new EventPointer("orders-4", 2, 8)]);
+        bounded.ShouldBe([new EventPointer("shipments-1", 0, 2), new EventPointer("orders-1", 1, 3)]);
+    }
+
+    [Fact]
     public async Task ReadAsync_ShouldPageInPositionOrderWithinTheBounds()
     {
         // Act

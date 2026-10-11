@@ -16,9 +16,10 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// answer with an unimplemented status until their slice lands.
 /// </summary>
 /// <param name="stores">The backend's stores and tails, one per tenant; a call resolves those of the tenant it was authorized for.</param>
+/// <param name="routers">The routers a subscription to a plain stream takes its live events through, one per tenant.</param>
 /// <param name="timeProvider">The clock the progress notes are stamped with.</param>
 /// <param name="options">The common settings: which deletions the host allows.</param>
-public sealed class StreamsService(ITenantStores stores, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
+public sealed class StreamsService(ITenantStores stores, StreamRouters routers, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
 {
     /// <summary>The longest stream name the store column holds.</summary>
     public const int MaxStreamNameLength = 250;
@@ -106,7 +107,7 @@ public sealed class StreamsService(ITenantStores stores, TimeProvider timeProvid
                 }
                 else
                 {
-                    await SubscribeStream(store, tail, stream, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    await SubscribeStream(store, routers.For(scope), stream, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
 
                 return;
@@ -404,58 +405,103 @@ public sealed class StreamsService(ITenantStores stores, TimeProvider timeProvid
 
     /// <summary>
     /// A subscription to a plain stream: confirm with the head, deliver what is there, say so, then
-    /// wait for the store's head to move and read what the stream gained. A stream that does not
-    /// exist yet is confirmed with head -1 and waited for. Waking on the store's head rather than
-    /// on the stream's own means one query per wake per subscription; a router that reads the new
-    /// range once and hands events to their subscriptions is the scaling step recorded in TODO.md.
+    /// deliver what the router brings, in revision order, saying so after each batch. A stream that
+    /// does not exist yet is confirmed with head -1 and waited for. The router is followed before
+    /// the first read, so an event the read does not see yet is one the router brings; what the
+    /// router brings ahead of the next revision, or a lapse for leaving too much unread, means the
+    /// stream is read again from where the delivery stands, under a fresh following.
     /// </summary>
-    private async Task SubscribeStream(IStreamStore store, IStoreTail tail, string stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task SubscribeStream(IStreamStore store, StreamRouter router, string stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("D");
         var liveOnly = request.FromCase == ReadRequest.FromOneofCase.End;
         var next = request.FromCase == ReadRequest.FromOneofCase.Position ? request.Position : 0;
 
-        // The store's head is taken before every read, so an event committed between the read and
-        // the wait is not missed: the wait returns as soon as the head is beyond what was taken.
-        var observed = tail.Head;
-        var page = await ReadPage(store, stream, Direction.Forwards, liveOnly ? long.MaxValue : next, PageSize, cancellationToken).ConfigureAwait(false);
-        var head = page?.Head.Last ?? -1;
-        await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = head } }, cancellationToken).ConfigureAwait(false);
-        if (liveOnly)
+        var following = router.Follow(stream);
+        try
         {
-            next = head + 1;
-            page = null;
-        }
-
-        while (true)
-        {
-            var behind = false;
-            while (page is not null && page.Events.Count > 0)
+            var page = await ReadPage(store, stream, Direction.Forwards, liveOnly ? long.MaxValue : next, PageSize, cancellationToken).ConfigureAwait(false);
+            var head = page?.Head.Last ?? -1;
+            await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = head } }, cancellationToken).ConfigureAwait(false);
+            if (liveOnly)
             {
-                if (page.Events.Count == PageSize && page.Head.Last > page.Events[^1].Revision && !behind)
-                {
-                    behind = true;
-                    await responseStream.WriteAsync(FellBehindAt(page.Head.Last, page.Head.Last - next + 1, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
-                }
-
-                foreach (var record in page.Events)
-                {
-                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
-                }
-
-                next = page.Events[^1].Revision + 1;
-                head = page.Head.Last;
-                page = page.Events.Count < PageSize ? null : await ReadPage(store, stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
+                next = head + 1;
+                page = null;
             }
 
-            await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
-
-            do
+            while (true)
             {
-                observed = await tail.WaitForAdvanceAsync(observed, cancellationToken).ConfigureAwait(false);
+                var behind = false;
+                while (page is not null && page.Events.Count > 0)
+                {
+                    if (page.Events.Count == PageSize && page.Head.Last > page.Events[^1].Revision && !behind)
+                    {
+                        behind = true;
+                        await responseStream.WriteAsync(FellBehindAt(page.Head.Last, page.Head.Last - next + 1, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    }
+
+                    foreach (var record in page.Events)
+                    {
+                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    next = page.Events[^1].Revision + 1;
+                    head = page.Head.Last;
+                    page = page.Events.Count < PageSize ? null : await ReadPage(store, stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
+                }
+
+                await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+
+                var ahead = false;
+                while (!ahead && await WaitForLiveAsync(following, cancellationToken).ConfigureAwait(false))
+                {
+                    var delivered = false;
+                    while (following.Events.TryRead(out var record))
+                    {
+                        if (record.Revision < next)
+                        {
+                            continue;
+                        }
+
+                        if (record.Revision > next)
+                        {
+                            ahead = true;
+                            break;
+                        }
+
+                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        next = record.Revision + 1;
+                        head = record.Revision;
+                        delivered = true;
+                    }
+
+                    if (delivered && !ahead)
+                    {
+                        await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                following.Dispose();
+                following = router.Follow(stream);
                 page = await ReadPage(store, stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
             }
-            while (page is null || page.Events.Count == 0);
+        }
+        finally
+        {
+            following.Dispose();
+        }
+    }
+
+    /// <summary>Waits for the router to bring something; a stream deleted meanwhile is the contract's error, as it is on a read.</summary>
+    private static async Task<bool> WaitForLiveAsync(StreamFollowing following, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await following.Events.WaitToReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (StreamDeletedException deleted)
+        {
+            throw NightingaleErrors.StreamDeleted(deleted.Stream);
         }
     }
 
