@@ -6,7 +6,9 @@
   instructions where it sits; keep the name.
 
   Links in the copy are relative to the REPOSITORY ROOT, where the sync puts
-  its rows - not to docs/rules/.
+  its rows - not to docs/rules/. A row with no rule behind it, one that only
+  points at a document of the repository's own (VARIANCES.md, PENDING.md),
+  does not belong here: it goes in the root AGENTS.md outside the block.
 -->
 
 # Rules of this repository
