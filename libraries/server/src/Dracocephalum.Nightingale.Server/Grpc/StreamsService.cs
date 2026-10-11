@@ -7,19 +7,18 @@ using Grpc.Core;
 namespace Dracocephalum.Nightingale.Server.Grpc;
 
 /// <summary>
-/// The <c>Streams</c> service over the <see cref="IStreamStore"/> of the call's tenant and the
-/// store's <see cref="IStoreTail"/>. It validates requests, keeps the contract's message order on
+/// The <c>Streams</c> service over the <see cref="IStreamStore"/> and the <see cref="IStoreTail"/>
+/// of the call's tenant. It validates requests, keeps the contract's message order on
 /// a read, and translates the store's domain exceptions into the contract's errors. It knows
 /// nothing about the backend: revisions and positions arrive from the store already in the
 /// contract's numbering. It serves plain streams, <c>$all</c> and the virtual streams, bounded
 /// and as subscriptions, the virtual streams under either numbering; filters on <c>$all</c>
 /// answer with an unimplemented status until their slice lands.
 /// </summary>
-/// <param name="stores">The backend's stores, one per tenant; a call resolves the one of the tenant it was authorized for.</param>
-/// <param name="tail">The backend's head as it moves.</param>
+/// <param name="stores">The backend's stores and tails, one per tenant; a call resolves those of the tenant it was authorized for.</param>
 /// <param name="timeProvider">The clock the progress notes are stamped with.</param>
 /// <param name="options">The common settings: which deletions the host allows.</param>
-public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
+public sealed class StreamsService(ITenantStores stores, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
 {
     /// <summary>The longest stream name the store column holds.</summary>
     public const int MaxStreamNameLength = 250;
@@ -36,7 +35,9 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(responseStream);
         ArgumentNullException.ThrowIfNull(context);
-        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Read).ConfigureAwait(false));
+        var scope = await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Read).ConfigureAwait(false);
+        var store = stores.GetStreams(scope);
+        var tail = stores.GetTail(scope);
 
         var stream = RequireValidStreamName(request.Stream);
         var all = stream == StreamNames.All;
@@ -69,7 +70,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
             case ReadRequest.ModeOneofCase.Count when request.Count > 0:
                 if (all)
                 {
-                    await ReadAllBounded(store, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
+                    await ReadAllBounded(store, tail, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else if (ordinal)
                 {
@@ -77,7 +78,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
                 }
                 else if (isVirtual)
                 {
-                    await ReadVirtualBounded(store, virtualStream, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
+                    await ReadVirtualBounded(store, tail, virtualStream, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -93,19 +94,19 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
 
                 if (all)
                 {
-                    await SubscribeAll(store, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    await SubscribeAll(store, tail, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else if (ordinal)
                 {
-                    await SubscribeOrdinal(store, virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    await SubscribeOrdinal(store, tail, virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else if (isVirtual)
                 {
-                    await SubscribeVirtual(store, virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    await SubscribeVirtual(store, tail, virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    await SubscribeStream(store, stream, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    await SubscribeStream(store, tail, stream, request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
 
                 return;
@@ -365,7 +366,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
     /// first page, so an append that returned before the read is in it, and no page reads past it,
     /// so events committed during the read are not delivered.
     /// </summary>
-    private async Task ReadAllBounded(IStreamStore store, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private static async Task ReadAllBounded(IStreamStore store, IStoreTail tail, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var head = await tail.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var from = request.FromCase switch
@@ -408,7 +409,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
     /// on the stream's own means one query per wake per subscription; a router that reads the new
     /// range once and hands events to their subscriptions is the scaling step recorded in TODO.md.
     /// </summary>
-    private async Task SubscribeStream(IStreamStore store, string stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task SubscribeStream(IStreamStore store, IStoreTail tail, string stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("D");
         var liveOnly = request.FromCase == ReadRequest.FromOneofCase.End;
@@ -462,7 +463,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
     /// A subscription to <c>$all</c>: the same shape as a stream's, with the store's head as both
     /// the bound of every page and the thing waited on.
     /// </summary>
-    private async Task SubscribeAll(IStreamStore store, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task SubscribeAll(IStreamStore store, IStoreTail tail, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("D");
 
@@ -507,7 +508,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
     /// are the stream's own first and last events. A virtual stream with no events reads as empty,
     /// with bounds of zero, never as not found.
     /// </summary>
-    private async Task ReadVirtualBounded(IStreamStore store, VirtualStreamName stream, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private static async Task ReadVirtualBounded(IStreamStore store, IStoreTail tail, VirtualStreamName stream, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var head = await tail.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var bounds = await store.VirtualHeadAsync(stream, head, cancellationToken).ConfigureAwait(false);
@@ -554,7 +555,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
     /// it reports is always the stream's own last event, so a quiet category keeps a stable head
     /// while the store moves on, and an advance of the store that brings it nothing is silent.
     /// </summary>
-    private async Task SubscribeVirtual(IStreamStore store, VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task SubscribeVirtual(IStreamStore store, IStoreTail tail, VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("D");
         var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
@@ -662,7 +663,7 @@ public sealed class StreamsService(ITenantStores stores, IStoreTail tail, TimePr
     /// advance that a quiet store would never bring. A store advance that brings this
     /// stream nothing is silent, as under global numbering.
     /// </summary>
-    private async Task SubscribeOrdinal(IStreamStore store, VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private async Task SubscribeOrdinal(IStreamStore store, IStoreTail tail, VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("D");
         var observed = tail.Head;

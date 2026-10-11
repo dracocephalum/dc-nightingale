@@ -77,10 +77,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   data, and dropping it is the way out. Close by: recognizing a database that
   holds only the store's own tables, all empty, as one to carry on
   initializing.
-- **Subscriptions under tenant partitioning follow the wrong mark.** The
-  tailer follows the store's single high-water mark; with a sequence per
-  tenant the store keeps a mark per tenant, and the tail would need one too.
-  Close by: with the multi-tenancy work in `PENDING.md`.
 - **Range partitioning of the events table is not a store feature.** The
   store partitions events by tenant or by the archived flag only, and adds
   the partition column to its unique stream-and-version index when it does.

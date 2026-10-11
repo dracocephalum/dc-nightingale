@@ -17,19 +17,22 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// read under an update lock, so a second sequencer whose lease overlapped a takeover continues
 /// from what the first committed rather than numbering anything twice. An event archived or removed
 /// after numbering keeps or vacates its ordinal, and the next ordinal of the key is never reused.
+/// Under a sequence per tenant there is a sequence, a head and a progress row per tenant, and
+/// the sequencer walks each in turn; positions are the tenant's own, so every batch is one
+/// tenant's.
 /// </summary>
 /// <param name="leases">Where the lease is taken.</param>
-/// <param name="tail">The head the sequencer never passes.</param>
+/// <param name="sequences">The sequences to number, each with the head the sequencer never passes.</param>
 /// <param name="registry">The instance id the lease is taken under.</param>
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="schemaName">The schema the event store's tables live in.</param>
-/// <param name="progressSchemaName">The schema the gateway's own tables live in, the progress row among them.</param>
+/// <param name="progressSchemaName">The schema the gateway's own tables live in, the progress rows among them.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 /// <param name="leaseDuration">How long the lease lasts without renewal; <see cref="LeaseDuration"/> when not given. The renewal follows from it.</param>
 internal sealed partial class OrdinalSequencer(
     ISubscriptionGroupStore leases,
-    IStoreTail tail,
+    INumberedSequences sequences,
     SubscriptionGroupRegistry registry,
     string connectionString,
     string schemaName,
@@ -81,26 +84,26 @@ internal sealed partial class OrdinalSequencer(
     public void Dispose() => _stopping.Dispose();
 
     /// <summary>
-    /// Numbers one batch, from the position numbered through up to the head or the batch size,
-    /// whichever comes first, and records the new progress in the same transaction.
+    /// Numbers one batch of a sequence, from the position numbered through up to the head or the
+    /// batch size, whichever comes first, and records the new progress in the same transaction.
     /// </summary>
-    /// <param name="head">The high-water mark; nothing beyond it is numbered.</param>
+    /// <param name="tenantId">The tenant whose sequence it is, or <see langword="null"/> for the shared sequence.</param>
+    /// <param name="head">The sequence's high-water mark; nothing beyond it is numbered.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The position numbered through after the batch.</returns>
-    internal async Task<long> NumberBatchAsync(long head, CancellationToken cancellationToken)
+    internal async Task<long> NumberBatchAsync(string? tenantId, long head, CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var name = SequencerProgress.OrdinalsOf(tenantId);
 
         long from;
         await using (var progress = connection.CreateCommand())
         {
             progress.Transaction = transaction;
-            progress.CommandText = string.Format(
-                CultureInfo.InvariantCulture,
-                "SELECT [Position] FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE [Name] = '" + SequencerProgress.Ordinals + "'",
-                OrdinalsTable);
+            progress.CommandText = string.Format(CultureInfo.InvariantCulture, "SELECT [Position] FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE [Name] = @name", OrdinalsTable);
+            progress.Parameters.AddWithValue("@name", name);
             var value = await progress.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (value is long known)
             {
@@ -111,7 +114,8 @@ internal sealed partial class OrdinalSequencer(
                 from = 0;
                 await using var insert = connection.CreateCommand();
                 insert.Transaction = transaction;
-                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} ([Id], [Name], [Position]) VALUES (NEWID(), '" + SequencerProgress.Ordinals + "', 0)", OrdinalsTable);
+                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} ([Id], [Name], [Position]) VALUES (NEWID(), @name, 0)", OrdinalsTable);
+                insert.Parameters.AddWithValue("@name", name);
                 await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
         }
@@ -128,7 +132,8 @@ internal sealed partial class OrdinalSequencer(
             // Each key's next ordinal is the last one assigned to it plus one, found with one
             // backward seek in the ordinal index; the rows of the batch are then numbered in
             // position order per key. The previous ordinal is -1 when a key is new, so the first
-            // ordinal is 0.
+            // ordinal is 0. Under a sequence per tenant a position is only unique with its tenant,
+            // so the batch is the tenant's rows alone.
             number.Transaction = transaction;
             number.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
@@ -136,7 +141,7 @@ internal sealed partial class OrdinalSequencer(
                 + " SELECT seq_id, tenant_id, category, [type],"
                 + " ROW_NUMBER() OVER (PARTITION BY tenant_id, category ORDER BY seq_id) AS category_n,"
                 + " ROW_NUMBER() OVER (PARTITION BY tenant_id, [type] ORDER BY seq_id) AS type_n"
-                + " FROM {0} WHERE seq_id > @from AND seq_id <= @to),"
+                + " FROM {0} WHERE seq_id > @from AND seq_id <= @to{2}),"
                 + " categories AS ("
                 + " SELECT k.tenant_id, k.category, ISNULL(last.category_ordinal, -1) AS last_ordinal"
                 + " FROM (SELECT DISTINCT tenant_id, category FROM batch) k"
@@ -147,17 +152,24 @@ internal sealed partial class OrdinalSequencer(
                 + " OUTER APPLY (SELECT TOP (1) e.type_ordinal FROM {0} e WHERE e.tenant_id = k.tenant_id AND e.[type] = k.[type] AND e.type_ordinal IS NOT NULL ORDER BY e.type_ordinal DESC) last)"
                 + " UPDATE e SET category_ordinal = c.last_ordinal + b.category_n, type_ordinal = t.last_ordinal + b.type_n"
                 + " FROM {0} e"
-                + " JOIN batch b ON b.seq_id = e.seq_id"
+                + " JOIN batch b ON b.seq_id = e.seq_id AND b.tenant_id = e.tenant_id"
                 + " JOIN categories c ON c.tenant_id = b.tenant_id AND c.category = b.category"
                 + " JOIN types t ON t.tenant_id = b.tenant_id AND t.[type] = b.[type];"
-                + " UPDATE {1} SET [Position] = @to WHERE [Name] = '" + SequencerProgress.Ordinals + "'",
+                + " UPDATE {1} SET [Position] = @to WHERE [Name] = @name",
                 EventsTable,
-                OrdinalsTable);
+                OrdinalsTable,
+                tenantId is null ? string.Empty : " AND tenant_id = @tenant");
             number.Parameters.AddWithValue("@from", from);
             number.Parameters.AddWithValue("@to", to);
+            number.Parameters.AddWithValue("@name", name);
+            if (tenantId is not null)
+            {
+                number.Parameters.AddWithValue("@tenant", tenantId);
+            }
+
             var rows = await number.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            LogNumbered(to, rows - 1);
+            LogNumbered(name, to, rows - 1);
         }
 
         return to;
@@ -195,8 +207,10 @@ internal sealed partial class OrdinalSequencer(
                         LogTookOver(owner);
                     }
 
-                    var numbered = await CatchUpAsync(owner, stopping).ConfigureAwait(false);
-                    if (numbered < 0)
+                    // The count is read before the heads are, so a head that moves during the pass
+                    // is not waited on as if it had not.
+                    var seen = sequences.Advances;
+                    if (!await CatchUpAsync(owner, stopping).ConfigureAwait(false))
                     {
                         // The lease was lost mid-way; the loop asks again after the interval.
                         holding = false;
@@ -204,11 +218,11 @@ internal sealed partial class OrdinalSequencer(
                         continue;
                     }
 
-                    // Caught up: wait for the tail, but no longer than the renewal interval, so the
+                    // Caught up: wait for a head, but no longer than the renewal interval, so the
                     // lease is renewed by the next acquire while the store is quiet.
                     try
                     {
-                        await tail.WaitForAdvanceAsync(numbered, stopping).AsTask().WaitAsync(RenewInterval, timeProvider, stopping).ConfigureAwait(false);
+                        await sequences.WaitForAnyAdvanceAsync(seen, stopping).WaitAsync(RenewInterval, timeProvider, stopping).ConfigureAwait(false);
                     }
                     catch (TimeoutException)
                     {
@@ -253,37 +267,42 @@ internal sealed partial class OrdinalSequencer(
         }
     }
 
-    /// <summary>Numbers batches until the head is reached, renewing the lease along the way.</summary>
-    /// <returns>The position numbered through, or -1 when the lease was lost.</returns>
-    private async Task<long> CatchUpAsync(string owner, CancellationToken stopping)
+    /// <summary>Numbers every sequence in batches until each has reached its head, renewing the lease along the way.</summary>
+    /// <returns>Whether every sequence was caught up; false when the lease was lost.</returns>
+    private async Task<bool> CatchUpAsync(string owner, CancellationToken stopping)
     {
         var renewed = timeProvider.GetTimestamp();
-        while (true)
+        foreach (var sequence in await sequences.ListAsync(stopping).ConfigureAwait(false))
         {
-            var head = tail.Head;
-            var numbered = await NumberBatchAsync(head, stopping).ConfigureAwait(false);
-            if (numbered >= head)
+            while (true)
             {
-                return numbered;
-            }
-
-            if (timeProvider.GetElapsedTime(renewed) >= RenewInterval)
-            {
-                if (await leases.AcquireLeaseAsync(LeaseName, owner, null, _leaseDuration, stopping).ConfigureAwait(false) is not null)
+                var head = sequence.Tail.Head;
+                var numbered = await NumberBatchAsync(sequence.TenantId, head, stopping).ConfigureAwait(false);
+                if (numbered >= head)
                 {
-                    return -1;
+                    break;
                 }
 
-                renewed = timeProvider.GetTimestamp();
+                if (timeProvider.GetElapsedTime(renewed) >= RenewInterval)
+                {
+                    if (await leases.AcquireLeaseAsync(LeaseName, owner, null, _leaseDuration, stopping).ConfigureAwait(false) is not null)
+                    {
+                        return false;
+                    }
+
+                    renewed = timeProvider.GetTimestamp();
+                }
             }
         }
+
+        return true;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "This instance ({Owner}) numbers the virtual streams.")]
     private partial void LogTookOver(string owner);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Numbered events through position {Through}: {Rows} rows.")]
-    private partial void LogNumbered(long through, int rows);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Numbered {Sequence} through position {Through}: {Rows} rows.")]
+    private partial void LogNumbered(string sequence, long through, int rows);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Numbering the virtual streams failed; retrying after the interval.")]
     private partial void LogFailed(Exception exception);

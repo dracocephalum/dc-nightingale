@@ -68,6 +68,10 @@ internal class EventsDbContext : DbContext, ISchemaScoped
         modelBuilder.Entity<EventRow>(row =>
         {
             row.ToTable("pc_events");
+
+            // The store's own key. Under a sequence per tenant a position repeats across tenants
+            // and the store keys the table with its partition column too; the mirror's queries
+            // never resolve identity, selecting columns by name, so the position serves here.
             row.HasKey(e => e.SeqId);
             row.Property(e => e.SeqId).HasColumnName("seq_id").HasColumnType("bigint").ValueGeneratedNever();
             row.Property(e => e.Id).HasColumnName("id").HasColumnType("uniqueidentifier");

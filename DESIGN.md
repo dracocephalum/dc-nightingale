@@ -187,9 +187,22 @@ never the global head.
 Sequence numbers are assigned before a transaction commits, so a forward read
 of `$all` or a subscription must stop at the store's high-water mark, which
 advances by polling; per-stream reads are unaffected because versions are
-dense under the stream lock. Under tenant partitioning there is no global
-sequence, each tenant has its own, so the wildcard read across tenants is
-refused there and everything else still works.
+dense under the stream lock. `PolecatStoreTail` is that mark as the process
+follows it: it runs the store's own high-water agent and nothing else of the
+daemon, and every subscription waits on it rather than polling. Under tenant
+partitioning there is no global sequence, each tenant has its own and its own
+mark, so the wildcard read across tenants is refused there and the tail is per
+tenant: `ITenantStores` hands a scope its tail beside its stores, the one tail
+while the sequence is shared and the tenant's own under a sequence per tenant.
+The store's daemon keeps a mark per tenant too, but only for tenants its
+projections are assigned, of which the gateway has none, and its detector is
+internal (`UPSTREAM.md`); so `PolecatTenantTails` polls the marks itself, in
+the store's terms: one read per interval finds which served tenants moved,
+each is extended through its committed prefix, and a gap that has held a mark
+for the store's stale threshold is given up to the last position appended
+before it, as the store's agent does. The queries are a port of their own,
+`ITenantEventPositions`, so the poller's rules are tested against positions
+written by hand.
 
 ### 5. A group runs in one place, on a lease
 
@@ -296,7 +309,10 @@ message are all in that numbering, so a consumer resuming the group can never
 mix the two, and one that wants the other numbering creates another group.
 Ordinals are per tenant by construction, the sequencer partitions by tenant and
 the indexes lead with the tenant column, so a read across all tenants has no
-single ordinal sequence and is served under global numbering only.
+single ordinal sequence and is served under global numbering only. Under a
+sequence per tenant the sequencer walks each tenant's sequence in turn, behind
+that tenant's own mark, with a progress row per tenant, and a batch is one
+tenant's rows, since a position is only unique with its tenant there.
 
 ### 7. The gateway's own tables are one model, and its own schema
 
@@ -450,12 +466,14 @@ PBKDF2 hash in PHC form (`PasswordHasher`), the built-in administrator is
 configuration, and a verified name and password are remembered per
 instance for a short while, keyed by a digest of what was presented. The
 scope is what a call resolves its stores through: `ITenantStores` hands out
-the stream store and the group store of the tenant, one of each per tenant
-served, made on first use over the one document store, the one sequence and
-the one set of gateway tables — the Polecat stream store opens every
-session for its tenant, the group store reads and writes its tenant's rows,
-and a running group resolves its own tenant's stores from the tenant its row
-carries, so a disabled tenant stops its groups alone. The wildcard resolves
+the stream store, the group store and the tail of the tenant, one of each per
+tenant served, made on first use over the one document store and the one set
+of gateway tables — the Polecat stream store opens every session for its
+tenant, the group store reads and writes its tenant's rows, the tail is the
+process's one tail while the sequence is shared and the tenant's own under a
+sequence per tenant (seam 4), and a running group resolves its own tenant's
+stores and tail from the tenant its row carries, so a disabled tenant stops
+its groups alone. The wildcard resolves
 to a stream store with no tenant, which reads `$all` and the virtual streams
 across tenants through the mirror of the events table and refuses a stream
 name, which is per tenant; it exists while the sequence is shared, which
@@ -521,9 +539,10 @@ transports at once and of a client that can fall back between them.
 
 - `*.Tests` projects are unit tests and need nothing running: the service
   against a strict fake of the port and a tail a test moves by hand, the
-  client against a scripted call, the conversions, the marker comparison, the
-  group store on the in-memory provider, and the model against the schema
-  feature.
+  per-tenant poller against positions a test writes, the client against a
+  scripted call, the conversions, the marker comparison, the group store and
+  the mirror's queries on the in-memory provider, and the model against the
+  schema feature.
 - `*.Tests.Integration` projects need the local SQL Server and run only with
   `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
   path, and the two guards above. Each creates its databases and drops them.

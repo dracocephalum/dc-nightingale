@@ -95,8 +95,25 @@ public static class ServiceCollectionExtensions
         services.AddDbContextFactory<EventsDbContext>(context => context.UseSqlServer(connectionString));
         services.AddDbContextFactory<ReadOnlyEventsDbContext>(context => context.UseSqlServer(readOnlyConnectionString ?? connectionString));
 
-        // One stream store and one group store per tenant, made as tenants are served; the
-        // default tenant's stream store is also the store of a host that resolves none.
+        // One stream store, one group store and one tail per tenant, made as tenants are served;
+        // the default tenant's stream store and tail are also those of a host that resolves no
+        // tenant. The tail is the store's own agent followed once while the sequence is shared,
+        // and a poll of every served tenant's mark under a sequence per tenant.
+        var partitionedByTenant = options.Store.Partitioning == PartitioningMode.Tenant;
+        if (partitionedByTenant)
+        {
+            services.AddSingleton(provider => new PolecatTenantTails(
+                new EventRowPositions(provider.GetRequiredService<IDbContextFactory<EventsDbContext>>()),
+                provider.GetService<TimeProvider>() ?? TimeProvider.System,
+                provider.GetService<ILogger<PolecatTenantTails>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatTenantTails>.Instance));
+            services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatTenantTails>().For(JasperFx.StorageConstants.DefaultTenantId));
+        }
+        else
+        {
+            services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
+            services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
+        }
+
         services.AddSingleton(provider => new PolecatTenantStores(
             provider.GetRequiredService<IDocumentStore>(),
             provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(),
@@ -106,13 +123,14 @@ public static class ServiceCollectionExtensions
                 ? DocumentStore.For(store => Configure(store, readOnlyConnectionString, options))
                 : null,
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
-            options.Store.Partitioning != PartitioningMode.Tenant,
+            !partitionedByTenant,
+            partitionedByTenant
+                ? provider.GetRequiredService<PolecatTenantTails>().For
+                : _ => provider.GetRequiredService<IStoreTail>(),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<PolecatStreamStore>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatStreamStore>.Instance));
         services.AddSingleton<ITenantStores>(provider => provider.GetRequiredService<PolecatTenantStores>());
         services.AddSingleton(provider => provider.GetRequiredService<PolecatTenantStores>().GetStreams(TenantScope.Default));
-        services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
-        services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         services.AddNightingaleSubscriptionGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
         services.Replace(ServiceDescriptor.Singleton<ITenantProvisioner, PolecatTenantProvisioner>());
         services.AddSingleton<IStoreDatabase>(new StoreDatabase(connectionString));
@@ -132,7 +150,15 @@ public static class ServiceCollectionExtensions
 
         // After the initializer, so the first refresh reads tables that are there.
         services.AddHostedService<TenantRefresher>();
-        services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
+        if (partitionedByTenant)
+        {
+            services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatTenantTails>());
+        }
+        else
+        {
+            services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
+        }
+
         if (options.Store.AssignOrdinals)
         {
             // After the tailer, so the sequencer's first look at the head is a real one. The
@@ -140,7 +166,9 @@ public static class ServiceCollectionExtensions
             services.TryAddSingleton<SubscriptionGroupRegistry>();
             services.AddSingleton<IHostedService>(provider => new OrdinalSequencer(
                 provider.GetRequiredService<ISubscriptionGroupStore>(),
-                provider.GetRequiredService<IStoreTail>(),
+                partitionedByTenant
+                    ? new TenantSequences(provider.GetRequiredService<PolecatTenantTails>(), provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>())
+                    : new SharedSequence(provider.GetRequiredService<IStoreTail>()),
                 provider.GetRequiredService<SubscriptionGroupRegistry>(),
                 connectionString,
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,

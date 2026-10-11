@@ -15,12 +15,11 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// instance, refuses a second consumer, runs the group in memory for as long as the consumer
 /// stays, and turns the consumer's acknowledgements into the group's checkpoint.
 /// </summary>
-/// <param name="stores">The backend's stores, one per tenant: a call resolves the group store and the stream store of the tenant it was authorized for, and a running group those of its own tenant.</param>
-/// <param name="tail">The tail.</param>
+/// <param name="stores">The backend's stores and tails, one per tenant: a call resolves the group store and the stream store of the tenant it was authorized for, and a running group those of its own tenant, and the tail its stream is numbered against.</param>
 /// <param name="registry">The groups live in this instance.</param>
 /// <param name="address">Where this instance is reached, written with every lease it takes.</param>
 /// <param name="timeProvider">The clock.</param>
-public sealed class PersistentSubscriptionsService(ITenantStores stores, IStoreTail tail, SubscriptionGroupRegistry registry, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
+public sealed class PersistentSubscriptionsService(ITenantStores stores, SubscriptionGroupRegistry registry, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
 {
     /// <summary>How long a lease lasts; it is renewed at a third of this.</summary>
     public static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
@@ -444,7 +443,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, IStoreT
             throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, owner);
         }
 
-        var runtime = new SubscriptionGroupRuntime(GetStreams(definition), tail, GetGroups(definition), timeProvider, definition);
+        var runtime = new SubscriptionGroupRuntime(GetStreams(definition), GetTail(definition), GetGroups(definition), timeProvider, definition);
         return new SubscriptionGroupHost(definition, runtime, (live, token) => KeepAsync(live, definition, lease, token));
     }
 
@@ -567,6 +566,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, IStoreT
     private async Task<long?> LastKnownAsync(SubscriptionGroupDefinition definition, CancellationToken cancellationToken)
     {
         var store = GetStreams(definition);
+        var tail = GetTail(definition);
         if (StreamNames.TryParseVirtual(definition.Stream, out var virtualStream))
         {
             var head = definition.Settings.Numbering == Numbering.Ordinal
@@ -756,4 +756,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, IStoreT
 
     /// <summary>The group store of a group's own tenant.</summary>
     private ISubscriptionGroupStore GetGroups(SubscriptionGroupDefinition definition) => stores.GetGroups(TenantScope.OfStoreTenant(definition.TenantId));
+
+    /// <summary>The tail of a group's own tenant: the head its stream is numbered against.</summary>
+    private IStoreTail GetTail(SubscriptionGroupDefinition definition) => stores.GetTail(TenantScope.OfStoreTenant(definition.TenantId));
 }

@@ -127,23 +127,6 @@ consistency model is richer still, tag-based conditions of the form "no event
 matching this query since sequence N", and can be exposed once the single-stream
 contract is stable.
 
-## Multi-tenancy: what is left
-
-Tenants share one database and one sequence, every data call works in the
-tenant it was authorized for, and the wildcard spans tenants on reads of
-`$all` and the virtual streams by position; `DESIGN.md` has the shape, and the
-samples run on one database with a tenant per scenario. One thing remains.
-
-**Tenant partitioning.** With the store's per-tenant partitioning
-(`Nightingale:Store:Partitioning` = `Tenant`, fixed when the store is
-initialized and guarded by its marker row) there is a sequence per tenant and
-no global position: the server says so through its features call and refuses
-the wildcard, which is done; what is not is the tail and the sequencer, which
-follow one high-water mark and would need one per tenant, so
-`Nightingale:Store:AssignOrdinals` is refused with it and subscriptions under
-it follow the wrong mark (`TODO.md`). Range partitioning by sequence, the
-gateway's own if ever added, keeps the shared sequence and the wildcard.
-
 ## Database per tenant
 
 Not planned, and recorded so that the cost is known if it is ever wanted.

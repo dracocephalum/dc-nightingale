@@ -35,9 +35,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
 /// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by whoever made this instance, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="contexts">Makes the gateway's own context, for the sequencer's progress.</param>
+/// <param name="ordinalsOf">The tenant whose sequence the sequencer's progress is read for, or <see langword="null"/> while the sequence is shared and the progress is one row.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
+internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, IDbContextFactory<NightingaleDbContext> contexts, string? ordinalsOf, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
 {
     /// <summary>SQL Server's error for a value longer than its column, naming the column.</summary>
     /// <summary>
@@ -293,8 +294,9 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         // Named in full: the store's own LINQ has a method of the same name.
+        var name = SequencerProgress.OrdinalsOf(ordinalsOf);
         var progress = context.SequencerProgress.AsNoTracking()
-            .Where(row => row.Name == SequencerProgress.Ordinals)
+            .Where(row => row.Name == name)
             .Select(row => (long?)row.Position);
         return await EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(progress, cancellationToken).ConfigureAwait(false) ?? 0;
     }
