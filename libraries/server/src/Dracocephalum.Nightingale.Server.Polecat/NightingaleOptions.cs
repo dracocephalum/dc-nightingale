@@ -60,13 +60,19 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     internal TimeSpan TailQuietWait { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Gets or sets how long the tail waits between looks at the store, whether or not the last
-    /// look found movement, in place of the store's own fast and slow polling times. Unset, the
-    /// store's times stand, for whichever tail the host runs. Not bound from configuration, like
-    /// <see cref="TailQuietWait"/>: it is here so that a test can make the interval far longer
-    /// than it waits, and so prove that an event reached the tail because the append woke it.
+    /// Gets or sets how long the tail rests between looks at the store once it has caught up,
+    /// which is how far behind an append made through another instance a subscriber on this one
+    /// can be: an append made through this instance wakes its own tail at once, the others find
+    /// it at their next look. A second, the store's own slow polling time, unless the host says
+    /// otherwise; a look is one small query per instance, whatever the number of subscriptions,
+    /// so a host that wants a quarter of a second across instances pays four such queries a
+    /// second for it. While a look moved the head and left it short of positions already
+    /// committed past it, the tail looks again after the store's fast polling time, a quarter
+    /// of a second, or after this interval when it is shorter. Whichever tail the host runs
+    /// keeps this rule: the store's agent over a shared sequence, the server's own poller under
+    /// a sequence per tenant.
     /// </summary>
-    internal TimeSpan? TailPollingInterval { get; set; }
+    public TimeSpan TailPollingInterval { get; set; } = PolecatTenantTails.SlowInterval;
 
     /// <summary>
     /// Gets or sets how long the sequencer's lease lasts without renewal, after which another

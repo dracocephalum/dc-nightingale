@@ -79,11 +79,19 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.MaxEventsPerAppend)} is {options.MaxEventsPerAppend}; this backend takes at most {PolecatStreamStore.MaxEventsPerAppend} events in one append.");
         }
 
+        if (options.TailPollingInterval <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.TailPollingInterval)} must be positive. It was {options.TailPollingInterval}.");
+        }
+
         services.AddNightingaleOptions(options);
 
         // The signal every append pulses, which whichever tail the host runs waits on: the store's
         // high-water agent takes it as the daemon's wake-up, the per-tenant poller in place of its
-        // interval. The polling times stand as the store sets them unless a test lengthens them.
+        // interval. The slow polling time is the host's setting; the fast one is the store's own
+        // unless the setting is shorter still, and is what the numbering follower reads on too.
+        var slowInterval = options.TailPollingInterval;
+        var fastInterval = slowInterval < PolecatTenantTails.FastInterval ? slowInterval : PolecatTenantTails.FastInterval;
         services.AddSingleton(provider => new AppendSignal(provider.GetService<TimeProvider>() ?? TimeProvider.System));
 
         // How names are compared, as the initializer learns it from the database's collation.
@@ -97,10 +105,10 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<IStoreDatabase>().Name);
             store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals, migrations), connectionString);
             store.Projections.Wakeup = provider.GetRequiredService<AppendSignal>();
-            if (options.TailPollingInterval is { } interval)
+            store.Projections.SlowPollingTime = slowInterval;
+            if (fastInterval < store.Projections.FastPollingTime)
             {
-                store.Projections.FastPollingTime = interval;
-                store.Projections.SlowPollingTime = interval;
+                store.Projections.FastPollingTime = fastInterval;
             }
 
             return store;
@@ -127,8 +135,8 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<AppendSignal>(),
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
                 provider.GetService<ILogger<PolecatTenantTails>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatTenantTails>.Instance,
-                options.TailPollingInterval,
-                options.TailPollingInterval));
+                fastInterval,
+                slowInterval));
             services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatTenantTails>().For(JasperFx.StorageConstants.DefaultTenantId));
         }
         else
@@ -201,7 +209,7 @@ public static class ServiceCollectionExtensions
                     new SequencerProgressReader(provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>()),
                     provider.GetService<TimeProvider>() ?? TimeProvider.System,
                     provider.GetService<ILogger<NumberingFollower>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NumberingFollower>.Instance,
-                    options.TailPollingInterval),
+                    fastInterval),
                 provider.GetRequiredService<SubscriptionGroupRegistry>(),
                 connectionString,
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,

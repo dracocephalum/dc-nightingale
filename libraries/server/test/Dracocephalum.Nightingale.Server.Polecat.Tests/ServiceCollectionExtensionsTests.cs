@@ -34,6 +34,7 @@ public sealed class ServiceCollectionExtensionsTests
             ("Nightingale:CreateDatabase", "false"),
             ("Nightingale:ApplySchemaChanges", "true"),
             ("Nightingale:FastBoot", "true"),
+            ("Nightingale:TailPollingInterval", "00:00:00.250"),
             ("Nightingale:Store:Collation", "Latin1_General_100_BIN2"),
             ("Nightingale:Store:Partitioning", "ArchivedStream"),
             ("Nightingale:Deletion:AllowTombstone", "true"));
@@ -50,6 +51,7 @@ public sealed class ServiceCollectionExtensionsTests
             bound => bound.CreateDatabase.ShouldBeFalse(),
             bound => bound.ApplySchemaChanges.ShouldBeTrue(),
             bound => bound.FastBoot.ShouldBeTrue(),
+            bound => bound.TailPollingInterval.ShouldBe(TimeSpan.FromMilliseconds(250)),
             bound => bound.Store.Collation.ShouldBe("Latin1_General_100_BIN2"),
             bound => bound.Store.Partitioning.ShouldBe(PartitioningMode.ArchivedStream),
             bound => bound.Deletion.AllowDelete.ShouldBeFalse(),
@@ -91,6 +93,39 @@ public sealed class ServiceCollectionExtensionsTests
         // Assert
         exception.Message.ShouldContain("Nightingale:MaxEventsPerAppend");
         exception.Message.ShouldContain(expected);
+    }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("-00:00:01")]
+    public void AddNightingalePolecat_WhenTheTailPollingIntervalIsNotPositive_ShouldRefuseAtRegistration(string configured)
+    {
+        // Arrange
+        var configuration = Configuration(
+            ("ConnectionStrings:Nightingale", ConnectionString),
+            ("Nightingale:TailPollingInterval", configured));
+        var services = new ServiceCollection();
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => services.AddNightingalePolecat(configuration));
+
+        // Assert
+        exception.Message.ShouldContain("Nightingale:TailPollingInterval");
+        exception.Message.ShouldContain("must be positive");
+    }
+
+    [Fact]
+    public void AddNightingalePolecat_ByDefault_ShouldRestASecondBetweenLooksOnceCaughtUp()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddNightingalePolecat(Configuration(("ConnectionStrings:Nightingale", ConnectionString)));
+        using var provider = services.BuildServiceProvider();
+
+        // Assert: the store's own slow polling time, so the two tails rest alike.
+        provider.GetRequiredService<NightingaleOptions>().TailPollingInterval.ShouldBe(TimeSpan.FromSeconds(1));
     }
 
     [Fact]

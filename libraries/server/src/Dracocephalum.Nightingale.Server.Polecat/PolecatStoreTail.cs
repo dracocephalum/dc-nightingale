@@ -13,8 +13,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// committed, and nothing else of the daemon, because the gateway registers no projections. The
 /// agent advances only through committed, gap-free sequence numbers, persists the mark in the
 /// store's progression table, and polls on the daemon's cadence: the fast interval while the head
-/// moves, the slow one when it is quiet, and is woken ahead of either by an append this process
-/// commits, through the <see cref="AppendSignal"/> the store was given as the daemon's wake-up.
+/// moves and is still short of the last number taken, the slow one once it has caught up or
+/// while a gap holds it, and is woken ahead of either by an append this process commits, through
+/// the <see cref="AppendSignal"/> the store was given as the daemon's wake-up.
 /// Every subscription in the process waits on this one tail rather than polling the store itself.
 /// Under a sequence per tenant the store's agent follows a mark that is nobody's, and
 /// <see cref="PolecatTenantTails"/> follows one per tenant instead.

@@ -15,9 +15,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// that has held the mark for the store's stale threshold is given up as a transaction that will
 /// never commit, the mark moving to the last position appended before the threshold, as the
 /// store's agent does. One round trip per interval finds which polled tenants moved, and only
-/// those are read; the interval is the store's fast one while something moved and its slow one
-/// when nothing did, and an append made through this process cuts either short: the poller waits
-/// on the append signal, so the look follows the commit at once. A tenant is polled from the first
+/// those are read; the interval is the store's rule too: the fast one while a look moved a head
+/// and left it short of positions already committed past it, a head catching up, and the slow
+/// one otherwise, a head that has caught up or that a gap holds. An append made through this
+/// process cuts either short: the poller waits on the append signal, so the look follows the
+/// commit at once. A tenant is polled from the first
 /// time its tail is asked for, for the life of the process, as its stores are kept. A look that
 /// fails is logged and taken again at the next interval: the heads stay where they were, and
 /// whoever waits on them waits on.
@@ -26,8 +28,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="appended">Pulsed after each append this process commits; a wait between looks ends at a pulse.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-/// <param name="fastInterval">How long the poller waits after a look that found movement; <see cref="FastInterval"/> when not given.</param>
-/// <param name="slowInterval">How long it waits after a look that found none; <see cref="SlowInterval"/> when not given.</param>
+/// <param name="fastInterval">How long the poller waits after a look that moved a head and left it behind; <see cref="FastInterval"/> when not given.</param>
+/// <param name="slowInterval">How long it waits after any other look; <see cref="SlowInterval"/> when not given.</param>
 /// <param name="staleAfter">How long a gap holds a mark before it is given up; <see cref="StaleAfter"/> when not given.</param>
 internal sealed partial class PolecatTenantTails(
     ITenantEventPositions positions,
@@ -38,10 +40,10 @@ internal sealed partial class PolecatTenantTails(
     TimeSpan? slowInterval = null,
     TimeSpan? staleAfter = null) : IHostedService, IAsyncDisposable
 {
-    /// <summary>How long the poller waits after a look that found movement: the store's fast polling time.</summary>
+    /// <summary>How long the poller waits after a look that moved a head and left it behind: the store's fast polling time.</summary>
     public static readonly TimeSpan FastInterval = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>How long the poller waits after a look that found none: the store's slow polling time.</summary>
+    /// <summary>How long the poller waits after any other look, a head caught up or held by a gap: the store's slow polling time.</summary>
     public static readonly TimeSpan SlowInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>How long a gap holds a mark before it is given up as abandoned: the store's stale sequence threshold.</summary>
@@ -151,7 +153,7 @@ internal sealed partial class PolecatTenantTails(
     /// then each of those extended. The poller looks on its cadence; a test looks by hand.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>Whether any head moved.</returns>
+    /// <returns>Whether a head moved and was left behind positions already committed past it: a head catching up, which calls for the next look soon.</returns>
     internal async Task<bool> LookAsync(CancellationToken cancellationToken)
     {
         var tails = _tails.Values.ToArray();
@@ -161,26 +163,26 @@ internal sealed partial class PolecatTenantTails(
         }
 
         var ceilings = await positions.ReadCeilingsAsync(tails.Select(tail => tail.TenantId).ToArray(), cancellationToken).ConfigureAwait(false);
-        var moved = false;
+        var catchingUp = false;
         foreach (var tail in tails)
         {
             if (ceilings.TryGetValue(tail.TenantId, out var ceiling) && ceiling > tail.Followed.Head)
             {
-                moved |= await ExtendAsync(tail, true, cancellationToken).ConfigureAwait(false);
+                catchingUp |= await ExtendAsync(tail, true, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        return moved;
+        return catchingUp;
     }
 
     private async Task PollAsync(CancellationToken stopping)
     {
         while (!stopping.IsCancellationRequested)
         {
-            var moved = false;
+            var catchingUp = false;
             try
             {
-                moved = await LookAsync(stopping).ConfigureAwait(false);
+                catchingUp = await LookAsync(stopping).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stopping.IsCancellationRequested)
             {
@@ -193,7 +195,7 @@ internal sealed partial class PolecatTenantTails(
 
             try
             {
-                await appended.WaitAsync(moved ? _fast : _slow, stopping).ConfigureAwait(false);
+                await appended.WaitAsync(catchingUp ? _fast : _slow, stopping).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -213,13 +215,14 @@ internal sealed partial class PolecatTenantTails(
     /// Extends a tenant's head through the committed positions that follow it one by one, and,
     /// when asked to, past a gap that has held it longer than the threshold.
     /// </summary>
-    /// <returns>Whether the head moved.</returns>
+    /// <returns>Whether the head moved and was left behind positions seen past it: a gap follows it, or the window was full.</returns>
     private async Task<bool> ExtendAsync(TenantTail tail, bool giveUpAbandoned, CancellationToken cancellationToken)
     {
         var mark = tail.Followed.Head;
         var following = await positions.ReadFollowingAsync(tail.TenantId, mark, RefreshWindow, cancellationToken).ConfigureAwait(false);
         var reached = ContiguousPrefix.Extend(mark, following);
         var gapFollows = following.Count > 0 && following[^1] > reached;
+        var windowFull = following.Count == RefreshWindow;
         if (gapFollows && giveUpAbandoned)
         {
             // A gap right after the head: a number taken by a transaction that has not committed.
@@ -235,8 +238,10 @@ internal sealed partial class PolecatTenantTails(
                 if (past is { } beyond)
                 {
                     LogGaveUpGap(tail.TenantId, reached, beyond);
-                    reached = ContiguousPrefix.Extend(beyond, await positions.ReadFollowingAsync(tail.TenantId, beyond, RefreshWindow, cancellationToken).ConfigureAwait(false));
+                    following = await positions.ReadFollowingAsync(tail.TenantId, beyond, RefreshWindow, cancellationToken).ConfigureAwait(false);
+                    reached = ContiguousPrefix.Extend(beyond, following);
                     gapFollows = false;
+                    windowFull = following.Count == RefreshWindow;
                 }
             }
         }
@@ -252,7 +257,7 @@ internal sealed partial class PolecatTenantTails(
         }
 
         Publish(tail, reached);
-        return true;
+        return gapFollows || windowFull;
     }
 
     private void Publish(TenantTail tail, long mark)

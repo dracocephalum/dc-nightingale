@@ -205,7 +205,17 @@ not wait for it: every stream store pulses `AppendSignal` once its append has
 committed, and the tail waits on that signal between looks, the store's agent
 through the wake-up its daemon settings take and `PolecatTenantTails` in
 place of its interval. Only the appending instance is woken; the others find
-the event at their next poll (`TODO.md`). Under tenant
+the event at their next look, and both tails look on the store's rule: again
+after its fast polling time, a quarter of a second, while a look moved the
+head and left it short of what is already committed, a head catching up; after
+`Nightingale:TailPollingInterval` otherwise, a second by default, whether the
+head has caught up or a gap holds it. So a subscriber on another instance than
+the writer is at most that interval behind, measured at a median of half of it
+on a quiet store and the whole of it while events flow, since every look then
+catches up; the setting buys it down, a quarter of a second for four small
+queries a second per instance, and a signal across instances, Service Broker
+or query notifications on SQL Server, was not worth its machinery for a
+quarter of a second that a setting already gives. Under tenant
 partitioning there is no global sequence, each tenant has its own and its own
 mark, so the wildcard read across tenants is refused there and the tail is per
 tenant: `ITenantStores` hands a scope its tail beside its stores, the one tail
