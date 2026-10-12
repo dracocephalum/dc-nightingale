@@ -14,6 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Tests.Data;
 /// </summary>
 public sealed class SubscriptionGroupStoreTests
 {
+    private const string Owner = "one";
     private static readonly DateTimeOffset Now = new(2026, 9, 22, 8, 0, 0, TimeSpan.Zero);
     private static readonly Guid Billing = Guid.Parse("0198f3a2-0000-7000-8000-000000000001");
 
@@ -29,10 +30,11 @@ public sealed class SubscriptionGroupStoreTests
 
         // Act
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", settings, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
         await Should.ThrowAsync<GroupExistsException>(() => sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", settings, -1) { Id = Billing }, TestContext.Current.CancellationToken));
-        await sut.SaveCheckpointAsync(Billing, 41, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await sut.SaveCheckpointAsync(Billing, 41, Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), Owner, TestContext.Current.CancellationToken);
         await sut.ReplayAsync(Billing, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         var read = await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken);
         var deleted = await sut.DeleteAsync("orders-1", "billing", TestContext.Current.CancellationToken);
@@ -54,11 +56,12 @@ public sealed class SubscriptionGroupStoreTests
         // Arrange
         var sut = Store();
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
 
         // Act
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "shipping", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
-        await sut.SaveCheckpointAsync(Billing, 5, TestContext.Current.CancellationToken);
+        await sut.SaveCheckpointAsync(Billing, 5, Owner, TestContext.Current.CancellationToken);
 
         // Assert
         (await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken))!.Checkpoint.ShouldBe(5);
@@ -72,8 +75,9 @@ public sealed class SubscriptionGroupStoreTests
         // Arrange
         var sut = Store();
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, Guid.NewGuid(), "a", 1, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 12, 12, null, Guid.NewGuid(), "b", 1, Now.AddSeconds(1)), Owner, TestContext.Current.CancellationToken);
 
         // Act
         var before = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
@@ -83,7 +87,7 @@ public sealed class SubscriptionGroupStoreTests
         var afterOne = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
         var rest = await sut.ReplayAsync(Billing, null, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         var afterAll = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
-        await sut.DequeueAsync(Billing, 10, TestContext.Current.CancellationToken);
+        await sut.DequeueAsync(Billing, 10, Owner, TestContext.Current.CancellationToken);
         var afterDequeue = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
 
         // Assert
@@ -108,10 +112,11 @@ public sealed class SubscriptionGroupStoreTests
         // so the order shows which number was used.
         var sut = Store();
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 100, 4, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 200, 3, null, Guid.NewGuid(), "b", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 300, 2, null, Guid.NewGuid(), "c", 3, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 400, 1, null, Guid.NewGuid(), "d", 4, Now), TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 100, 4, null, Guid.NewGuid(), "a", 1, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 200, 3, null, Guid.NewGuid(), "b", 2, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 300, 2, null, Guid.NewGuid(), "c", 3, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 400, 1, null, Guid.NewGuid(), "d", 4, Now), Owner, TestContext.Current.CancellationToken);
 
         // Act
         var byPosition = await sut.ListParkedAsync(Billing, SubscriptionParkedNumber.Position, null, 10, TestContext.Current.CancellationToken);
@@ -158,7 +163,8 @@ public sealed class SubscriptionGroupStoreTests
         var created = GroupSettings.Default with { Start = StreamPosition.From(3), Numbering = Numbering.Ordinal };
         var changed = created with { MessageTimeout = TimeSpan.FromSeconds(7), MaxRetryCount = 4, CheckpointUpperBound = 50, CheckpointAfter = TimeSpan.FromSeconds(1), CheckpointLowerBound = 5, BufferSize = 20, MaxSubscriberCount = 1 };
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", created, -1) { Id = Billing }, TestContext.Current.CancellationToken);
-        await sut.SaveCheckpointAsync(Billing, 41, TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.SaveCheckpointAsync(Billing, 41, Owner, TestContext.Current.CancellationToken);
 
         // Act
         var updated = await sut.UpdateSettingsAsync(Billing, changed, TestContext.Current.CancellationToken);
@@ -177,7 +183,8 @@ public sealed class SubscriptionGroupStoreTests
     {
         // Arrange: a message put on the outbox for later.
         var sut = Store();
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, Guid.NewGuid(), "a", 1, Now), TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, Guid.NewGuid(), "a", 1, Now), Owner, TestContext.Current.CancellationToken);
         await sut.ReplayAsync(Billing, null, SubscriptionParkedNumber.Position, Now.AddMinutes(5), TestContext.Current.CancellationToken);
 
         // Act
@@ -194,13 +201,14 @@ public sealed class SubscriptionGroupStoreTests
     {
         // Arrange: one event at position 40, revision 2 in its stream, ordinal 7 in its category.
         var sut = Store();
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 2, 7, Guid.NewGuid(), "poison", 1, Now), TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 2, 7, Guid.NewGuid(), "poison", 1, Now), Owner, TestContext.Current.CancellationToken);
 
         // Act
         var byWrongNumber = await sut.ReplayAsync(Billing, 40, SubscriptionParkedNumber.Ordinal, Now, TestContext.Current.CancellationToken);
         var byOrdinal = await sut.ReplayAsync(Billing, 7, SubscriptionParkedNumber.Ordinal, Now, TestContext.Current.CancellationToken);
         var due = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 2, 7, Guid.NewGuid(), "poison again", 2, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 2, 7, Guid.NewGuid(), "poison again", 2, Now), Owner, TestContext.Current.CancellationToken);
         var backOnParked = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
         var byRevision = await sut.ReplayAsync(Billing, 2, SubscriptionParkedNumber.Revision, Now, TestContext.Current.CancellationToken);
 
@@ -220,11 +228,12 @@ public sealed class SubscriptionGroupStoreTests
     {
         // Arrange: a replayed message that fails again is parked under the same key.
         var sut = Store();
+        await HoldAsync(sut, Billing);
         var id = Guid.NewGuid();
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, id, "first", 1, Now), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, id, "first", 1, Now), Owner, TestContext.Current.CancellationToken);
 
         // Act
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, id, "second", 3, Now.AddMinutes(1)), TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, id, "second", 3, Now.AddMinutes(1)), Owner, TestContext.Current.CancellationToken);
         await sut.ReplayAsync(Billing, null, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         var due = await sut.DueAsync(Billing, Now, TestContext.Current.CancellationToken);
 
@@ -290,12 +299,13 @@ public sealed class SubscriptionGroupStoreTests
         var sut = Store();
         var consumer = new SubscriptionGroupStore(_contexts, "tenant", _time);
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), Owner, TestContext.Current.CancellationToken);
         await sut.ReplayAsync(Billing, null, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         _contexts.BeforeSave = async () =>
         {
             _contexts.BeforeSave = null;
-            await consumer.DequeueAsync(Billing, 40, TestContext.Current.CancellationToken);
+            await consumer.DequeueAsync(Billing, 40, Owner, TestContext.Current.CancellationToken);
         };
 
         // Act
@@ -313,9 +323,10 @@ public sealed class SubscriptionGroupStoreTests
         // Arrange: two parked, one of them replayed onto the outbox, and a lease that lasts thirty seconds.
         var sut = Store();
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
-        await sut.SaveCheckpointAsync(Billing, 41, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.SaveCheckpointAsync(Billing, 41, Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), Owner, TestContext.Current.CancellationToken);
         await sut.ReplayAsync(Billing, 42, SubscriptionParkedNumber.Position, Now, TestContext.Current.CancellationToken);
         await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "one", new Uri("http://one:5000"), TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
@@ -344,27 +355,127 @@ public sealed class SubscriptionGroupStoreTests
         var sut = Store();
         var live = new SubscriptionGroupLive(Now.AddMinutes(-5), 4, 1, 10, 41, Now.AddSeconds(-20), "ipv4:10.0.0.7:51234", Now, 2, [new SubscriptionConsumerLive(Now.AddMinutes(-5), "ipv4:10.0.0.7:51234", 5, 3), new SubscriptionConsumerLive(Now.AddMinutes(-4), "ipv4:10.0.0.8:51234", 5, 1)]);
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
         await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // Act
-        await sut.SaveLiveAsync(Billing, live, TestContext.Current.CancellationToken);
+        await sut.SaveLiveAsync(Billing, live, Owner, TestContext.Current.CancellationToken);
         var described = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
         var listed = await sut.ListAsync("orders-1", TestContext.Current.CancellationToken);
         _time.Advance(TimeSpan.FromSeconds(31));
         var lapsed = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
         await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
-        await sut.SaveLiveAsync(Billing, null, TestContext.Current.CancellationToken);
+        await sut.SaveLiveAsync(Billing, null, Owner, TestContext.Current.CancellationToken);
         var cleared = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
-        await sut.SaveLiveAsync(Guid.NewGuid(), live, TestContext.Current.CancellationToken);
+        var unknown = await sut.SaveLiveAsync(Guid.NewGuid(), live, Owner, TestContext.Current.CancellationToken);
 
         // Assert: the row keeps the count and the totals, not each consumer; without a holder the
-        // columns are leftovers; cleared, there is nothing to read.
+        // columns are leftovers; cleared, there is nothing to read; a group with no lease, this
+        // one because it does not exist, takes no write.
         var stored = live with { Consumers = [] };
         described.ShouldNotBeNull().Live.ShouldBe(stored);
         listed.ShouldHaveSingleItem().Live.ShouldBe(stored);
         lapsed.ShouldNotBeNull().Live.ShouldBeNull();
         cleared.ShouldNotBeNull().Holder.ShouldNotBeNull();
         cleared.Live.ShouldBeNull();
+        unknown.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task FencedWrites_WithoutTheLease_ShouldBeRefusedAndChangeNothing()
+    {
+        // Arrange: the group exists; its lease is nobody's, then another instance's, then the
+        // writer's own but lapsed.
+        var sut = Store();
+        var live = new SubscriptionGroupLive(Now, 1, 0, 5, null, null, null, Now, 1, []);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+
+        // Act
+        var noLease = await sut.SaveCheckpointAsync(Billing, 5, Owner, TestContext.Current.CancellationToken);
+        await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        var anothers = await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 10, 10, null, Guid.NewGuid(), "poison", 1, Now), Owner, TestContext.Current.CancellationToken);
+        var anothersDequeue = await sut.DequeueAsync(Billing, 10, Owner, TestContext.Current.CancellationToken);
+        var anothersLive = await sut.SaveLiveAsync(Billing, live, Owner, TestContext.Current.CancellationToken);
+        _time.Advance(TimeSpan.FromSeconds(31));
+        await HoldAsync(sut, Billing);
+        _time.Advance(TimeSpan.FromSeconds(31));
+        var lapsed = await sut.SaveCheckpointAsync(Billing, 5, Owner, TestContext.Current.CancellationToken);
+
+        // Assert
+        noLease.ShouldBeFalse();
+        anothers.ShouldBeFalse();
+        anothersDequeue.ShouldBeFalse();
+        anothersLive.ShouldBeFalse();
+        lapsed.ShouldBeFalse();
+        var read = await sut.DescribeAsync("orders-1", "billing", TestContext.Current.CancellationToken);
+        read.ShouldNotBeNull().Definition.Checkpoint.ShouldBe(-1);
+        read.ParkedCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task FencedWrites_WhenTheLeaseChangesHandsUnderTheWrite_ShouldBeRefused()
+    {
+        // Arrange: the lease is the writer's when the write reads it, and another instance's by
+        // the time the write lands: the lease lapses and is taken over in between.
+        var sut = Store();
+        var rival = new SubscriptionGroupStore(_contexts, "tenant", _time);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        _contexts.BeforeSave = async () =>
+        {
+            _contexts.BeforeSave = null;
+            _time.Advance(TimeSpan.FromSeconds(31));
+            await rival.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), "two", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        };
+
+        // Act
+        var written = await sut.SaveCheckpointAsync(Billing, 5, Owner, TestContext.Current.CancellationToken);
+
+        // Assert: the tokens on the lease row refused the write, and the writer learned it was no longer its own.
+        written.ShouldBeFalse();
+        (await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken))!.Checkpoint.ShouldBe(-1);
+    }
+
+    [Fact]
+    public async Task FencedWrites_WhenTheWritersOwnRenewalLandsUnderTheWrite_ShouldStillLand()
+    {
+        // Arrange: the keeper renews the lease between the write's read of it and its save; the
+        // tokens refuse the first try, and the second finds the lease still the writer's.
+        var sut = Store();
+        var keeper = new SubscriptionGroupStore(_contexts, "tenant", _time);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        _contexts.BeforeSave = async () =>
+        {
+            _contexts.BeforeSave = null;
+            _time.Advance(TimeSpan.FromSeconds(1));
+            await keeper.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), Owner, null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        };
+
+        // Act
+        var written = await sut.SaveCheckpointAsync(Billing, 5, Owner, TestContext.Current.CancellationToken);
+
+        // Assert
+        written.ShouldBeTrue();
+        (await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken))!.Checkpoint.ShouldBe(5);
+    }
+
+    [Fact]
+    public async Task SaveCheckpoint_ShouldNeverMoveTheCheckpointBack()
+    {
+        // Arrange
+        var sut = Store();
+        await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+
+        // Act: a write that arrives late, behind one already landed, is taken and changes nothing.
+        var ahead = await sut.SaveCheckpointAsync(Billing, 41, Owner, TestContext.Current.CancellationToken);
+        var behind = await sut.SaveCheckpointAsync(Billing, 40, Owner, TestContext.Current.CancellationToken);
+
+        // Assert
+        ahead.ShouldBeTrue();
+        behind.ShouldBeTrue();
+        (await sut.GetAsync("orders-1", "billing", TestContext.Current.CancellationToken))!.Checkpoint.ShouldBe(41);
     }
 
     [Fact]
@@ -376,8 +487,10 @@ public sealed class SubscriptionGroupStoreTests
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "shipping", GroupSettings.Default, -1) { Id = shipping }, TestContext.Current.CancellationToken);
         await sut.CreateAsync(new SubscriptionGroupDefinition("orders-1", "billing", GroupSettings.Default, -1) { Id = Billing }, TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
-        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), TestContext.Current.CancellationToken);
+        await HoldAsync(sut, Billing);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 40, 40, null, Guid.NewGuid(), "poison", 2, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ParkAsync(new SubscriptionParkedMessage(Billing, 42, 42, null, Guid.NewGuid(), "poison", 2, Now), Owner, TestContext.Current.CancellationToken);
+        await sut.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(Billing), Owner, TestContext.Current.CancellationToken);
         await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(shipping), "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         await sut.AcquireLeaseAsync("ordinals", "one", null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
@@ -398,6 +511,10 @@ public sealed class SubscriptionGroupStoreTests
     }
 
     private SubscriptionGroupStore Store() => new(_contexts, "tenant", _time);
+
+    /// <summary>Takes a group's lease for the writer, for thirty seconds: what every fenced write needs.</summary>
+    private static async Task HoldAsync(SubscriptionGroupStore sut, Guid groupId) =>
+        (await sut.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(groupId), Owner, null, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken)).ShouldBeNull();
 
     /// <summary>
     /// Contexts over one in-memory database per test, with a hook that runs just before a save so

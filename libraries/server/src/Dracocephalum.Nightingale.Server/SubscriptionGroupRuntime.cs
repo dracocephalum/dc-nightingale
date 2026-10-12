@@ -22,6 +22,9 @@ namespace Dracocephalum.Nightingale.Server;
 /// a refusal, is applied to the store to completion even when the consumer leaves the moment it
 /// asked: its departure ends its deliveries, never the bookkeeping, and what it had in flight
 /// goes back to be delivered to the consumers that remain, not counted against the event.
+/// Every write to the store is fenced by the group's lease; one the store refuses, because the
+/// lease is no longer this instance's, ends every consumer's call with who owns the group now,
+/// the same answer a refused renewal gives.
 /// </summary>
 internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
 {
@@ -29,6 +32,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     private readonly IStoreTail _tail;
     private readonly StreamRouter _router;
     private readonly ISubscriptionGroupStore _groups;
+    private readonly string _owner;
     private readonly TimeProvider _time;
     private readonly SubscriptionGroupDefinition _definition;
     private readonly bool _byPosition;
@@ -65,14 +69,16 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     /// <param name="tail">The tail.</param>
     /// <param name="router">The router a plain stream's events come through once the group has caught up.</param>
     /// <param name="groups">The group store.</param>
+    /// <param name="owner">This instance, the one holding the group's lease, which every write names.</param>
     /// <param name="time">The clock.</param>
     /// <param name="definition">The group as read from the store.</param>
-    public SubscriptionGroupRuntime(IStreamStore store, IStoreTail tail, StreamRouter router, ISubscriptionGroupStore groups, TimeProvider time, SubscriptionGroupDefinition definition)
+    public SubscriptionGroupRuntime(IStreamStore store, IStoreTail tail, StreamRouter router, ISubscriptionGroupStore groups, string owner, TimeProvider time, SubscriptionGroupDefinition definition)
     {
         _store = store;
         _tail = tail;
         _router = router;
         _groups = groups;
+        _owner = owner;
         _time = time;
         _definition = definition;
         _checkpoint = definition.Checkpoint;
@@ -278,7 +284,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
 
         foreach (var position in toDequeue)
         {
-            await _groups.DequeueAsync(_definition.Id, position, CancellationToken.None).ConfigureAwait(false);
+            await DequeueAsync(position).ConfigureAwait(false);
         }
 
         await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
@@ -328,7 +334,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         await SettleAsync(toRedeliver, toPark, reason).ConfigureAwait(false);
         foreach (var position in toDequeue)
         {
-            await _groups.DequeueAsync(_definition.Id, position, CancellationToken.None).ConfigureAwait(false);
+            await DequeueAsync(position).ConfigureAwait(false);
         }
 
         await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
@@ -470,10 +476,43 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         {
             // Parking moves a message off the outbox in the same write, so one that came from
             // there and failed again is back where it was, with its new reason and count.
-            await _groups.ParkAsync(
+            var parked = await _groups.ParkAsync(
                 new SubscriptionParkedMessage(_definition.Id, flight.Record.Position, flight.Record.Revision, flight.Record.Ordinal, flight.Record.Id, reason, flight.Attempts, _time.GetUtcNow()),
+                _owner,
                 CancellationToken.None).ConfigureAwait(false);
+            await RequireOwnedAsync(parked).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Takes a message off the outbox, as a fenced write.</summary>
+    private async Task DequeueAsync(long position) =>
+        await RequireOwnedAsync(await _groups.DequeueAsync(_definition.Id, position, _owner, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
+
+    /// <summary>
+    /// What a fenced write's answer means: refused, the lease is no longer this instance's, and
+    /// every consumer is told who owns the group now, or that nobody does yet. Told once; a
+    /// group already failed is not failed again.
+    /// </summary>
+    /// <param name="written">Whether the store took the write.</param>
+    private async Task RequireOwnedAsync(bool written)
+    {
+        if (written)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (_failure is not null)
+            {
+                return;
+            }
+        }
+
+        var holder = await _groups.LeaseHolderAsync(SubscriptionGroupRegistry.GetLeaseName(_definition.Id), CancellationToken.None).ConfigureAwait(false);
+        Fail(holder is null
+            ? new GroupOwnedElsewhereException(_definition.Stream, _definition.Group)
+            : new GroupOwnedElsewhereException(_definition.Stream, _definition.Group, holder.Owner, holder.Address));
     }
 
     private async Task WriteCheckpointIfDueAsync(bool force, CancellationToken cancellationToken)
@@ -497,7 +536,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
             _lastWrite = _time.GetUtcNow();
         }
 
-        await _groups.SaveCheckpointAsync(_definition.Id, checkpoint, cancellationToken).ConfigureAwait(false);
+        await RequireOwnedAsync(await _groups.SaveCheckpointAsync(_definition.Id, checkpoint, _owner, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
     }
 
     /// <summary>Ends every consumer's deliveries when the reader or the dispatcher fails, with the cause.</summary>
@@ -770,7 +809,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                 var record = await ReadOneAsync(message, cancellationToken).ConfigureAwait(false);
                 if (record is null)
                 {
-                    await _groups.DequeueAsync(_definition.Id, message.Position, cancellationToken).ConfigureAwait(false);
+                    await DequeueAsync(message.Position).ConfigureAwait(false);
                     continue;
                 }
 

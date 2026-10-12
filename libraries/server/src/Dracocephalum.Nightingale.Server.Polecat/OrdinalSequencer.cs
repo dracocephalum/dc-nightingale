@@ -17,6 +17,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// read under an update lock, so a second sequencer whose lease overlapped a takeover continues
 /// from what the first committed rather than numbering anything twice. An event archived or removed
 /// after numbering keeps or vacates its ordinal, and the next ordinal of the key is never reused.
+/// An event whose position the tail gave up as a gap and that committed late, below the progress,
+/// is numbered by the next batch with the next ordinal of its key: by ordinal it follows what was
+/// appended after it, and is never left out.
 /// Under a sequence per tenant there is a sequence, a head and a progress row per tenant, and
 /// the sequencer walks each in turn; positions are the tenant's own, so every batch is one
 /// tenant's. How far each sequence is numbered is published in process as each batch commits,
@@ -124,20 +127,22 @@ internal sealed partial class OrdinalSequencer(
             }
         }
 
-        if (from >= head)
-        {
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return from;
-        }
-
-        var to = Math.Min(head, from + BatchSize);
+        // Run even when the progress is at the head: a row committed late lies below the
+        // progress and moves no head, and is found all the same, at the next advance or at the
+        // next renewal on a quiet store. The progress row is written only when it moves.
+        var to = Math.Max(from, Math.Min(head, from + BatchSize));
         await using (var number = connection.CreateCommand())
         {
-            // Each key's next ordinal is the last one assigned to it plus one, found with one
-            // backward seek in the ordinal index; the rows of the batch are then numbered in
-            // position order per key. The previous ordinal is -1 when a key is new, so the first
-            // ordinal is 0. Under a sequence per tenant a position is only unique with its tenant,
-            // so the batch is the tenant's rows alone.
+            // The batch is every unnumbered row up to its end, found through the index over the
+            // unsequenced rows: those between the progress and the end, and any below the
+            // progress that committed late, after the tail had given their position up as a gap,
+            // which an earlier batch therefore never saw. Each key's next ordinal is the last one
+            // assigned to it plus one, found with one backward seek in the ordinal index; the
+            // rows of the batch are then numbered in position order per key, so a late row gets
+            // the next ordinal of its key when it is found and by ordinal follows what was
+            // appended after it: late, never missing. The previous ordinal is -1 when a key is
+            // new, so the first ordinal is 0. Under a sequence per tenant a position is only
+            // unique with its tenant, so the batch is the tenant's rows alone.
             number.Transaction = transaction;
             number.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
@@ -145,7 +150,7 @@ internal sealed partial class OrdinalSequencer(
                 + " SELECT seq_id, tenant_id, category, [type],"
                 + " ROW_NUMBER() OVER (PARTITION BY tenant_id, category ORDER BY seq_id) AS category_n,"
                 + " ROW_NUMBER() OVER (PARTITION BY tenant_id, [type] ORDER BY seq_id) AS type_n"
-                + " FROM {0} WHERE seq_id > @from AND seq_id <= @to{2}),"
+                + " FROM {0} WHERE category_ordinal IS NULL AND seq_id <= @to{2}),"
                 + " categories AS ("
                 + " SELECT k.tenant_id, k.category, ISNULL(last.category_ordinal, -1) AS last_ordinal"
                 + " FROM (SELECT DISTINCT tenant_id, category FROM batch) k"
@@ -159,11 +164,10 @@ internal sealed partial class OrdinalSequencer(
                 + " JOIN batch b ON b.seq_id = e.seq_id AND b.tenant_id = e.tenant_id"
                 + " JOIN categories c ON c.tenant_id = b.tenant_id AND c.category = b.category"
                 + " JOIN types t ON t.tenant_id = b.tenant_id AND t.[type] = b.[type];"
-                + " UPDATE {1} SET [Position] = @to WHERE [Name] = @name",
+                + "{1}",
                 EventsTable,
-                OrdinalsTable,
+                to > from ? string.Format(CultureInfo.InvariantCulture, " UPDATE {0} SET [Position] = @to WHERE [Name] = @name", OrdinalsTable) : string.Empty,
                 tenantId is null ? string.Empty : " AND tenant_id = @tenant");
-            number.Parameters.AddWithValue("@from", from);
             number.Parameters.AddWithValue("@to", to);
             number.Parameters.AddWithValue("@name", name);
             if (tenantId is not null)

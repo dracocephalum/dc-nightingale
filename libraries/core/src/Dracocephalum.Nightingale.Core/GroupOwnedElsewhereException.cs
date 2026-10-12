@@ -36,13 +36,24 @@ public sealed class GroupOwnedElsewhereException : InvalidOperationException
         Address = address;
     }
 
+    /// <summary>Initializes a new instance of the <see cref="GroupOwnedElsewhereException"/> class for a group this instance no longer owns while no instance has taken it: its lease lapsed.</summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="group">The group name.</param>
+    public GroupOwnedElsewhereException(string stream, string group)
+        : base(string.Format(CultureInfo.InvariantCulture, "Group '{1}' on stream '{0}' is no longer owned by this instance: its lease lapsed, and no instance holds it yet.", stream, group))
+    {
+        Stream = stream;
+        Group = group;
+        Owner = string.Empty;
+    }
+
     /// <summary>Gets the stream name.</summary>
     public string Stream { get; }
 
     /// <summary>Gets the group name.</summary>
     public string Group { get; }
 
-    /// <summary>Gets the id of the instance that owns the group.</summary>
+    /// <summary>Gets the id of the instance that owns the group, or an empty string when none does: the lease lapsed and nobody has taken it yet.</summary>
     public string Owner { get; }
 
     /// <summary>Gets where the owner is reached, or <see langword="null"/> when it advertised no address.</summary>
