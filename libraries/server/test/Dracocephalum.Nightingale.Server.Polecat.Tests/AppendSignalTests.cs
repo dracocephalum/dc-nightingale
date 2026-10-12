@@ -69,6 +69,25 @@ public sealed class AppendSignalTests : IDisposable
     }
 
     [Fact]
+    public async Task Stop_ShouldEndTheCurrentWaitAtOnceAndMakeEveryLaterOneAMoment()
+    {
+        // Arrange: a wait of the interval is under way.
+        var waiting = _sut.WaitAsync(TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        // Act
+        _sut.Stop();
+        await waiting.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var later = _sut.WaitAsync(TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+        var atOnce = later.IsCompleted;
+        _time.Advance(AppendSignal.StoppingWait);
+        await later.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Assert: no time passed for the first; the later one lasted the moment, not the interval,
+        // and not nothing either, so an agent whose stop flag is not yet set does not spin.
+        atOnce.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Wait_WhenCancelled_ShouldBeCancelled()
     {
         // Arrange

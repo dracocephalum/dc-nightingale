@@ -10,9 +10,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// The virtual streams under ordinal numbering, against a store initialized with ordinals: the
 /// sequencer runs in the host exactly as it would in production, behind the tail, on its lease,
 /// and the tests wait for its progress rather than numbering anything themselves. Every test uses
-/// a database of its own, dropped at the end whatever happened, one at a time.
+/// a database of its own, dropped at the end whatever happened.
 /// </summary>
-[Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
 public sealed class OrdinalTests : IAsyncLifetime
 {

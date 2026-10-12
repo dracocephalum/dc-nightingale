@@ -49,18 +49,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   revision that was no longer current. Close by: a conditional archive
   statement that carries the expected revision, which is asked for in
   `UPSTREAM.md`.
-- **The integration suite takes eleven minutes.** Every test starts on a
-  database of its own and the `OwnDatabase` collection runs one test at a
-  time, so the first start in each new database pays the store's catalog
-  comparison compile, about ten seconds, serially; a few tests wait on
-  purpose, the blocked-batch one for twelve seconds. Close by: a measured
-  pass first, the suite run with `--report-trx` and the slowest fifteen
-  listed; then tests that need only a report or can share an initialized
-  database made to, and the collection split so that only the tests that
-  need the server to themselves stay serial, the rest in per-class
-  collections under `maxParallelThreads` of about three in
-  `xunit.runner.json`, since unbounded concurrency is what stalled the
-  server's memory grants before.
 - **Range partitioning of the events table is not a store feature.** The
   store partitions events by tenant or by the archived flag only, and adds
   the partition column to its unique stream-and-version index when it does.

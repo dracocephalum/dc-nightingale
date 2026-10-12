@@ -22,9 +22,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="store">The store.</param>
 /// <param name="events">Makes the mirror of the store's events table, over the main connection.</param>
+/// <param name="appended">The signal the agent waits on between looks; told when the tail stops, so the agent's wait ends at once rather than at the interval.</param>
 /// <param name="loggerFactory">Where the daemon's logger comes from.</param>
 /// <param name="quietWait">How long one wait on the store's tracker lasts before the tracker ends it with a timeout; a minute when not given.</param>
-internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextFactory<EventsDbContext> events, ILoggerFactory loggerFactory, TimeSpan? quietWait = null) : IStoreTail, IHostedService, IAsyncDisposable
+internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextFactory<EventsDbContext> events, AppendSignal appended, ILoggerFactory loggerFactory, TimeSpan? quietWait = null) : IStoreTail, IHostedService, IAsyncDisposable
 {
     /// <summary>How many rows past the mark one refresh looks at.</summary>
     private const int RefreshWindow = 10_000;
@@ -157,6 +158,9 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
 
         if (_daemon is not null)
         {
+            // The agent's stop awaits its loop, which is waiting on the signal for the interval;
+            // the signal told first, the loop comes round to the stop in a moment.
+            appended.Stop();
             await _daemon.StopAllAsync().ConfigureAwait(false);
         }
     }

@@ -14,7 +14,7 @@ public sealed class PolecatStoreTailTests
     public async Task Follow_ShouldPublishTheMarkAsItMovesAndEndQuietlyWhenStopped()
     {
         // Arrange: the mark moves to 3, then nothing more happens until the tail is stopped.
-        await using var sut = new PolecatStoreTail(null!, null!, NullLoggerFactory.Instance);
+        await using var sut = new PolecatStoreTail(null!, null!, new AppendSignal(TimeProvider.System), NullLoggerFactory.Instance);
         using var stopping = new CancellationTokenSource();
         var mark = 0L;
         var moved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -45,7 +45,7 @@ public sealed class PolecatStoreTailTests
     {
         // Arrange: the daemon goes away under the tail, which nobody stopped. A cancellation
         // that is not the tail's own is the same thing.
-        await using var sut = new PolecatStoreTail(null!, null!, NullLoggerFactory.Instance);
+        await using var sut = new PolecatStoreTail(null!, null!, new AppendSignal(TimeProvider.System), NullLoggerFactory.Instance);
         var cause = thrown == typeof(ObjectDisposedException) ? new ObjectDisposedException("tracker") : (Exception)Activator.CreateInstance(thrown)!;
         var gone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task WaitBeyond(long beyond, CancellationToken cancellationToken) => gone.Task;
@@ -69,7 +69,7 @@ public sealed class PolecatStoreTailTests
     {
         // Arrange: the store's tracker gives up its wait after a minute without an append, which
         // on a quiet store is every minute. Twice nothing has moved; then the mark is at 4.
-        await using var sut = new PolecatStoreTail(null!, null!, NullLoggerFactory.Instance);
+        await using var sut = new PolecatStoreTail(null!, null!, new AppendSignal(TimeProvider.System), NullLoggerFactory.Instance);
         using var stopping = new CancellationTokenSource();
         var waits = 0;
         Task WaitBeyond(long beyond, CancellationToken cancellationToken) => Interlocked.Increment(ref waits) switch
@@ -94,7 +94,7 @@ public sealed class PolecatStoreTailTests
     {
         // Arrange: a host is stopped by whoever asked and by its own wait for shutdown, and
         // disposed by one of them while the other may still be stopping it.
-        var sut = new PolecatStoreTail(null!, null!, NullLoggerFactory.Instance);
+        var sut = new PolecatStoreTail(null!, null!, new AppendSignal(TimeProvider.System), NullLoggerFactory.Instance);
 
         // Act
         var together = Task.WhenAll(
@@ -113,7 +113,7 @@ public sealed class PolecatStoreTailTests
     public async Task WaitForAdvance_WhenTheHeadIsAlreadyBeyond_ShouldAnswerEvenAfterTheTailFailed()
     {
         // Arrange: the head reached 5 before the tail stopped following.
-        await using var sut = new PolecatStoreTail(null!, null!, NullLoggerFactory.Instance);
+        await using var sut = new PolecatStoreTail(null!, null!, new AppendSignal(TimeProvider.System), NullLoggerFactory.Instance);
         var calls = 0;
         Task WaitBeyond(long beyond, CancellationToken cancellationToken) =>
             calls++ == 0 ? Task.CompletedTask : Task.FromException(new ObjectDisposedException("tracker"));

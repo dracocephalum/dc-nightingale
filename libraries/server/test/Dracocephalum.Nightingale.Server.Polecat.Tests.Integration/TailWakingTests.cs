@@ -12,7 +12,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// head reaches the append in time is the wake. Both tails, the store's own agent over a shared
 /// sequence and the server's poller under a sequence per tenant, on a database of their own.
 /// </summary>
-[Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
 public sealed class TailWakingTests
 {
@@ -46,9 +45,14 @@ public sealed class TailWakingTests
                 head = await tail.WaitForAdvanceAsync(head, timeout.Token);
             }
 
-            // Assert
+            // Assert: and the stop does not wait the interval out either. The store's agent awaits
+            // its loop when stopped, and the loop is waiting on the tail's signal; the tail tells
+            // the signal first, so the loop comes round at once. Without that, this stop lasted
+            // the five minutes.
             head.ShouldBeGreaterThanOrEqualTo(appended.Position);
-            await host.StopAsync(TestContext.Current.CancellationToken);
+            using var stopping = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            stopping.CancelAfter(TimeSpan.FromSeconds(30));
+            await host.StopAsync(stopping.Token);
         }
         finally
         {

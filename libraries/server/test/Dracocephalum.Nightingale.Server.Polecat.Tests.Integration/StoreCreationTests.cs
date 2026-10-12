@@ -12,7 +12,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// read side by side: every column, index, constraint, module, type and partition function, by
 /// definition, and the rows that record what the store was made from.
 /// </summary>
-[Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
 public sealed class StoreCreationTests : IAsyncLifetime
 {

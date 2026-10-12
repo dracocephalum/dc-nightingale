@@ -11,15 +11,22 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// ends the next wait at once, so an append that commits while the tail is looking is never left
 /// to the interval. One waiter at a time, the tail of the process; the sequencer and every
 /// subscription wait on the tail, not on this. Only the appending instance is woken: another
-/// instance's tail finds the event at its next poll.
+/// instance's tail finds the event at its next poll. When the tail stops it says so here first,
+/// and from then on a wait lasts a moment rather than the interval: the store's agent does not
+/// cancel its wait when it is stopped, it awaits its loop, which comes round to the stop only
+/// when the wait ends, so without this a stop would last a whole interval.
 /// </summary>
 /// <param name="timeProvider">The clock a wait's time runs on.</param>
 internal sealed class AppendSignal(TimeProvider timeProvider) : IDaemonWakeup
 {
+    /// <summary>How long a wait lasts once the tail is stopping: enough for the agent to see its stop flag without spinning.</summary>
+    internal static readonly TimeSpan StoppingWait = TimeSpan.FromMilliseconds(50);
+
     private readonly Lock _gate = new();
     private TaskCompletionSource _pulsed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _pulses;
     private long _taken;
+    private bool _stopping;
 
     /// <summary>Says an append has committed: the current wait ends, or the next one begins ended.</summary>
     public void Pulse()
@@ -35,7 +42,21 @@ internal sealed class AppendSignal(TimeProvider timeProvider) : IDaemonWakeup
         pulsed.TrySetResult();
     }
 
-    /// <summary>Waits for a pulse, or for the time to run out, whichever comes first.</summary>
+    /// <summary>Says the tail is stopping: the current wait ends now, and every later one lasts only a moment.</summary>
+    public void Stop()
+    {
+        TaskCompletionSource pulsed;
+        lock (_gate)
+        {
+            _stopping = true;
+            pulsed = _pulsed;
+            _pulsed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        pulsed.TrySetResult();
+    }
+
+    /// <summary>Waits for a pulse, or for the time to run out, whichever comes first; a moment, once the tail is stopping.</summary>
     /// <param name="timeout">How long to wait without a pulse: the tail's polling interval.</param>
     /// <param name="token">Cancelled when the tail stops.</param>
     /// <returns>A task that completes at a pulse or when the time is up, and is cancelled when the tail stops.</returns>
@@ -44,13 +65,27 @@ internal sealed class AppendSignal(TimeProvider timeProvider) : IDaemonWakeup
         Task pulsed;
         lock (_gate)
         {
-            if (_pulses > _taken)
+            if (_stopping)
+            {
+                pulsed = Task.CompletedTask;
+                timeout = StoppingWait;
+            }
+            else if (_pulses > _taken)
             {
                 _taken = _pulses;
                 return;
             }
+            else
+            {
+                pulsed = _pulsed.Task;
+            }
+        }
 
-            pulsed = _pulsed.Task;
+        if (pulsed.IsCompleted)
+        {
+            // Stopping: the wait is the moment, pulses are nobody's business any more.
+            await Task.Delay(timeout, timeProvider, token).ConfigureAwait(false);
+            return;
         }
 
         using var timer = CancellationTokenSource.CreateLinkedTokenSource(token);
