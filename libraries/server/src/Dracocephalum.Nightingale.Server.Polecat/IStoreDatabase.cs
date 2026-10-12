@@ -25,11 +25,28 @@ internal interface IStoreDatabase
     /// <returns>The code page, or <see langword="null"/> when the server knows no collation by that name.</returns>
     Task<int?> ReadCodePageAsync(string collation, CancellationToken cancellationToken);
 
-    /// <summary>Creates the database, empty.</summary>
+    /// <summary>
+    /// Creates the database, empty. A database another instance created in the meantime is taken
+    /// as made: nothing can hold a lock on a database that does not exist yet, so this is the one
+    /// step two instances can race, and the race is settled by the server, not by them.
+    /// </summary>
     /// <param name="collation">A collation the server knows, or <see langword="null"/> for the server's default.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the database exists.</returns>
     Task CreateAsync(string? collation, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Takes the schema lock, held until what is returned is disposed: exclusively to change the
+    /// database, shared to look at it, so a start that verifies never reads a database another
+    /// instance is half-way through changing, and two that would change it do so one after the
+    /// other, the second finding the first's work done. The lock lives with the connection it is
+    /// taken on, which is nobody else's and never pooled: a process that dies releases it when the
+    /// server notices the connection gone. A wait behind another instance is logged.
+    /// </summary>
+    /// <param name="exclusive">Whether the lock is taken to change the database, or to look at it.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The lock; disposing it releases it.</returns>
+    Task<IAsyncDisposable> LockSchemaAsync(bool exclusive, CancellationToken cancellationToken);
 
     /// <summary>The collation the database has: its name, its code page, and what its comparison ignores.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>

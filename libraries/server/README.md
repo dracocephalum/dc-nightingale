@@ -30,9 +30,10 @@ library another host mounts through `AddNightingalePolecat()`, and runs on its
 own with `dotnet run`. A backend belongs beside the server rather than in a
 component of its own because it implements the server's port and ships with
 every change to it; a later backend lands here the same way. The backend owns
-its database: a host names one, and the server creates or initializes it,
-records the settings that shaped it, and refuses a database that is not its
-own. `DESIGN.md` at the repository root says why.
+its database: a host names one; the server verifies it at every start and,
+when `Nightingale:SchemaMode` allows, creates or initializes it and records
+the settings that shaped it; a database that is not its own is refused.
+`DESIGN.md` at the repository root says why.
 
 ## Run it
 
@@ -46,14 +47,17 @@ local SQL Server and live in the `*.Tests.Integration` project, which a plain
     dotnet test Dracocephalum.Nightingale.Server.slnx -p:RunIntegrationTests=true
 
 From this folder, the default host: `dotnet run --project src/Dracocephalum.Nightingale.Server.Polecat`.
-Three switches make the same host do one thing and exit instead of serving;
-append them after `--`:
+Four switches make the same host do one thing and exit instead of serving;
+append them after `--`. The two that change the database do what the two
+modes of `Nightingale:SchemaMode` do at startup, whatever the setting says,
+so a pipeline runs them once and the servers start in the default mode:
 
 | Switch | Does |
 |---|---|
 | `--export-schema schema.sql` | writes the creation script of a new store: the event store's tables with the gateway's additions, then the gateway's own tables; connects to nothing |
 | `--schema-report` | prints what the configured database needs: that it is not initialized yet, or changes to the event store's tables, the gateway's pending migrations, and settings the configuration contradicts; exit code 0 when it is current, 1 when it is not |
-| `--apply-schema` | brings the configured database up to date, the event store's tables first and the gateway's after, whatever `Nightingale:ApplySchemaChanges` says |
+| `--apply-schema` | applies what an initialized database is behind on, the event store's tables first and the gateway's after, as `Migrate` would; a database that is missing or not initialized is refused |
+| `--initialize` | creates the database when it is missing, initializes it when it is empty, finishes an initialization that died half-way, and applies what it is behind on, as `Initialize` would; idempotent |
 
 The gateway's own tables are created by EF Core migrations, generated from
 the model in the server library into the backend that owns the provider.
@@ -83,9 +87,8 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 |---|---|---|
 | `ConnectionStrings:<name>` | a local server, trusted login, database `nightingale` | the SQL Server connection string; it must name a database other than `master` |
 | `Nightingale:ConnectionStringName` | `Nightingale` | which entry under `ConnectionStrings` the server uses |
-| `Nightingale:CreateDatabase` | `true` | create the database when it does not exist; off, a missing database is an error, for a host whose login may not create one |
-| `Nightingale:ApplySchemaChanges` | `false` | apply what a store initialized earlier needs at startup: changes to the event store's tables, then the gateway's pending migrations; off, a database that is behind is refused with what would be applied in the message |
-| `Nightingale:FastBoot` | `false` | at startup, take the event store's tables as current when the hash recorded with them is the hash of the creation script this server would apply, instead of comparing every table; the hash covers the store library, the schema library under it, the gateway's additions and the settings, so an upgrade still compares, but a change made to the tables outside the server goes unnoticed; `--schema-report` and `--apply-schema` always compare |
+| `Nightingale:SchemaMode` | `Verify` | what a start may do to the database. `Verify` checks it and refuses whatever is not what this server expects, missing, not initialized, behind, newer or initialized with other settings, naming the mode or switch that would fix it; the database is expected to be ready, as a service expects its migrations to have run elsewhere. `Migrate` also applies what an initialized store is behind on. `Initialize` also creates a missing database and initializes an empty one, and is idempotent. Every mode takes the schema lock, shared to verify and exclusive to change, so instances starting together do the work once |
+| `Nightingale:FastBoot` | `false` | at startup, take the event store's tables as current when the hash recorded with them is the hash of the creation script this server would apply, instead of comparing every table; the hash covers the store library, the schema library under it, the gateway's additions and the settings, so an upgrade still compares, but a change made to the tables outside the server goes unnoticed; the switches always compare |
 | `Nightingale:TailPollingInterval` | `00:00:01` | how long the tail rests between looks at the store once it has caught up, which is how far behind an append made through another instance a subscriber on this one can be; an append made through this instance wakes its own tail at once. One small query per look per instance, whatever the number of subscriptions, so `00:00:00.250` buys a quarter of a second across instances for four queries a second. While a look moved the head and left it short of what is already committed, the tail looks again after a quarter of a second, or after this interval when it is shorter |
 | `Nightingale:MaxEventsPerAppend` | `150` | the most events one append may carry; one more is refused with `APPEND_SIZE_EXCEEDED` before anything is written, and the caller sends several appends. At most 190, which is what the store takes in one write on SQL Server; more is refused at startup |
 | `Nightingale:Schema` | `nightingale` | the schema the gateway keeps its own tables and its migrations history in; it may be the event store's schema |

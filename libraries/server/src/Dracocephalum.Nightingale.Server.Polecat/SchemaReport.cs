@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// when all three are current.
 /// </summary>
 /// <param name="DatabaseExists">Whether the database is there at all.</param>
-/// <param name="Initialized">Whether the gateway has initialized it: at least one of its migrations is applied.</param>
+/// <param name="Initialized">Whether the gateway has initialized it: the record of the store is complete, which its last row, the one saying who initialized it, says.</param>
 /// <param name="StoreChanges">The change the event store's tables need, as the statements that would be run, or <see langword="null"/> when they match, and when they were not compared: before the store is initialized, while its settings conflict or it is newer than this server, and when <see cref="StoreComparisonSkipped"/> says so.</param>
 /// <param name="PendingMigrations">The gateway's migrations not applied yet, oldest first.</param>
 /// <param name="UnknownMigrations">Migrations applied to the database that this server does not have: the store is newer than the server.</param>
@@ -28,6 +28,22 @@ public sealed record SchemaReport(
     /// </summary>
     public bool StoreComparisonSkipped { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether an initialization died before its record: the gateway's
+    /// migrations are applied, and the row saying who initialized the store is not there. Not
+    /// initialized, and <see cref="SchemaMode.Initialize"/> finishes it.
+    /// </summary>
+    public bool InitializationUnfinished { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the record of what made the store's tables, the store
+    /// library's version and the hash of its creation script, is not this server's while the
+    /// tables are compared current: a library upgraded without a change to the tables, or a
+    /// start that died between applying and recording. Not a difference in the database;
+    /// a start that may change the database rewrites the record.
+    /// </summary>
+    public bool StoreRecordStale { get; init; }
+
     /// <summary>Gets a value indicating whether the database is exactly what this server expects.</summary>
     public bool IsCurrent =>
         DatabaseExists && Initialized && StoreChanges is null && PendingMigrations.Count == 0 && UnknownMigrations.Count == 0 && SettingConflicts.Count == 0;
@@ -43,13 +59,17 @@ public sealed record SchemaReport(
 
         if (IsCurrent)
         {
-            return "The database is current: the event store's tables, the gateway's tables and the settings all match.";
+            return StoreRecordStale
+                ? "The database is current: the event store's tables, the gateway's tables and the settings all match. The record of the store library and of its creation script is not this server's; a start in Migrate or Initialize mode rewrites it."
+                : "The database is current: the event store's tables, the gateway's tables and the settings all match.";
         }
 
         var text = new StringBuilder();
         if (!Initialized)
         {
-            text.AppendLine("The database has not been initialized by Nightingale.");
+            text.AppendLine(InitializationUnfinished
+                ? "An initialization of the database by Nightingale did not finish: the gateway's migrations are applied, and the record of the store is not written. Initialize mode finishes it."
+                : "The database has not been initialized by Nightingale.");
         }
 
         if (UnknownMigrations.Count > 0)

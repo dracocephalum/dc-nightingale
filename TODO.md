@@ -49,16 +49,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   revision that was no longer current. Close by: a conditional archive
   statement that carries the expected revision, which is asked for in
   `UPSTREAM.md`.
-- **An initialization interrupted after the gateway's migrations and before
-  the settings rows is not recognized.** A start that dies between the two
-  halves is carried on by the next, which finds only the server's own tables,
-  all empty; one that dies after the migrations' transaction committed and
-  before the settings rows were written leaves an initialized store with no
-  record of its settings, which the next start reads as a store initialized
-  with the defaults: served when the configuration is the defaults, refused
-  as a settings conflict when it is not. The window is a few row writes wide.
-  Close by: writing the settings rows in the migration's own transaction, or
-  recognizing a store whose property table is empty as one to finish.
 - **Range partitioning of the events table is not a store feature.** The
   store partitions events by tenant or by the archived flag only, and adds
   the partition column to its unique stream-and-version index when it does.

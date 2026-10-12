@@ -19,21 +19,20 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public string ConnectionStringName { get; set; } = "Nightingale";
 
     /// <summary>
-    /// Gets or sets a value indicating whether the server creates the database when it does not
-    /// exist. Off, a missing database is an error, which is the setting for a production host whose
-    /// login is not allowed to create databases and whose database was provisioned empty by hand.
+    /// Gets or sets what a start may do to the database. <see cref="SchemaMode.Verify"/>, the
+    /// default, checks and refuses: the database is expected to be ready, as a service expects
+    /// its migrations to have run elsewhere, and a start against one that is missing, not
+    /// initialized, behind or newer says so and names the mode or the switch that would fix it.
+    /// <see cref="SchemaMode.Migrate"/> also applies what an initialized store is behind on,
+    /// which on a large store can take long. <see cref="SchemaMode.Initialize"/> also creates a
+    /// missing database, with the configured collation, and initializes an empty one; it is
+    /// idempotent, so a host may leave it on. Each mode takes the schema lock, shared to verify
+    /// and exclusive to change, so instances starting together do the work once and never see
+    /// it half-done. The default host's switches do the same work once: <c>--apply-schema</c>
+    /// as <see cref="SchemaMode.Migrate"/> would, <c>--initialize</c> as
+    /// <see cref="SchemaMode.Initialize"/> would.
     /// </summary>
-    public bool CreateDatabase { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the server applies pending schema changes at startup
-    /// to a store it initialized earlier. Off, the server refuses to start when the schema differs
-    /// from what this version expects, and names the difference; a newer server against an older
-    /// store is the case. On, it applies the change, which on a large store can take long. Nothing
-    /// in this setting changes what happens to a store that has not been initialized: that is
-    /// always either initialized from empty or refused.
-    /// </summary>
-    public bool ApplySchemaChanges { get; set; }
+    public SchemaMode SchemaMode { get; set; } = SchemaMode.Verify;
 
     /// <summary>
     /// Gets or sets a value indicating whether startup takes the event store's tables as current

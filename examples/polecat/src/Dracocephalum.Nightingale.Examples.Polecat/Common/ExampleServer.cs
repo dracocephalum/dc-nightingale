@@ -54,6 +54,11 @@ public sealed class ExampleServer : IAsyncDisposable
             options.Auth.AdminPassword = AdminPassword;
             options.Auth.AllowInsecureTransport = true;
 
+            // The samples make their own database as they go; a real host runs in the default
+            // mode, which verifies the database and never changes it, and initializes it once
+            // through the host's switch or a pipeline.
+            options.SchemaMode = SchemaMode.Initialize;
+
             // A store setting fixed when the database is initialized is every server's over that
             // database afterwards: the run's store numbers the virtual streams, since one scenario
             // shows the ordinals, so every sample server says so.

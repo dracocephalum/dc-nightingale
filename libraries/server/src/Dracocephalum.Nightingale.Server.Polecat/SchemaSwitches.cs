@@ -10,6 +10,9 @@ public static class SchemaSwitches
     /// <summary>Prints what the database needs and exits; the exit code is 0 when it is current, 1 when it is not.</summary>
     public const string Report = "--schema-report";
 
-    /// <summary>Brings the database up to date and exits.</summary>
+    /// <summary>Applies what an initialized database is behind on and exits, as <see cref="SchemaMode.Migrate"/> would at startup; a database that is missing or not initialized is refused.</summary>
     public const string Apply = "--apply-schema";
+
+    /// <summary>Creates the database when it is missing, initializes it when it is empty, applies what it is behind on, and exits, as <see cref="SchemaMode.Initialize"/> would at startup.</summary>
+    public const string Initialize = "--initialize";
 }

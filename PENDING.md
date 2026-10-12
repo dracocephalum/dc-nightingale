@@ -379,6 +379,26 @@ host asks, eventually consistent. Pending:
   read-only connection on and off, and what a stronger secondary does for
   read throughput.
 
+## Schema work off the start path
+
+Today the schema is dealt with before the server serves: `Nightingale:SchemaMode`
+says what a start may do, and a start that cannot bring the database to what
+the server expects fails. The shape wanted later: schema work that does not
+block the server. A `SchemaErrorAction` with two values, fail the start as now,
+or disable, where disable puts the store in a *disabled* state, a state of the
+store unit `DESIGN.md` describes under *A registry of stores*: the management
+calls answer, the health endpoint says why, the operations that need nothing
+of what is missing still work, and the store is enabled once the schema is
+brought up to date, by a pipeline or by an operator. Migrations themselves
+then run beside the server rather than ahead of it. Two more pieces belong
+with it: `--schema-script <file>`, the delta the server would apply as one
+reviewable file, the event store's statements and the gateway's idempotent
+migration script in apply order, for the change too large to run at startup
+at all, an index over a very large events table say, which a database
+administrator runs by hand, the server accepting whatever matches its
+definition; and online or resumable index builds where the edition has them,
+an option appended to the index statements of that script.
+
 ## Binary event bodies
 
 `application/octet-stream` through the store's binary event path, which needs

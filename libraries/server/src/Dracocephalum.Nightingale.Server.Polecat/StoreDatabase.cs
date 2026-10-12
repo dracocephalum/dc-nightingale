@@ -1,14 +1,25 @@
 using System.Globalization;
 
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>The database on SQL Server, reached through the store's connection string and, for what must not connect to it, the server's master database.</summary>
 /// <param name="connectionString">The connection string the store uses.</param>
-internal sealed class StoreDatabase(string connectionString) : IStoreDatabase
+/// <param name="logger">The logger; silent when not given.</param>
+internal sealed partial class StoreDatabase(string connectionString, ILogger<StoreDatabase>? logger = null) : IStoreDatabase
 {
+    /// <summary>The name of the schema lock, one per database: whoever holds it exclusively is the one instance changing the database.</summary>
+    internal const string SchemaLockResource = "Nightingale.Schema";
+
+    /// <summary>The error SQL Server raises for a <c>CREATE DATABASE</c> of a name that is taken.</summary>
+    private const int DatabaseExistsError = 1801;
+
     private readonly string _master = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master" }.ConnectionString;
+    private readonly string _unpooled = new SqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
+    private readonly ILogger<StoreDatabase> _logger = logger ?? NullLogger<StoreDatabase>.Instance;
 
     /// <inheritdoc/>
     public string Name { get; } = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
@@ -56,7 +67,44 @@ internal sealed class StoreDatabase(string connectionString) : IStoreDatabase
             command.Parameters.AddWithValue("@collation", collation);
         }
 
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqlException exception) when (exception.Number == DatabaseExistsError)
+        {
+            LogCreatedElsewhere(Name);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IAsyncDisposable> LockSchemaAsync(bool exclusive, CancellationToken cancellationToken)
+    {
+        var mode = exclusive ? "Exclusive" : "Shared";
+        var connection = new SqlConnection(_unpooled);
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            // Asked for at once first, so that a wait behind another instance is said out loud
+            // before it is waited out; the second request waits for as long as it takes.
+            if (await RequestLockAsync(connection, mode, waitForever: false, cancellationToken).ConfigureAwait(false) < 0)
+            {
+                LogWaitingForLock(Name, mode);
+                var result = await RequestLockAsync(connection, mode, waitForever: true, cancellationToken).ConfigureAwait(false);
+                if (result < 0)
+                {
+                    throw new StoreInitializationException($"The schema lock on database {Name} could not be taken: sp_getapplock answered {result}.");
+                }
+            }
+
+            return new SchemaLock(connection);
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <inheritdoc/>
@@ -71,9 +119,6 @@ internal sealed class StoreDatabase(string connectionString) : IStoreDatabase
         await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
         return new DatabaseCollation(reader.GetString(0), ReadInt(reader, 1), ReadInt(reader, 2), ReadInt(reader, 3));
     }
-
-    private static int? ReadInt(SqlDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? null : Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<DatabaseTable>> ListTablesAsync(CancellationToken cancellationToken)
@@ -99,5 +144,53 @@ internal sealed class StoreDatabase(string connectionString) : IStoreDatabase
         }
 
         return tables.OrderBy(table => table.Name.Schema, StringComparer.Ordinal).ThenBy(table => table.Name.Name, StringComparer.Ordinal).ToList();
+    }
+
+    private static int? ReadInt(SqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+
+    /// <summary>Asks for the lock on the session; what comes back is sp_getapplock's answer, 0 or 1 when granted and negative when not.</summary>
+    private static async Task<int> RequestLockAsync(SqlConnection connection, string mode, bool waitForever, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DECLARE @result int; EXEC @result = sp_getapplock @Resource = @resource, @LockMode = @mode, @LockOwner = 'Session', @LockTimeout = @timeout; SELECT @result;";
+        command.CommandTimeout = 0;
+        command.Parameters.AddWithValue("@resource", SchemaLockResource);
+        command.Parameters.AddWithValue("@mode", mode);
+        command.Parameters.AddWithValue("@timeout", waitForever ? -1 : 0);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Database {Database} was created by another instance in the meantime; taking it as made.")]
+    private partial void LogCreatedElsewhere(string database);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Waiting for the schema lock on database {Database} ({Mode}): another instance is working on the schema.")]
+    private partial void LogWaitingForLock(string database, string mode);
+
+    /// <summary>The lock as held: releasing it closes the connection it lives on, which was nobody else's.</summary>
+    private sealed class SchemaLock(SqlConnection connection) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "EXEC sp_releaseapplock @Resource = @resource, @LockOwner = 'Session';";
+                command.Parameters.AddWithValue("@resource", SchemaLockResource);
+                await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+            catch (SqlException)
+            {
+                // The connection is gone, and the lock with it.
+            }
+            catch (InvalidOperationException)
+            {
+                // Same: a connection that is no longer open holds no lock.
+            }
+            finally
+            {
+                await connection.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 }

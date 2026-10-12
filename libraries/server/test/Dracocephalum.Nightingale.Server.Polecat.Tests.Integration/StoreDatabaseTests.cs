@@ -65,6 +65,48 @@ public sealed class StoreDatabaseTests : IAsyncLifetime
         ]);
     }
 
+    [Fact]
+    public async Task Create_WhenAnotherInstanceCreatedTheDatabaseInTheMeantime_ShouldTakeItAsMade()
+    {
+        // Arrange: the database appeared between an instance's look and its create.
+        var database = new StoreDatabase(TestDatabases.ConnectionStringFor(_name));
+        await TestDatabases.CreateEmptyAsync(_name);
+
+        // Act
+        await database.CreateAsync(NightingaleOptions.StoreOptions.DefaultCollation, TestContext.Current.CancellationToken);
+
+        // Assert
+        (await database.ExistsAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task LockSchema_ShouldLetLooksShareTheLockAndMakeAChangeWaitForThemAndThemForIt()
+    {
+        // Arrange
+        var database = new StoreDatabase(TestDatabases.ConnectionStringFor(_name));
+        await TestDatabases.CreateEmptyAsync(_name);
+        var lookOne = await database.LockSchemaAsync(exclusive: false, TestContext.Current.CancellationToken);
+        var lookTwo = await database.LockSchemaAsync(exclusive: false, TestContext.Current.CancellationToken);
+
+        // Act: a change asked for while two looks hold the lock waits until both let go; a look
+        // asked for while the change holds it waits for the change.
+        var change = database.LockSchemaAsync(exclusive: true, TestContext.Current.CancellationToken);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        var changeWaitedForLooks = !change.IsCompleted;
+        await lookOne.DisposeAsync();
+        await lookTwo.DisposeAsync();
+        var held = await change.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var lookThree = database.LockSchemaAsync(exclusive: false, TestContext.Current.CancellationToken);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        var lookWaitedForChange = !lookThree.IsCompleted;
+        await held.DisposeAsync();
+        await using var granted = await lookThree.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        // Assert
+        changeWaitedForLooks.ShouldBeTrue();
+        lookWaitedForChange.ShouldBeTrue();
+    }
+
     [Theory]
     [InlineData(NightingaleOptions.StoreOptions.DefaultCollation, Utf8)]
     [InlineData("SQL_Latin1_General_CP1_CI_AS", 1252)]

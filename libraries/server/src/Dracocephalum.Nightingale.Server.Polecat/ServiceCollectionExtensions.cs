@@ -74,6 +74,12 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options, string? readOnlyConnectionString)
     {
         options.Store.Validate();
+        if (!Enum.IsDefined(options.SchemaMode))
+        {
+            throw new InvalidOperationException(
+                $"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.SchemaMode)} {options.SchemaMode} is not one of {string.Join(", ", Enum.GetNames<SchemaMode>())}.");
+        }
+
         if (options.MaxEventsPerAppend > PolecatStreamStore.MaxEventsPerAppend)
         {
             throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.MaxEventsPerAppend)} is {options.MaxEventsPerAppend}; this backend takes at most {PolecatStreamStore.MaxEventsPerAppend} events in one append.");
@@ -166,7 +172,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(provider => provider.GetRequiredService<PolecatTenantStores>().GetStreams(TenantScope.Default));
         services.AddNightingaleSubscriptionGroupStore(options.Schema, JasperFx.StorageConstants.DefaultTenantId, context => NightingaleDbContextFactory.Configure(context, connectionString, options.Schema));
         services.Replace(ServiceDescriptor.Singleton<ITenantProvisioner, PolecatTenantProvisioner>());
-        services.AddSingleton<IStoreDatabase>(new StoreDatabase(connectionString));
+        services.AddSingleton<IStoreDatabase>(provider => new StoreDatabase(connectionString, provider.GetService<ILogger<StoreDatabase>>()));
         services.AddSingleton(provider => new StoreSchema(
             provider.GetRequiredService<IDocumentStore>(),
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
