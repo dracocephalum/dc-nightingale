@@ -399,10 +399,29 @@ administrator runs by hand, the server accepting whatever matches its
 definition; and online or resumable index builds where the edition has them,
 an option appended to the index statements of that script.
 
-## Binary event bodies
+## Binary event bodies, beside the JSON one
 
-`application/octet-stream` through the store's binary event path, which needs
-a serializer per event type on the server. Deferred until a consumer needs it.
+A body that is not JSON: a Protobuf or Avro payload, or personal data
+encrypted with a key per subject, so that deleting the key forgets the
+subject in a store that never deletes, which is the case most likely to make
+this real. The shape, decided so the lazy route is not taken: never Base64
+inside the JSON body, which the events table's native JSON column would parse
+on every write on top of the size and the encoding; the table already has a
+binary column, `bdata`, beside `data`, the store's own binary path, and a
+binary body goes there raw. A content type on the wire says which; JSON stays
+the default, and nothing else changes, since filters, the virtual streams and
+the ordinals work on names and index columns, never on a body. The store's
+typed binary path, which wants a serializer per event type, is not used; the
+gateway's own readers hydrate rows themselves and read either column, and the
+plain-stream read through the store's session needs the sticky event seam to
+take a row whose JSON body is null, which is the one thing to probe. An event
+may carry both at once, a JSON body and a binary one, which is the better
+shape for encrypted personal data: what stays readable is JSON, the personal
+part is the encrypted binary beside it, and shredding the key leaves an event
+that still says what happened rather than a dead row. Only the gateway's own
+protocol carries two bodies; the reference protocol has one per event, and the
+compatibility adapter would carry the JSON one. No schema change: the column
+exists. Deferred until a consumer needs it.
 
 ## Regular-expression filters in the database
 
