@@ -5,9 +5,11 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 
 /// <summary>
-/// Every decision the initializer makes, against a database and a schema that only answer: when
-/// it creates, when it initializes, when it applies and when it refuses, and what it says. What
-/// the real database and the real schema do under those decisions is the integration tests'.
+/// Every decision the initializer makes, against a database and a schema that only answer: what
+/// each mode may do, when it creates, when it initializes, when it applies and when it refuses,
+/// what it says, and that the schema lock is held, shared to verify and exclusive to change,
+/// around everything it reads or changes. What the real database and the real schema do under
+/// those decisions is the integration tests'.
 /// </summary>
 public sealed class StoreInitializerTests
 {
@@ -36,18 +38,20 @@ public sealed class StoreInitializerTests
         _database.Calls.ShouldBeEmpty();
     }
 
-    [Fact]
-    public async Task Initialize_WhenTheDatabaseIsMissingAndCreationIsOff_ShouldRefuseAndCreateNothing()
+    [Theory]
+    [InlineData(SchemaMode.Verify)]
+    [InlineData(SchemaMode.Migrate)]
+    public async Task Initialize_WhenTheDatabaseIsMissingAndTheModeDoesNotInitialize_ShouldRefuseAndCreateNothing(SchemaMode mode)
     {
         // Arrange
         _database.Exists = false;
-        _options.CreateDatabase = false;
 
         // Act
-        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync());
+        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(mode));
 
-        // Assert
-        exception.Message.ShouldContain("Nightingale:CreateDatabase is false");
+        // Assert: the way out is named, and nothing was locked, let alone created.
+        exception.Message.ShouldContain($"Nightingale:SchemaMode is {mode}");
+        exception.Message.ShouldContain("--initialize");
         _database.Calls.ShouldBe(["exists"]);
         _schema.Calls.ShouldBeEmpty();
     }
@@ -64,9 +68,10 @@ public sealed class StoreInitializerTests
         // Act
         await InitializeAsync();
 
-        // Assert: the collation is checked before it is used, the store's tables come before the
-        // record of what shaped them, and the record holds what is configured.
-        _database.Calls.ShouldBe(["exists", $"code page of {NightingaleOptions.StoreOptions.DefaultCollation}", $"create {NightingaleOptions.StoreOptions.DefaultCollation}", "list tables", "collation"]);
+        // Assert: the collation is checked before it is used, the lock is taken once the database
+        // exists and held to the end, the store's tables come before the record of what shaped
+        // them, and the record holds what is configured.
+        _database.Calls.ShouldBe(["exists", $"code page of {NightingaleOptions.StoreOptions.DefaultCollation}", $"create {NightingaleOptions.StoreOptions.DefaultCollation}", "lock exclusive", "list tables", "collation", "unlock"]);
         _schema.Calls.ShouldBe(["report", "apply", "write initialization"]);
         var written = _schema.Initialization.ShouldNotBeNull();
         written.Settings.Schema.ShouldBe(_options.Store.Schema);
@@ -89,7 +94,7 @@ public sealed class StoreInitializerTests
         await InitializeAsync();
 
         // Assert
-        _database.Calls.ShouldBe(["exists", "create (server default)", "list tables", "collation"]);
+        _database.Calls.ShouldBe(["exists", "create (server default)", "lock exclusive", "list tables", "collation", "unlock"]);
         _schema.Initialization.ShouldNotBeNull().Settings.Collation.ShouldBe("Latin1_General_100_CI_AS_SC_UTF8");
     }
 
@@ -148,18 +153,33 @@ public sealed class StoreInitializerTests
     public async Task Initialize_WhenAProvisionedDatabaseIsEmpty_ShouldInitializeItWithoutCreating()
     {
         // Arrange: a database administrator created the database; the login may not create one.
-        _options.CreateDatabase = false;
 
         // Act
         await InitializeAsync();
 
         // Assert
-        _database.Calls.ShouldBe(["exists", "list tables", "collation"]);
+        _database.Calls.ShouldBe(["exists", "lock exclusive", "list tables", "collation", "unlock"]);
         _schema.Calls.ShouldBe(["report", "apply", "write initialization"]);
     }
 
+    [Theory]
+    [InlineData(SchemaMode.Verify, "lock shared")]
+    [InlineData(SchemaMode.Migrate, "lock exclusive")]
+    public async Task Initialize_WhenTheDatabaseIsNotInitializedAndTheModeDoesNotInitialize_ShouldRefuseUnderTheLockAndChangeNothing(SchemaMode mode, string lockTaken)
+    {
+        // Act
+        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(mode));
+
+        // Assert
+        exception.Message.ShouldContain("has not been initialized by Nightingale");
+        exception.Message.ShouldContain($"Nightingale:SchemaMode is {mode}");
+        exception.Message.ShouldContain("--initialize");
+        _database.Calls.ShouldBe(["exists", lockTaken, "unlock"]);
+        _schema.Calls.ShouldBe(["report"]);
+    }
+
     [Fact]
-    public async Task Initialize_WhenTheDatabaseHoldsATableThatIsNotTheServersAndNoneOfTheGatewaysMigrations_ShouldRefuse()
+    public async Task Initialize_WhenTheDatabaseHoldsATableThatIsNotTheServersAndNoRecordOfAStore_ShouldRefuse()
     {
         // Arrange: two of the server's own tables, empty, and one that is nobody's.
         _database.Tables.Add(new(new("dbo", "pc_events"), HasRows: false));
@@ -188,12 +208,38 @@ public sealed class StoreInitializerTests
         await InitializeAsync();
 
         // Assert
-        _database.Calls.ShouldBe(["exists", "list tables", "collation"]);
+        _database.Calls.ShouldBe(["exists", "lock exclusive", "list tables", "collation", "unlock"]);
         _schema.Calls.ShouldBe(["report", "own tables", "apply", "write initialization"]);
     }
 
     [Fact]
-    public async Task Initialize_WhenATableOfTheServersHoldsRowsAndNoneOfTheGatewaysMigrations_ShouldRefuse()
+    public async Task Initialize_WhenAnEarlierInitializationDiedBeforeTheRecordOfTheStore_ShouldFinishItWhenInitializingAndRefuseOtherwise()
+    {
+        // Arrange: the migrations are applied, so their history holds rows, and the record was
+        // never written; the tables the record would go in are empty.
+        _schema.Report = new SchemaReport(true, false, null, [], [], []) { InitializationUnfinished = true };
+        _database.Tables.Add(new(new("dbo", "pc_events"), HasRows: false));
+        _database.Tables.Add(new(new("nightingale", "__EFMigrationsHistory"), HasRows: true));
+        _database.Tables.Add(new(new("nightingale", "StoreProperty"), HasRows: false));
+        _schema.OwnTables.Add(new("nightingale", "StoreProperty"));
+
+        // Act
+        var verifying = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(SchemaMode.Verify));
+        var migrating = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(SchemaMode.Migrate));
+        await InitializeAsync(SchemaMode.Initialize);
+
+        // Assert: the history's rows are what such an initialization leaves, and are not held
+        // against it; the whole record is written, and the two modes that do not initialize say
+        // what happened and what finishes it.
+        verifying.Message.ShouldContain("did not finish");
+        verifying.Message.ShouldContain("--initialize");
+        migrating.Message.ShouldContain("did not finish");
+        _schema.Calls.ShouldBe(["report", "report", "report", "own tables", "apply", "write initialization"]);
+        _schema.Initialization.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Initialize_WhenATableOfTheServersHoldsRowsAndNoRecordOfAStore_ShouldRefuse()
     {
         // Arrange
         _database.Tables.Add(new(new("dbo", "pc_events"), HasRows: true));
@@ -237,15 +283,16 @@ public sealed class StoreInitializerTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Initialize_WhenTheStoreIsNewerThanTheServer_ShouldRefuseEvenWhenToldToApply(bool applyChanges)
+    [InlineData(SchemaMode.Verify)]
+    [InlineData(SchemaMode.Migrate)]
+    [InlineData(SchemaMode.Initialize)]
+    public async Task Initialize_WhenTheStoreIsNewerThanTheServer_ShouldRefuseWhateverTheMode(SchemaMode mode)
     {
         // Arrange
         _schema.Report = Initialized() with { UnknownMigrations = ["29990101000000_FromTheFuture"] };
 
         // Act
-        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(applyChanges));
+        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(mode));
 
         // Assert
         exception.Message.ShouldContain("newer than this server");
@@ -253,14 +300,16 @@ public sealed class StoreInitializerTests
         _schema.Calls.ShouldBe(["report"]);
     }
 
-    [Fact]
-    public async Task Initialize_WhenTheConfigurationContradictsTheStoresSettings_ShouldRefuseEvenWhenToldToApply()
+    [Theory]
+    [InlineData(SchemaMode.Migrate)]
+    [InlineData(SchemaMode.Initialize)]
+    public async Task Initialize_WhenTheConfigurationContradictsTheStoresSettings_ShouldRefuseEvenWhenAllowedToChange(SchemaMode mode)
     {
         // Arrange
         _schema.Report = Initialized() with { SettingConflicts = ["Partitioning is Tenant but the store was initialized with None"] };
 
         // Act
-        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(applyChanges: true));
+        var exception = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(mode));
 
         // Assert
         exception.Message.ShouldContain("Partitioning is Tenant but the store was initialized with None");
@@ -276,9 +325,9 @@ public sealed class StoreInitializerTests
         _database.Collation = new("SQL_Latin1_General_CP1_CI_AS", Latin1, null, null);
 
         // Act
-        var refused = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync());
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(SchemaMode.Verify));
         _options.Store.IgnoreCollationCompatibility = true;
-        await InitializeAsync();
+        await InitializeAsync(SchemaMode.Verify);
 
         // Assert
         refused.Message.ShouldContain("is not a UTF-8 collation");
@@ -289,7 +338,7 @@ public sealed class StoreInitializerTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public async Task Initialize_WhenTheSchemaIsBehind_ShouldRefuseWithWhatWouldBeAppliedUnlessToldToApply(bool storeChanges, bool pendingMigration)
+    public async Task Initialize_WhenTheSchemaIsBehind_ShouldRefuseToVerifyWithWhatWouldBeAppliedAndApplyOtherwise(bool storeChanges, bool pendingMigration)
     {
         // Arrange
         _schema.Report = Initialized() with
@@ -299,21 +348,40 @@ public sealed class StoreInitializerTests
         };
 
         // Act
-        var refused = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(applyChanges: false));
-        await InitializeAsync(applyChanges: true);
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => InitializeAsync(SchemaMode.Verify));
+        await InitializeAsync(SchemaMode.Migrate);
+        await InitializeAsync(SchemaMode.Initialize);
 
-        // Assert
-        refused.Message.ShouldContain("Nightingale:ApplySchemaChanges is false");
+        // Assert: applying is the tables, then the record of what made them; never the
+        // initialization record, which an initialized store has.
+        refused.Message.ShouldContain("Nightingale:SchemaMode is Verify");
         refused.Message.ShouldContain(storeChanges ? "ix_pc_events_category_seq" : "20270101000000_Next");
         refused.Message.ShouldContain("--apply-schema");
-        _schema.Calls.ShouldBe(["report", "report", "apply", "read created by"]);
+        _schema.Calls.ShouldBe(["report", "report", "apply", "record store", "read created by", "report", "apply", "record store", "read created by"]);
         _schema.Initialization.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(SchemaMode.Verify, "lock shared")]
+    [InlineData(SchemaMode.Migrate, "lock exclusive")]
+    [InlineData(SchemaMode.Initialize, "lock exclusive")]
+    public async Task Initialize_WhenTheStoreIsCurrent_ShouldServeItChangingNothingUnderTheLockTheModeTakes(SchemaMode mode, string lockTaken)
+    {
+        // Arrange
+        _schema.Report = Initialized();
+
+        // Act
+        await InitializeAsync(mode);
+
+        // Assert
+        _database.Calls.ShouldBe(["exists", lockTaken, "collation", "unlock"]);
+        _schema.Calls.ShouldBe(["report", "read created by"]);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Initialize_WhenTheStoreIsCurrent_ShouldServeItChangingNothingAndPassFastBootOn(bool fastBoot)
+    public async Task Initialize_ShouldPassFastBootOnToTheReport(bool fastBoot)
     {
         // Arrange
         _schema.Report = Initialized();
@@ -322,9 +390,21 @@ public sealed class StoreInitializerTests
         await InitializeAsync(fastBoot: fastBoot);
 
         // Assert
-        _database.Calls.ShouldBe(["exists", "collation"]);
-        _schema.Calls.ShouldBe(["report", "read created by"]);
         _schema.TrustedStoreHash.ShouldBe(fastBoot);
+    }
+
+    [Fact]
+    public async Task Initialize_WhenTheStoreIsCurrentUnderARecordThatIsNotThisServers_ShouldRewriteTheRecordUnlessVerifying()
+    {
+        // Arrange: the tables are what this server expects, the recorded library or hash is not.
+        _schema.Report = Initialized() with { StoreRecordStale = true };
+
+        // Act
+        await InitializeAsync(SchemaMode.Verify);
+        await InitializeAsync(SchemaMode.Migrate);
+
+        // Assert
+        _schema.Calls.ShouldBe(["report", "read created by", "report", "record store", "read created by"]);
     }
 
     [Fact]
@@ -332,7 +412,7 @@ public sealed class StoreInitializerTests
     {
         // Arrange
         _schema.Report = Initialized() with { PendingMigrations = ["20270101000000_Next"] };
-        _options.ApplySchemaChanges = true;
+        _options.SchemaMode = SchemaMode.Migrate;
         _options.FastBoot = true;
 
         // Act
@@ -343,15 +423,30 @@ public sealed class StoreInitializerTests
         _schema.TrustedStoreHash.ShouldBe(true);
     }
 
+    [Fact]
+    public async Task Start_ByDefault_ShouldOnlyVerify()
+    {
+        // Arrange: a store that is behind, under the options as a host gets them.
+        _schema.Report = Initialized() with { PendingMigrations = ["20270101000000_Next"] };
+
+        // Act
+        var exception = await Should.ThrowAsync<StoreInitializationException>(() => Initializer().StartAsync(TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.Message.ShouldContain("Nightingale:SchemaMode is Verify");
+        _database.Calls.ShouldContain("lock shared");
+        _schema.Calls.ShouldNotContain("apply");
+    }
+
     private static SchemaReport Initialized() => new(true, true, null, [], [], []);
 
     private StoreInitializer Initializer() =>
         new(_database, _schema, _options, new NameComparison(), new FakeTimeProvider(Now), NullLogger<StoreInitializer>.Instance);
 
-    private Task InitializeAsync(bool applyChanges = false, bool fastBoot = false) =>
-        Initializer().InitializeAsync(applyChanges, fastBoot, TestContext.Current.CancellationToken);
+    private Task InitializeAsync(SchemaMode mode = SchemaMode.Initialize, bool fastBoot = false) =>
+        Initializer().InitializeAsync(mode, fastBoot, TestContext.Current.CancellationToken);
 
-    /// <summary>A database that answers what the test set and records what it was asked. It exists, is empty and has the default collation unless said otherwise.</summary>
+    /// <summary>A database that answers what the test set and records what it was asked, the lock's taking and release included. It exists, is empty and has the default collation unless said otherwise.</summary>
     private sealed class FakeDatabase : IStoreDatabase
     {
         public string Name { get; set; } = "nightingale";
@@ -385,6 +480,12 @@ public sealed class StoreInitializerTests
             return Task.CompletedTask;
         }
 
+        public Task<IAsyncDisposable> LockSchemaAsync(bool exclusive, CancellationToken cancellationToken)
+        {
+            Calls.Add(exclusive ? "lock exclusive" : "lock shared");
+            return Task.FromResult<IAsyncDisposable>(new Held(Calls));
+        }
+
         public Task<DatabaseCollation> ReadCollationAsync(CancellationToken cancellationToken)
         {
             Calls.Add("collation");
@@ -395,6 +496,15 @@ public sealed class StoreInitializerTests
         {
             Calls.Add("list tables");
             return Task.FromResult<IReadOnlyList<DatabaseTable>>(Tables);
+        }
+
+        private sealed class Held(List<string> calls) : IAsyncDisposable
+        {
+            public ValueTask DisposeAsync()
+            {
+                calls.Add("unlock");
+                return ValueTask.CompletedTask;
+            }
         }
     }
 
@@ -427,6 +537,12 @@ public sealed class StoreInitializerTests
         public Task ApplyAsync(CancellationToken cancellationToken)
         {
             Calls.Add("apply");
+            return Task.CompletedTask;
+        }
+
+        public Task RecordStoreAsync(CancellationToken cancellationToken)
+        {
+            Calls.Add("record store");
             return Task.CompletedTask;
         }
 

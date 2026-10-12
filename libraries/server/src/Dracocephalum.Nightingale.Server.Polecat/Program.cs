@@ -2,10 +2,12 @@
 // host mounts the same pieces through the extension methods in Server and in
 // this package; this file exists so the package also runs on its own
 // (dotnet run) and so tests can host it through WebApplicationFactory<Program>.
-// Three switches make it do one thing and exit instead of serving:
+// Four switches make it do one thing and exit instead of serving:
 // --export-schema <file> writes the creation script of a new store;
 // --schema-report prints what the configured database needs, exit code 0 when
-// it is current and 1 when it is not; --apply-schema brings it up to date.
+// it is current and 1 when it is not; --apply-schema applies what an
+// initialized database is behind on; --initialize creates and initializes a
+// database as well, from wherever it is.
 using Dracocephalum.Nightingale.Server;
 using Dracocephalum.Nightingale.Server.Polecat;
 
@@ -30,6 +32,13 @@ if (args.Contains(SchemaSwitches.Report))
 if (args.Contains(SchemaSwitches.Apply))
 {
     await app.Services.ApplyNightingaleSchemaAsync();
+    Console.WriteLine((await app.Services.GetNightingaleSchemaReportAsync()).Describe());
+    return 0;
+}
+
+if (args.Contains(SchemaSwitches.Initialize))
+{
+    await app.Services.InitializeNightingaleStoreAsync();
     Console.WriteLine((await app.Services.GetNightingaleSchemaReportAsync()).Describe());
     return 0;
 }

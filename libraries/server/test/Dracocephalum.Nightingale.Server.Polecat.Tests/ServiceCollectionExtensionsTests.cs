@@ -31,8 +31,7 @@ public sealed class ServiceCollectionExtensionsTests
         // Arrange
         var configuration = Configuration(
             ("ConnectionStrings:Nightingale", ConnectionString),
-            ("Nightingale:CreateDatabase", "false"),
-            ("Nightingale:ApplySchemaChanges", "true"),
+            ("Nightingale:SchemaMode", "Initialize"),
             ("Nightingale:FastBoot", "true"),
             ("Nightingale:TailPollingInterval", "00:00:00.250"),
             ("Nightingale:Store:Collation", "Latin1_General_100_BIN2"),
@@ -48,8 +47,7 @@ public sealed class ServiceCollectionExtensionsTests
         var options = provider.GetRequiredService<NightingaleOptions>();
         options.ShouldSatisfyAllConditions(
             bound => bound.ConnectionStringName.ShouldBe("Nightingale"),
-            bound => bound.CreateDatabase.ShouldBeFalse(),
-            bound => bound.ApplySchemaChanges.ShouldBeTrue(),
+            bound => bound.SchemaMode.ShouldBe(SchemaMode.Initialize),
             bound => bound.FastBoot.ShouldBeTrue(),
             bound => bound.TailPollingInterval.ShouldBe(TimeSpan.FromMilliseconds(250)),
             bound => bound.Store.Collation.ShouldBe("Latin1_General_100_BIN2"),
@@ -74,6 +72,37 @@ public sealed class ServiceCollectionExtensionsTests
 
         // Assert
         exception.Message.ShouldContain("Sideways");
+    }
+
+    [Fact]
+    public void AddNightingalePolecat_WhenTheSchemaModeIsNotAKnownOne_ShouldRefuseAtRegistration()
+    {
+        // Arrange
+        var configuration = Configuration(
+            ("ConnectionStrings:Nightingale", ConnectionString),
+            ("Nightingale:SchemaMode", "7"));
+        var services = new ServiceCollection();
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => services.AddNightingalePolecat(configuration));
+
+        // Assert
+        exception.Message.ShouldContain("Nightingale:SchemaMode");
+        exception.Message.ShouldContain("Verify, Migrate, Initialize");
+    }
+
+    [Fact]
+    public void AddNightingalePolecat_ByDefault_ShouldOnlyVerifyTheDatabase()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddNightingalePolecat(Configuration(("ConnectionStrings:Nightingale", ConnectionString)));
+        using var provider = services.BuildServiceProvider();
+
+        // Assert: a server assumes its database is ready, as a service assumes its migrations ran.
+        provider.GetRequiredService<NightingaleOptions>().SchemaMode.ShouldBe(SchemaMode.Verify);
     }
 
     [Theory]

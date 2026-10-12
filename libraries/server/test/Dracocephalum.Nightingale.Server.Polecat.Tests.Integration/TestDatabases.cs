@@ -82,7 +82,9 @@ internal static class TestDatabases
 
     /// <summary>
     /// Hosts the backend against a database exactly as a production host would, through the same
-    /// registration. What the host logs is kept, not printed: <see cref="Logged"/> reads it.
+    /// registration, in <see cref="SchemaMode.Initialize"/> unless the options say otherwise, since
+    /// most tests start on a database nobody has initialized. What the host logs is kept, not
+    /// printed: <see cref="Logged"/> reads it.
     /// </summary>
     /// <param name="name">The database name.</param>
     /// <param name="configure">Adjusts the options.</param>
@@ -92,7 +94,7 @@ internal static class TestDatabases
         var builder = Host.CreateApplicationBuilder();
         builder.Logging.ClearProviders();
         builder.Logging.AddFakeLogging();
-        builder.Services.AddNightingalePolecat(ConnectionStringFor(name), TestAuth.Off(configure));
+        builder.Services.AddNightingalePolecat(ConnectionStringFor(name), TestAuth.Off(Initializing(configure)));
         var host = builder.Build();
         try
         {
@@ -110,7 +112,7 @@ internal static class TestDatabases
     /// <summary>
     /// Makes an initialized store without the server: the event store's tables from its creation
     /// script, run as one command, then what the server itself does after applying them, the
-    /// gateway's migrations and the rows that record what the store was made from. The server's
+    /// gateway's migrations and, in one transaction, the rows that record what the store was made from. The server's
     /// own way compares the database with what the store expects, and the first comparison in a
     /// database costs many seconds of query compilation; a test that is not about initialization
     /// has no use for it. <c>StoreCreationTests</c> holds a store made this way equal to one the
@@ -164,6 +166,30 @@ internal static class TestDatabases
         configure?.Invoke(options);
         options.FastBoot = true;
     };
+
+    /// <summary>The same options, in <see cref="SchemaMode.Initialize"/> unless they say otherwise.</summary>
+    /// <param name="configure">Adjusts the options.</param>
+    /// <returns>Initialize mode, followed by the adjustment.</returns>
+    public static Action<NightingaleOptions> Initializing(Action<NightingaleOptions>? configure = null) => options =>
+    {
+        options.SchemaMode = SchemaMode.Initialize;
+        configure?.Invoke(options);
+    };
+
+    /// <summary>
+    /// An initialization that died after the gateway's migrations and before the record of the
+    /// store: the event store's tables and the gateway's, and no row in any of them but the
+    /// migrations' history.
+    /// </summary>
+    /// <param name="name">The database name; the database must not exist.</param>
+    /// <returns>A task that completes when the database is in that state.</returns>
+    public static async Task LeaveInitializationUnfinishedAsync(string name)
+    {
+        await CreateEmptyAsync(name);
+        await using var provider = Backend(name, configure: null);
+        await CreateStoreTablesAsync(name, provider);
+        await provider.GetRequiredService<StoreSchema>().MigrateAsync(CancellationToken.None);
+    }
 
     /// <summary>
     /// The first half of an initialization alone, in a database that exists and is empty: the

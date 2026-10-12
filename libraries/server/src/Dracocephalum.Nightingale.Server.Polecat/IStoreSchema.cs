@@ -25,12 +25,26 @@ internal interface IStoreSchema
     /// <returns>The tables, by schema and name.</returns>
     Task<IReadOnlySet<TableName>> ListOwnTablesAsync(CancellationToken cancellationToken);
 
-    /// <summary>Applies what is pending: the event store's tables first, then the gateway's migrations.</summary>
+    /// <summary>Applies what the tables are behind on: the event store's first, then the gateway's migrations. Writes no row of the store's record.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the database is current.</returns>
+    /// <returns>A task that completes when the tables are current.</returns>
     Task ApplyAsync(CancellationToken cancellationToken);
 
-    /// <summary>Records what an empty database was initialized with, and by whom and when.</summary>
+    /// <summary>
+    /// Records, on an initialized store, what this server applied: the version of the store's
+    /// library and the hash of its creation script, and the default tenant's row when it is
+    /// missing. What a start writes after applying changes, and again when it finds the record
+    /// behind this server's.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the rows are written.</returns>
+    Task RecordStoreAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Records what an empty database was initialized with, and by whom and when: every row of
+    /// the store's record, the default tenant's included, in one transaction, so that the row
+    /// saying who initialized the store is there exactly when all of them are.
+    /// </summary>
     /// <param name="settings">The settings, with the database's actual collation.</param>
     /// <param name="createdAt">When the store was initialized.</param>
     /// <param name="createdBy">The version of the server that initialized it.</param>

@@ -101,7 +101,13 @@ from the augmented definition without connecting to anything.
 A host never configures the store; it names a database. The initializer,
 `StoreInitializer`, runs at startup before any request is served, under one
 rule: the server initializes only an empty database, and never changes a
-store while serving it unless told to.
+store while serving it unless told to. What a start may do is
+`Nightingale:SchemaMode`: `Verify`, the default, checks and refuses, since a
+server assumes its database is ready the way a service assumes its migrations
+ran elsewhere; `Migrate` also applies what an initialized store is behind on;
+`Initialize` also creates and initializes, and is idempotent, so a host may
+leave it on. The default host's switches do the same work once for a
+pipeline.
 
 Two mechanisms keep the database's tables, and they are kept in one order.
 The event store's tables, with the gateway's additions to them, are compared
@@ -115,20 +121,37 @@ gateway's tables are about a store that exists. `StoreSchema` is the one
 place that reports what is pending in both and applies it; startup, the
 default host's switches and a host's own code all go through it.
 
+- Every start takes the schema lock, an application lock named for the
+  gateway in the database, on a connection of its own that is never pooled,
+  so the lock lives exactly as long as the work and dies with the process:
+  shared to verify, exclusive to change. Instances starting together
+  therefore do the work once, the second finding it done under the lock, and
+  a verifier never reads a database another instance is half-way through
+  changing. Creating the database is the one step no lock can cover, and a
+  database another instance created first is taken as made.
 - A database that does not exist is created, with the configured collation,
-  when `Nightingale:CreateDatabase` allows it.
+  in `Initialize` mode; the other modes refuse, naming the mode and the
+  switch.
 - An empty database, created by the server or provisioned by hand, gets the
   store's tables and then the gateway's while every table is empty, so no
-  index is ever built over data, and a row per property of the store in
-  `StoreProperty`: the settings below that shaped it, with the actual
-  collation, then when and by which server version it was initialized, the
-  version of the store's library and the hash of its creation script.
-- An initialized database, one that has any of the gateway's migrations, is
-  refused when it has a migration this server does not know, because the
-  store is then newer than the server; refused when the configuration
-  contradicts a setting it was initialized with; and refused when either set
-  of tables is behind what this server expects, with what would be applied
-  in the message, unless `Nightingale:ApplySchemaChanges` is on.
+  index is ever built over data, and then a row per property of the store in
+  `StoreProperty`, written in one transaction with the default tenant's row:
+  the settings below that shaped it, with the actual collation, the version
+  of the store's library and the hash of its creation script, then when and
+  by which server version it was initialized. The last row is what the next
+  start reads as "initialized", so a record is complete or absent, never
+  partial, and a start that died anywhere before it leaves a database that
+  `Initialize` finishes and the other modes refuse, saying so.
+- An initialized database is refused when it has a migration this server
+  does not know, because the store is then newer than the server; refused
+  when the configuration contradicts a setting it was initialized with; and
+  refused when either set of tables is behind what this server expects, with
+  what would be applied in the message, in `Verify` mode; the other two apply
+  it, then record the library and the hash again. A store whose tables are
+  current under a record that is not this server's, after an upgrade that
+  changed no table, or a start that died between applying and recording, is
+  served by every mode and has its record rewritten by the two that may
+  write.
   The comparison of the store's tables is the slow part of a start the first
   time the database server compiles it, about ten seconds for the eighty
   catalog statements the store's schema library sends, and a fraction of a
@@ -141,12 +164,13 @@ default host's switches and a host's own code all go through it.
   initialization make their store from the creation script and start with
   fast boot on; one test holds a store made that way equal to one the server
   initialized, catalog and recorded rows.
-- A database with tables and none of the gateway's migrations is refused
-  outright, it is not ours, unless every table is one the server creates and
-  every one is empty: that is what a start that died between the store's
-  tables and the gateway's migrations leaves, and both halves apply only what
-  is missing, so the next start initializes it the rest of the way, with a
-  warning. A table that is not the server's, or one with rows, still refuses.
+- A database with tables and no record of a store is refused outright, it is
+  not ours, unless every table is one the server creates and every one is
+  empty but for the migrations' history: that is what a start that died
+  before its record leaves, and both halves apply only what is missing, so
+  the next start in `Initialize` mode initializes it the rest of the way,
+  with a warning. A table that is not the server's, or one with rows, still
+  refuses.
 - What a start applies is logged, each half under its own category at the
   same levels: the gateway's migrations by Entity Framework, the store's
   script by the schema tooling's logger routed to the host's logging under
@@ -154,11 +178,12 @@ default host's switches and a host's own code all go through it.
   error naming the statements when one fails. The server's README says
   which keys turn each on.
 
-The same report and the same apply are there without starting the server:
+The same report and the same work are there without starting the server:
 `--schema-report` on the default host prints what the database needs and
-exits with 1 when it is not current, `--apply-schema` brings it up to date,
-and a host of its own calls `GetNightingaleSchemaReportAsync` and
-`ApplyNightingaleSchemaAsync`.
+exits with 1 when it is not current, `--apply-schema` does what `Migrate`
+does and `--initialize` what `Initialize` does, whatever the setting says,
+and a host of its own calls `GetNightingaleSchemaReportAsync`,
+`ApplyNightingaleSchemaAsync` and `InitializeNightingaleStoreAsync`.
 
 The settings under `Nightingale:Store` are the ones fixed at initialization
 because each shapes the store's tables or where they live: the schema they

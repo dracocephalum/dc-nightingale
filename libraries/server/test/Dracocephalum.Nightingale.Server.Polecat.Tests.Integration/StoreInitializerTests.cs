@@ -9,9 +9,11 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 
 /// <summary>
-/// The server owns its database: it creates or initializes an empty one, records the settings that
-/// shaped it, refuses a database that is not its own or whose record disagrees with the
-/// configuration, and never migrates while serving unless told to. The decisions themselves are
+/// The server owns its database as far as its mode allows: in Initialize mode it creates or
+/// initializes an empty one, finishes one left half-way, and records the settings that shaped it;
+/// it refuses a database that is not its own or whose record disagrees with the configuration,
+/// and in the default mode it changes nothing and refuses whatever is not ready. Hosts here start
+/// in Initialize mode unless a test says otherwise. The decisions themselves are
 /// tested without a database, in the unit tests of the initializer; what is here is what only a
 /// real database shows, and a test whose subject is not the first initialization makes its store
 /// from the creation script instead. Every test here uses a
@@ -84,14 +86,82 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WhenDatabaseIsMissingAndCreationIsOff_ShouldRefuse()
+    public async Task Start_WhenAnEarlierStartDiedBeforeTheRecordOfTheStore_ShouldRefuseToVerifyAndFinishWhenInitializing()
+    {
+        // Arrange: both sets of tables, the migrations' history with its rows, and no record.
+        await TestDatabases.LeaveInitializationUnfinishedAsync(_name);
+
+        // Act
+        var verifying = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Verify));
+        using var host = await TestDatabases.StartHostAsync(_name);
+
+        // Assert: the whole record is there, the store serves, and the start said what it found.
+        verifying.Message.ShouldContain("did not finish");
+        verifying.Message.ShouldContain("--initialize");
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Tenant")).ShouldBe(1);
+        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        appended.Revision.ShouldBe(0);
+        host.Logged().ShouldContain(entry => entry.Level == LogLevel.Warning && entry.Message.Contains("initializing it the rest of the way", StringComparison.Ordinal));
+        await host.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Start_WhenTwoInstancesInitializeTheSameMissingDatabaseAtOnce_ShouldBothServeItAndMakeItOnce()
+    {
+        // Act: two hosts, neither knowing of the other, against a database that does not exist.
+        var hosts = await Task.WhenAll(TestDatabases.StartHostAsync(_name), TestDatabases.StartHostAsync(_name));
+
+        // Assert: one made the store's tables under the lock; the other found them made, whichever
+        // of the two created the database. Both serve.
+        try
+        {
+            (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
+            hosts.Count(host => StoreSchemaEntries(host).Count > 0).ShouldBe(1);
+            foreach (var host in hosts)
+            {
+                var appended = await host.Store().AppendAsync("orders-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+                appended.Revision.ShouldBe(0);
+                await host.StopAsync(TestContext.Current.CancellationToken);
+            }
+        }
+        finally
+        {
+            foreach (var host in hosts)
+            {
+                host.Dispose();
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(SchemaMode.Verify)]
+    [InlineData(SchemaMode.Migrate)]
+    public async Task Start_WhenDatabaseIsMissingAndTheModeDoesNotInitialize_ShouldRefuse(SchemaMode mode)
     {
         // Act
         var exception = await Should.ThrowAsync<StoreInitializationException>(
-            () => TestDatabases.StartHostAsync(_name, options => options.CreateDatabase = false));
+            () => TestDatabases.StartHostAsync(_name, options => options.SchemaMode = mode));
 
         // Assert
-        exception.Message.ShouldContain("CreateDatabase");
+        exception.Message.ShouldContain($"Nightingale:SchemaMode is {mode}");
+        exception.Message.ShouldContain("--initialize");
+        (await TestDatabases.ScalarAsync<object>("master", $"SELECT ISNULL(DB_ID('{_name}'), -1)")).ShouldBe(-1);
+    }
+
+    [Fact]
+    public async Task Start_WhenAProvisionedDatabaseIsEmptyAndTheModeDoesNotInitialize_ShouldRefuseAndLeaveItEmpty()
+    {
+        // Arrange
+        await TestDatabases.CreateEmptyAsync(_name);
+
+        // Act
+        var exception = await Should.ThrowAsync<StoreInitializationException>(
+            () => TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Migrate));
+
+        // Assert
+        exception.Message.ShouldContain("has not been initialized by Nightingale");
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped = 0")).ShouldBe(0);
     }
 
     [Fact]
@@ -127,7 +197,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WhenSchemaDrifted_ShouldRefuseUnlessToldToApplyChanges()
+    public async Task Start_WhenSchemaDrifted_ShouldRefuseToVerifyAndRepairWhenMigrating()
     {
         // Arrange: something outside the server dropped one of the gateway's indexes.
         using (var first = await TestDatabases.StartHostAsync(_name))
@@ -138,11 +208,12 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         await TestDatabases.ExecuteAsync(_name, "DROP INDEX ix_pc_events_category_seq ON dbo.pc_events");
 
         // Act
-        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
-        using var repaired = await TestDatabases.StartHostAsync(_name, options => options.ApplySchemaChanges = true);
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Verify));
+        using var repaired = await TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Migrate);
 
         // Assert
-        refused.Message.ShouldContain("ApplySchemaChanges");
+        refused.Message.ShouldContain("Nightingale:SchemaMode is Verify");
+        refused.Message.ShouldContain("--apply-schema");
         refused.Message.ShouldContain("ix_pc_events_category_seq");
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name = 'ix_pc_events_category_seq'")).ShouldBe(1);
         await repaired.StopAsync(TestContext.Current.CancellationToken);
@@ -169,12 +240,43 @@ public sealed class StoreInitializerTests : IAsyncLifetime
             await trusting.StopAsync(TestContext.Current.CancellationToken);
         }
 
-        // A hash that is not this server's, as after an upgrade of the store library: compared, and refused.
+        // A hash that is not this server's, as after an upgrade of the store library: compared,
+        // and refused by a start that may not change the database.
         await TestDatabases.ExecuteAsync(_name, "UPDATE nightingale.StoreProperty SET [Value] = 'another' WHERE [Name] = 'StoreSchemaHash'");
-        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot()));
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot(options => options.SchemaMode = SchemaMode.Verify)));
 
         // Assert
         refused.Message.ShouldContain("ix_pc_events_category_seq");
+    }
+
+    [Fact]
+    public async Task Start_WhenTheRecordOfTheStoreIsNotThisServers_ShouldRewriteItWhenAllowedToChangeAndServeEitherWay()
+    {
+        // Arrange: an initialized, current store whose record says another library made it, as
+        // after an upgrade that changed no table, or a start that died between applying and
+        // recording.
+        await TestDatabases.ProvisionAsync(_name);
+        await TestDatabases.ExecuteAsync(_name, "UPDATE nightingale.StoreProperty SET [Value] = 'another' WHERE [Name] IN ('StoreSchemaHash', 'StoreLibrary')");
+
+        // Act
+        using (var verifying = await TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Verify))
+        {
+            await verifying.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        var stillAnother = await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'StoreLibrary'");
+        using (var migrating = await TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Migrate))
+        {
+            migrating.Logged().ShouldContain(entry => entry.Message.Contains("whose tables were current under another record", StringComparison.Ordinal));
+            await migrating.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Assert: fast boot trusts the rewritten hash again.
+        stillAnother.ShouldBe("another");
+        (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'StoreLibrary'")).ShouldBe(StoreSchema.StoreLibraryVersion);
+        using var trusting = await TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot(options => options.SchemaMode = SchemaMode.Verify));
+        trusting.Logged().ShouldContain(entry => entry.Message.Contains("Fast boot", StringComparison.Ordinal));
+        await trusting.StopAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -228,13 +330,13 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         await TestDatabases.ExecuteAsync(_name, "INSERT INTO nightingale.__EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('29990101000000_FromTheFuture', '99.0.0')");
 
         // Act
-        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
-        var evenWhenToldToApply = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.ApplySchemaChanges = true));
+        var refused = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Verify));
+        var evenWhenAllowedToChange = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name));
 
         // Assert
         refused.Message.ShouldContain("newer than this server");
         refused.Message.ShouldContain("29990101000000_FromTheFuture");
-        evenWhenToldToApply.Message.ShouldContain("newer than this server");
+        evenWhenAllowedToChange.Message.ShouldContain("newer than this server");
     }
 
     [Fact]
@@ -267,22 +369,26 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SchemaReport_WhenTheDatabaseIsMissing_ShouldSaySoAndApplyShouldInitializeIt()
+    public async Task SchemaReport_WhenTheDatabaseIsMissing_ShouldSaySoAndOnlyInitializeShouldMakeIt()
     {
-        // Arrange
+        // Arrange: the host's options say Verify, as a production host's would; the two applies
+        // do what their modes do regardless.
         var services = new ServiceCollection();
         services.AddNightingalePolecat(TestDatabases.ConnectionStringFor(_name), TestAuth.Off());
         await using var provider = services.BuildServiceProvider();
 
         // Act
         var before = await provider.GetNightingaleSchemaReportAsync(TestContext.Current.CancellationToken);
-        await provider.ApplyNightingaleSchemaAsync(TestContext.Current.CancellationToken);
+        var applyRefused = await Should.ThrowAsync<StoreInitializationException>(() => provider.ApplyNightingaleSchemaAsync(TestContext.Current.CancellationToken));
+        await provider.InitializeNightingaleStoreAsync(TestContext.Current.CancellationToken);
         var after = await provider.GetNightingaleSchemaReportAsync(TestContext.Current.CancellationToken);
+        await provider.InitializeNightingaleStoreAsync(TestContext.Current.CancellationToken);
 
-        // Assert
+        // Assert: initializing again changes nothing.
         before.DatabaseExists.ShouldBeFalse();
         before.IsCurrent.ShouldBeFalse();
         before.PendingMigrations.ShouldNotBeEmpty();
+        applyRefused.Message.ShouldContain("Nightingale:SchemaMode is Migrate");
         after.IsCurrent.ShouldBeTrue();
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
     }

@@ -57,8 +57,12 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
             return new SchemaReport(false, false, null, known, [], []);
         }
 
+        // Initialized means the record of the store is complete: the row saying who initialized
+        // it is written last, with the rest, in one transaction. Migrations applied without it
+        // are an initialization that died before its record.
         var applied = (await context.Database.GetAppliedMigrationsAsync(cancellationToken).ConfigureAwait(false)).ToList();
-        var initialized = applied.Count > 0;
+        var createdBy = applied.Count > 0 ? await context.ReadStorePropertyAsync(CreatedByRow, cancellationToken).ConfigureAwait(false) : null;
+        var initialized = createdBy is not null;
         IReadOnlyList<string> conflicts = initialized
             ? (await context.ReadStoreSettingsAsync<StoreSettings>(cancellationToken).ConfigureAwait(false)).DifferencesFrom(options.Store)
             : [];
@@ -70,11 +74,15 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
         // this server, which would be measured against what an older server expects.
         var unknown = applied.Except(known, StringComparer.Ordinal).ToList();
         var compare = initialized && conflicts.Count == 0 && unknown.Count == 0;
-        var trusted = compare && trustStoreHash
-            && string.Equals(
-                await context.ReadStorePropertyAsync(StoreSchemaHashRow, cancellationToken).ConfigureAwait(false),
-                await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false),
-                StringComparison.Ordinal);
+        var hashRecorded = compare && string.Equals(
+            await context.ReadStorePropertyAsync(StoreSchemaHashRow, cancellationToken).ConfigureAwait(false),
+            await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false),
+            StringComparison.Ordinal);
+        var libraryRecorded = compare && string.Equals(
+            await context.ReadStorePropertyAsync(StoreLibraryRow, cancellationToken).ConfigureAwait(false),
+            StoreLibraryVersion,
+            StringComparison.Ordinal);
+        var trusted = hashRecorded && trustStoreHash;
         return new SchemaReport(
             true,
             initialized,
@@ -84,6 +92,8 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
             conflicts)
         {
             StoreComparisonSkipped = trusted,
+            InitializationUnfinished = applied.Count > 0 && !initialized,
+            StoreRecordStale = compare && !(hashRecorded && libraryRecorded),
         };
     }
 
@@ -142,29 +152,46 @@ internal sealed class StoreSchema(IDocumentStore store, IDbContextFactory<Nighti
     }
 
     /// <summary>
-    /// Applies the gateway's migrations and records what the event store's tables were made
-    /// from: the store library's version and the hash of its creation script. It is the second
-    /// half of <see cref="ApplyAsync"/>, apart so that a test which made the store's tables from
-    /// the script can finish the way the server does.
+    /// Applies the gateway's migrations: the second half of <see cref="ApplyAsync"/>, apart so
+    /// that a test which made the store's tables from the script can finish the way the server
+    /// does. Writes no row; the record is <see cref="WriteInitializationAsync"/>'s and
+    /// <see cref="RecordStoreAsync"/>'s.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the migrations are applied and the rows written.</returns>
+    /// <returns>A task that completes when the migrations are applied.</returns>
     internal async Task MigrateAsync(CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
-        await context.EnsureDefaultTenantAsync(time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
-        await context.WriteStorePropertyAsync(StoreLibraryRow, StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
-        await context.WriteStorePropertyAsync(StoreSchemaHashRow, await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task RecordStoreAsync(CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await WriteStoreRecordAsync(context, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
     public async Task WriteInitializationAsync(IStoreSettings settings, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken)
     {
+        // One transaction, the row that says who initialized the store last: the next start
+        // reads that row as "initialized", and finds the rest there exactly when it is.
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await WriteStoreRecordAsync(context, cancellationToken).ConfigureAwait(false);
         await context.WriteStoreSettingsAsync(settings, cancellationToken).ConfigureAwait(false);
         await context.WriteStorePropertyAsync(CreatedAtRow, createdAt.ToString("O", CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
         await context.WriteStorePropertyAsync(CreatedByRow, createdBy, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The default tenant's row when it is missing, the store library's version and the hash of its creation script.</summary>
+    private async Task WriteStoreRecordAsync(NightingaleDbContext context, CancellationToken cancellationToken)
+    {
+        await context.EnsureDefaultTenantAsync(time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
+        await context.WriteStorePropertyAsync(StoreLibraryRow, StoreLibraryVersion, cancellationToken).ConfigureAwait(false);
+        await context.WriteStorePropertyAsync(StoreSchemaHashRow, await ComputeStoreHashAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
