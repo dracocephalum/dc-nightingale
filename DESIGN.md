@@ -346,7 +346,7 @@ and the progress row, the position numbered through, are one transaction, and
 the progress row is read under an update lock, so a sequencer whose lease
 overlapped a takeover continues from what the other committed. A batch is
 every unnumbered row up to its end, found through a third filtered index,
-over the unnumbered rows, which holds only the lag: so an event whose
+over the unsequenced rows by position, which holds only the lag: so an event whose
 position the tail gave up as a gap and that committed late, below the
 sequencer's progress, is numbered by the next batch with the next ordinal of
 its key. By ordinal it follows what was appended after it; it is never left

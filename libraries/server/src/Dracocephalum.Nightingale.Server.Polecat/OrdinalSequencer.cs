@@ -134,7 +134,7 @@ internal sealed partial class OrdinalSequencer(
         await using (var number = connection.CreateCommand())
         {
             // The batch is every unnumbered row up to its end, found through the index over the
-            // unnumbered rows: those between the progress and the end, and any below the
+            // unsequenced rows: those between the progress and the end, and any below the
             // progress that committed late, after the tail had given their position up as a gap,
             // which an earlier batch therefore never saw. Each key's next ordinal is the last one
             // assigned to it plus one, found with one backward seek in the ordinal index; the

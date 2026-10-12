@@ -11,8 +11,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// on a store initialized with ordinals, two nullable columns holding each event's place within
 /// its category stream and its event-type stream, each with a filtered index over the numbered
 /// rows only, so a read by ordinal is one seek and never returns an unnumbered row, and a third
-/// over the unnumbered rows, so the sequencer finds what it has yet to number, the lag and any
-/// row committed late below its progress, without a scan. They are
+/// over the unsequenced rows by position, so the sequencer finds what it has yet to reach, the
+/// lag and any row committed late below its progress, without a scan. They are
 /// declared rather than applied by hand because the migration drops any column or index it does
 /// not know; declared, they are created when missing and left alone afterwards, and the store's own
 /// changes to the table still flow through the same definition. Every index leads with the tenant
@@ -77,9 +77,11 @@ internal sealed class PatchedEventStoreFeature(IFeatureSchema inner, bool ordina
                     Predicate = TypeOrdinalColumn + " IS NOT NULL",
                 });
 
-                // The rows still to number: a handful at any time, the sequencer's lag, so the
-                // index is small whatever the table's size.
-                table.Indexes.Add(new IndexDefinition("ix_pc_events_unnumbered")
+                // The rows the sequencer has not reached, by position: a handful at any time, its
+                // lag, so the index is small whatever the table's size. One index serves both
+                // ordinals, because a batch assigns the two together, so a row without the one
+                // is a row without the other.
+                table.Indexes.Add(new IndexDefinition("ix_pc_events_unsequenced")
                 {
                     Columns = [TenantColumn, "seq_id"],
                     Predicate = CategoryOrdinalColumn + " IS NULL",
