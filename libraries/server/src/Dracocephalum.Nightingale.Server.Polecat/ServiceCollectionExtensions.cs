@@ -90,6 +90,16 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.TailPollingInterval)} must be positive. It was {options.TailPollingInterval}.");
         }
 
+        if (options.IndexMigrationStatementTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.IndexMigrationStatementTimeout)} must be positive. It was {options.IndexMigrationStatementTimeout}.");
+        }
+
+        if (options.SchemaLockWaitTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.SchemaLockWaitTimeout)} must be positive. It was {options.SchemaLockWaitTimeout}.");
+        }
+
         services.AddNightingaleOptions(options);
 
         // The signal every append pulses, which whichever tail the host runs waits on: the store's
@@ -106,10 +116,7 @@ public static class ServiceCollectionExtensions
         {
             var store = new StoreOptions();
             Configure(store, connectionString, options);
-            var migrations = new StoreMigrationLogger(
-                provider.GetService<ILogger<StoreSchema>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StoreSchema>.Instance,
-                provider.GetRequiredService<IStoreDatabase>().Name);
-            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals, migrations), connectionString);
+            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals), connectionString);
             store.Projections.Wakeup = provider.GetRequiredService<AppendSignal>();
             store.Projections.SlowPollingTime = slowInterval;
             if (fastInterval < store.Projections.FastPollingTime)
@@ -178,7 +185,8 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             provider.GetRequiredService<IStoreDatabase>(),
             options,
-            provider.GetService<TimeProvider>() ?? TimeProvider.System));
+            provider.GetService<TimeProvider>() ?? TimeProvider.System,
+            provider.GetService<ILogger<StoreSchema>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StoreSchema>.Instance));
         services.AddSingleton(provider => new StoreInitializer(
             provider.GetRequiredService<IStoreDatabase>(),
             provider.GetRequiredService<StoreSchema>(),
