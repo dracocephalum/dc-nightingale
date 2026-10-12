@@ -23,7 +23,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// server side is what is tested; the client's own following of the address is unit-tested in
 /// its component.
 /// </summary>
-[Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
 public sealed class RedirectTests : IAsyncLifetime
 {

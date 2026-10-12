@@ -154,7 +154,7 @@ public static class ServiceCollectionExtensions
         }
         else
         {
-            services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
+            services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<AppendSignal>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
             services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
         }
 

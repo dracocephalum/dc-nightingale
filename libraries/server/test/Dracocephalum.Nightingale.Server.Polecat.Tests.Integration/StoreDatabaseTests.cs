@@ -8,7 +8,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// anything, and that a database is created with the collation asked for. The initializer's
 /// decisions from those answers are tested without a database.
 /// </summary>
-[Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
 public sealed class StoreDatabaseTests : IAsyncLifetime
 {

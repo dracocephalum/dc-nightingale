@@ -12,7 +12,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// category, so a follower of either in one tenant gets that tenant's events and never another's,
 /// whether the tenants share a sequence or each have their own. Each case uses a database of its own.
 /// </summary>
-[Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
 public sealed class StreamRouterTests
 {

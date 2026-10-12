@@ -13,7 +13,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// sequencer progress of its own. A gap in one tenant holds that tenant alone and is given up
 /// after the store's threshold, on the real table. Every test uses a database of its own.
 /// </summary>
-[Collection(OwnDatabase.Name)]
 [Trait("Category", "Integration")]
 public sealed class TenantPartitioningTests : IAsyncLifetime
 {
