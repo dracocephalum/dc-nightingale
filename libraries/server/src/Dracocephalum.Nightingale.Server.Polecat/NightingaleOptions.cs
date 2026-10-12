@@ -35,6 +35,16 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public SchemaMode SchemaMode { get; set; } = SchemaMode.Verify;
 
     /// <summary>
+    /// Gets or sets how long a batch of the schema that creates or alters an index may run before
+    /// it is stopped and the start fails, naming the batch. An hour by default: an index over a
+    /// large events table takes long, and one that hangs, behind a lock another session holds
+    /// say, must not hang silently for longer. Every other batch runs under the connection's own
+    /// command timeout, since nothing else takes long. A change too large for even this is one to
+    /// run by hand; the report prints it.
+    /// </summary>
+    public TimeSpan IndexMigrationStatementTimeout { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// Gets or sets a value indicating whether startup takes the event store's tables as current
     /// when the hash recorded with them is the hash of the creation script this server would
     /// apply, instead of comparing every table with what the store expects. The hash covers the

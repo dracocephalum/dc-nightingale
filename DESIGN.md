@@ -111,13 +111,23 @@ pipeline.
 
 Two mechanisms keep the database's tables, and they are kept in one order.
 The event store's tables, with the gateway's additions to them, are compared
-and changed by the store's own schema tooling, which works from the
-difference between the real tables and what this version of the store
-expects: a comparison, not a version number, so a change the store's library
-brings with an upgrade is found whether or not anyone expected it. The
-gateway's own tables are created and changed by its migrations (seam 7),
-whose history says which have run. The store's go first, because the
-gateway's tables are about a store that exists. `StoreSchema` is the one
+by the store's own schema tooling, which works from the difference between
+the real tables and what this version of the store expects: a comparison,
+not a version number, so a change the store's library brings with an upgrade
+is found whether or not anyone expected it. The gateway's own tables are
+compared by its migrations (seam 7), whose history says which have run. The
+store's go first, because the gateway's tables are about a store that
+exists. Neither tool applies: each writes the statements it would run, and
+the server runs them itself, one batch at a time, the store's per object as
+the tooling would and the migrations' per `GO` of their idempotent script,
+without the transaction the migrations' tooling wraps each migration in. So
+what the report prints is exactly what the apply runs, each batch is logged
+as it starts and when it ends with how long it took, a batch that creates or
+alters an index runs under `Nightingale:IndexMigrationStatementTimeout`, an
+hour by default, rather than the connection's command timeout, and a batch
+that fails is named. A connection that fails under the apply, as the store's
+tooling judges such failures, has the whole apply begun again, which is safe
+because both tools apply only what is missing. `StoreSchema` is the one
 place that reports what is pending in both and applies it; startup, the
 default host's switches and a host's own code all go through it.
 
@@ -171,12 +181,9 @@ default host's switches and a host's own code all go through it.
   the next start in `Initialize` mode initializes it the rest of the way,
   with a warning. A table that is not the server's, or one with rows, still
   refuses.
-- What a start applies is logged, each half under its own category at the
-  same levels: the gateway's migrations by Entity Framework, the store's
-  script by the schema tooling's logger routed to the host's logging under
-  `StoreSchema`'s category, one entry per table or schema it changes and an
-  error naming the statements when one fails. The server's README says
-  which keys turn each on.
+- What a start applies is logged under `StoreSchema`'s category, both
+  halves alike: an entry as each batch starts, with the batch, one as it
+  ends, with how long it took, and an error naming the batch when one fails.
 
 The same report and the same work are there without starting the server:
 `--schema-report` on the default host prints what the database needs and

@@ -32,6 +32,7 @@ public sealed class ServiceCollectionExtensionsTests
         var configuration = Configuration(
             ("ConnectionStrings:Nightingale", ConnectionString),
             ("Nightingale:SchemaMode", "Initialize"),
+            ("Nightingale:IndexMigrationStatementTimeout", "02:30:00"),
             ("Nightingale:FastBoot", "true"),
             ("Nightingale:TailPollingInterval", "00:00:00.250"),
             ("Nightingale:Store:Collation", "Latin1_General_100_BIN2"),
@@ -48,6 +49,7 @@ public sealed class ServiceCollectionExtensionsTests
         options.ShouldSatisfyAllConditions(
             bound => bound.ConnectionStringName.ShouldBe("Nightingale"),
             bound => bound.SchemaMode.ShouldBe(SchemaMode.Initialize),
+            bound => bound.IndexMigrationStatementTimeout.ShouldBe(TimeSpan.FromHours(2.5)),
             bound => bound.FastBoot.ShouldBeTrue(),
             bound => bound.TailPollingInterval.ShouldBe(TimeSpan.FromMilliseconds(250)),
             bound => bound.Store.Collation.ShouldBe("Latin1_General_100_BIN2"),
@@ -89,6 +91,39 @@ public sealed class ServiceCollectionExtensionsTests
         // Assert
         exception.Message.ShouldContain("Nightingale:SchemaMode");
         exception.Message.ShouldContain("Verify, Migrate, Initialize");
+    }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("-00:00:01")]
+    public void AddNightingalePolecat_WhenTheIndexMigrationStatementTimeoutIsNotPositive_ShouldRefuseAtRegistration(string configured)
+    {
+        // Arrange
+        var configuration = Configuration(
+            ("ConnectionStrings:Nightingale", ConnectionString),
+            ("Nightingale:IndexMigrationStatementTimeout", configured));
+        var services = new ServiceCollection();
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => services.AddNightingalePolecat(configuration));
+
+        // Assert
+        exception.Message.ShouldContain("Nightingale:IndexMigrationStatementTimeout");
+        exception.Message.ShouldContain("must be positive");
+    }
+
+    [Fact]
+    public void AddNightingalePolecat_ByDefault_ShouldGiveAnIndexBatchAnHour()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddNightingalePolecat(Configuration(("ConnectionStrings:Nightingale", ConnectionString)));
+        using var provider = services.BuildServiceProvider();
+
+        // Assert: long enough for an index over a large table, never unbounded.
+        provider.GetRequiredService<NightingaleOptions>().IndexMigrationStatementTimeout.ShouldBe(TimeSpan.FromHours(1));
     }
 
     [Fact]
