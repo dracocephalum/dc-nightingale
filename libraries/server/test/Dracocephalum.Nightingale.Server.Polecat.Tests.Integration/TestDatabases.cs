@@ -184,6 +184,11 @@ internal static class TestDatabases
     /// <returns>The store.</returns>
     public static IStreamStore Store(this IHost host) => host.Services.GetRequiredService<IStreamStore>();
 
+    /// <summary>The tail a host registered: the one of the process while the sequence is shared.</summary>
+    /// <param name="host">The host.</param>
+    /// <returns>The tail.</returns>
+    public static IStoreTail Tail(this IHost host) => host.Services.GetRequiredService<IStoreTail>();
+
     /// <summary>What a host started by <see cref="StartHostAsync"/> has logged so far, oldest first.</summary>
     /// <param name="host">The host.</param>
     /// <returns>The entries.</returns>

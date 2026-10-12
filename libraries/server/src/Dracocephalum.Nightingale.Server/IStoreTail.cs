@@ -2,12 +2,27 @@ namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
 /// The store's head as it moves: the highest position up to which every event is committed, and
-/// a way to wait for it to move. One tail serves every subscription in the process, so liveness
-/// costs the store one poll per interval rather than one per subscriber. A backend registers its
-/// implementation beside its <see cref="IStreamStore"/>.
+/// a way to wait for it to move; and, on a store with ordinals, how far behind it the sequencer
+/// has numbered, and a way to wait for that. One tail serves every subscription in the process,
+/// so liveness costs the store one poll per interval rather than one per subscriber. A backend
+/// registers its implementation beside its <see cref="IStreamStore"/>.
 /// </summary>
 public interface IStoreTail
 {
+    /// <summary>
+    /// Gets the position up to which every event has its ordinals, as this process knows it: never
+    /// ahead of the sequencer, so a subscription under ordinal numbering can tell "nothing new for
+    /// this stream" from "not numbered yet". 0 when nothing is, or the store has no ordinals.
+    /// </summary>
+    long Numbered { get; }
+
+    /// <summary>Waits until the numbering has reached a position.</summary>
+    /// <param name="through">The position the caller needs numbered.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The position numbered through, at least <paramref name="through"/>.</returns>
+    /// <exception cref="InvalidOperationException">The tail has stopped following the store, so the numbering will not advance; the cause is the inner exception.</exception>
+    ValueTask<long> WaitForNumberedAsync(long through, CancellationToken cancellationToken);
+
     /// <summary>
     /// Gets the high-water mark: the position up to which every event is committed. 0 when the
     /// store has no events yet. Never the highest sequence number in the table, because a number

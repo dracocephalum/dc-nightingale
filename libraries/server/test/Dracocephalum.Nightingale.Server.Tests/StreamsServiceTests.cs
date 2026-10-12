@@ -728,20 +728,32 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Read_WhenSubscribingByOrdinal_ShouldConfirmWithTheLastOrdinalAndLookAgainWhileTheSequencerIsBehind()
+    public async Task Read_WhenSubscribingByOrdinal_ShouldConfirmWithTheLastOrdinalAndLookAgainWhenTheSequencerCatchesUp()
     {
         // Arrange: two numbered events; the tail then advances to 30 before the sequencer has
-        // reached it, so the first look after the wake finds nothing and the next one, after the
-        // interval, finds the event the sequencer assigned meanwhile.
+        // reached it, so the first look after the wake finds nothing, and the next one, woken by
+        // the numbering reaching 30, finds the event the sequencer assigned meanwhile.
         var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
         _tail.Advance(20);
+        _tail.Number(20);
+        var reads = 0;
         A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
         A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 1));
         A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 0, StreamsService.PageSize, A<CancellationToken>._))
             .Returns([Numbered("orders-1", 0, 5, 0), Numbered("orders-1", 1, 17, 1)]);
         A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 2, StreamsService.PageSize, A<CancellationToken>._))
-            .ReturnsNextFromSequence([], [Numbered("orders-2", 0, 25, 2)]);
-        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsNextFromSequence(20L, 20L, 30L);
+            .ReturnsLazily(_ =>
+            {
+                // The catch-up's page from 0 was short, so the first look from 2 is the one after
+                // the wake, which the sequencer finishes numbering as it returns.
+                var read = Interlocked.Increment(ref reads);
+                if (read == 1)
+                {
+                    _tail.Number(30);
+                }
+
+                return Task.FromResult<IReadOnlyList<EventRecord>>(read < 2 ? [] : [Numbered("orders-2", 0, 25, 2)]);
+            });
         var client = new Streams.StreamsClient(_channel);
         using var call = client.Read(new ReadRequest { Stream = "$ce-orders", Start = new(), Subscription = new SubscriptionOptions(), Numbering = Protocols.Grpc.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -757,7 +769,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         live[0].Event.Ordinal.ShouldBe(2);
         live[0].Event.Position.ShouldBe(25);
         live[1].CaughtUp.Head.ShouldBe(2);
-        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).MustHaveHappened(3, Times.Exactly);
+        reads.ShouldBe(2);
     }
 
     [Fact]
@@ -765,16 +777,25 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     {
         // Arrange: subscribed from the end at ordinal 7, the head at 20 and staying there, since
         // nothing more is appended. The event at 20 is committed and not numbered when the
-        // subscription reads, and numbered a moment later: asked before that read the sequencer
-        // says "through 19", asked after it "through 20".
+        // subscription reads, and numbered the moment the read returns: taken before that read
+        // the numbering says "through 19", after it "through 20".
         var orders = new VirtualStreamName(VirtualStreamKind.Category, "orders");
         _tail.Advance(20);
+        _tail.Number(19);
         var reads = 0;
         A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
         A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 7));
-        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).ReturnsLazily(_ => Task.FromResult(Volatile.Read(ref reads) == 0 ? 19L : 20L));
         A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 8, StreamsService.PageSize, A<CancellationToken>._))
-            .ReturnsLazily(_ => Task.FromResult<IReadOnlyList<EventRecord>>(Interlocked.Increment(ref reads) == 1 ? [] : [Numbered("orders-3", 0, 20, 8)]));
+            .ReturnsLazily(_ =>
+            {
+                if (Interlocked.Increment(ref reads) == 1)
+                {
+                    _tail.Number(20);
+                    return Task.FromResult<IReadOnlyList<EventRecord>>([]);
+                }
+
+                return Task.FromResult<IReadOnlyList<EventRecord>>([Numbered("orders-3", 0, 20, 8)]);
+            });
         var client = new Streams.StreamsClient(_channel);
         using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         giveUp.CancelAfter(TimeSpan.FromSeconds(20));
@@ -798,7 +819,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
         A.CallTo(() => _store.OrdinalHeadAsync(orders, A<CancellationToken>._)).Returns(new StreamHead(0, 7));
         A.CallTo(() => _store.ReadByOrdinalAsync(orders, Direction.Forwards, 8, StreamsService.PageSize, A<CancellationToken>._)).Returns([]);
-        A.CallTo(() => _store.NumberedThroughAsync(A<CancellationToken>._)).Returns(20L);
+        _tail.Number(20);
         var client = new Streams.StreamsClient(_channel);
         using var call = client.Read(new ReadRequest { Stream = "$ce-orders", End = new(), Subscription = new SubscriptionOptions(), Numbering = Protocols.Grpc.V1.Numbering.Ordinal }, cancellationToken: TestContext.Current.CancellationToken);
 

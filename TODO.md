@@ -56,13 +56,19 @@ undecided adds it here rather than mentioning it once in a conversation.
   the writer waits that long. Close by: a signal across instances, which on
   SQL Server is Service Broker or query notifications, once a measurement
   shows the interval matters there.
-- **An ordinal subscription polls while the sequencer is behind.** After the
-  tail advances, a subscription under ordinal numbering reads the numbered
-  rows, and while the sequencer has not yet passed the head it woke for, it
-  looks again every quarter second: one cheap query per subscription per
-  interval, only during the sequencer's lag, which is about one tail interval.
-  Close by: the sequencer publishing its progress in-process, and one poller
-  per process for the other instances, once the subscription count demands it.
+- **A running group's writes are not fenced by its lease.** A group's
+  checkpoint, its parked and outbox rows and its live snapshot are written by
+  whichever instance believes it holds the group's lease; an instance that
+  stalled past the lease's expiry, while another took the group over, writes
+  all the same when it wakes, until its keeper's next renewal finds the lease
+  gone. No event is lost: the outcome is a checkpoint moved back behind the
+  new holder's, and so redeliveries, within the at-least-once contract. Close
+  by: each such write carrying the lease in its own statement, `EXISTS` on the
+  lease row with this instance as the owner and an expiry still ahead, and the
+  checkpoint only ever greater; zero rows means the lease is gone, which the
+  runtime then treats as it treats a renewal refused. Park, an insert and a
+  delete, keeps a small transaction with a conditional renewal of the lease
+  as its fence.
 - **An initialization interrupted after the gateway's migrations and before
   the settings rows is not recognized.** A start that dies between the two
   halves is carried on by the next, which finds only the server's own tables,

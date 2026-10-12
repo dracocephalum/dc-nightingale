@@ -29,6 +29,7 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
     private const int RefreshWindow = 10_000;
 
     private readonly FollowedHead _head = new();
+    private readonly FollowedHead _numbering = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly ILogger<PolecatStoreTail> _logger = loggerFactory.CreateLogger<PolecatStoreTail>();
@@ -41,7 +42,16 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
     public long Head => _head.Head;
 
     /// <inheritdoc/>
+    public long Numbered => _numbering.Head;
+
+    /// <summary>Gets the numbering as it is followed: where the sequencer, or whoever follows it for this process, publishes how far it has come.</summary>
+    internal FollowedHead Numbering => _numbering;
+
+    /// <inheritdoc/>
     public ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken) => _head.WaitForAdvanceAsync(beyond, cancellationToken);
+
+    /// <inheritdoc/>
+    public ValueTask<long> WaitForNumberedAsync(long through, CancellationToken cancellationToken) => _numbering.WaitForReachAsync(through, cancellationToken);
 
     /// <inheritdoc/>
     public async ValueTask<long> RefreshAsync(CancellationToken cancellationToken)
@@ -195,7 +205,9 @@ internal sealed partial class PolecatStoreTail(IDocumentStore store, IDbContextF
     private void Fail(Exception exception)
     {
         LogStoppedFollowing(exception);
-        _head.Fail(new InvalidOperationException("The server has stopped following the store's head, so nothing appended from now on is delivered live or numbered. The cause is in the inner exception and in the server's log; the server needs a restart.", exception));
+        var failure = new InvalidOperationException("The server has stopped following the store's head, so nothing appended from now on is delivered live or numbered. The cause is in the inner exception and in the server's log; the server needs a restart.", exception);
+        _head.Fail(failure);
+        _numbering.Fail(failure);
     }
 
     [LoggerMessage(Level = LogLevel.Critical, Message = "The tail has stopped following the store's head without being stopped. Live delivery and ordinal numbering have ended; every call waiting on them fails with this cause. The server needs a restart.")]

@@ -107,8 +107,8 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         var acmes = stores.GetStreams(acme);
         var mine = await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
         var theirs = await acmes.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        await NumberedAsync(defaults, mine.Position);
-        await NumberedAsync(acmes, theirs.Position);
+        await NumberedAsync(stores.GetTail(TenantScope.Default), mine.Position);
+        await NumberedAsync(stores.GetTail(acme), theirs.Position);
 
         // Act
         var mineByOrdinal = await defaults.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
@@ -146,14 +146,11 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         return head;
     }
 
-    /// <summary>Waits for the sequencer to pass a position of a tenant's sequence, which it does on the tails' cadence.</summary>
-    private static async Task NumberedAsync(IStreamStore store, long position)
+    /// <summary>Waits for the sequencer to pass a position of a tenant's sequence, which it does on the tails' cadence, and the tail to say so.</summary>
+    private static async Task NumberedAsync(IStoreTail tail, long position)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        while (await store.NumberedThroughAsync(timeout.Token) < position)
-        {
-            await Task.Delay(100, timeout.Token);
-        }
+        await tail.WaitForNumberedAsync(position, timeout.Token);
     }
 }

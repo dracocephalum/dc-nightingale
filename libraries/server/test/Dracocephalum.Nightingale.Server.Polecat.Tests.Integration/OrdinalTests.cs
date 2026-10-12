@@ -140,13 +140,13 @@ public sealed class OrdinalTests : IAsyncLifetime
             using var first = await TestDatabases.StartProvisionedHostAsync(name, Ordinals);
             using var second = await TestDatabases.StartHostAsync(name, TestDatabases.FastBoot(Ordinals));
             var before = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed"), Event("order_paid")], TestContext.Current.CancellationToken);
-            await NumberedAsync(first.Store(), before.Position);
+            await NumberedAsync(first.Tail(), before.Position);
 
             // Act: the first instance stops, by itself numbering or not; whatever is appended
             // from then on is the second's to number.
             await first.StopAsync(TestContext.Current.CancellationToken);
             var after = await second.Store().AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
-            await NumberedAsync(second.Store(), after.Position);
+            await NumberedAsync(second.Tail(), after.Position);
             var byCategory = await second.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
             var byType = await second.Store().ReadByOrdinalAsync(Placed, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
 
@@ -191,8 +191,8 @@ public sealed class OrdinalTests : IAsyncLifetime
 
             // Act
             var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
-            var whileHeld = await host.Store().NumberedThroughAsync(TestContext.Current.CancellationToken);
-            await NumberedAsync(host.Store(), appended.Position);
+            var whileHeld = host.Tail().Numbered;
+            await NumberedAsync(host.Tail(), appended.Position);
             var byCategory = await host.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
 
             // Assert: nothing is numbered under another's lease, and everything after it lapses.
@@ -206,20 +206,41 @@ public sealed class OrdinalTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Follower_OnAnInstanceThatDoesNotHoldTheLease_ShouldPublishTheSequencersProgressToItsTail()
+    {
+        // Arrange: a second instance over the same store; the first holds the sequencer's lease,
+        // so the second numbers nothing and follows the progress rows instead.
+        using var other = await TestDatabases.StartHostAsync(_name, TestDatabases.FastBoot(options => options.Store.AssignOrdinals = true));
+        try
+        {
+            // Act: appended through the first instance, numbered by it, and seen by the second.
+            var appended = await Store.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+            await NumberedAsync(appended.Position);
+            var theirs = await NumberedAsync(other.Tail(), appended.Position);
+            var byCategory = await other.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+
+            // Assert
+            theirs.ShouldBeGreaterThanOrEqualTo(appended.Position);
+            byCategory.Select(record => record.Ordinal).ShouldBe([0L]);
+        }
+        finally
+        {
+            await other.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
     private IStreamStore Store => _host!.Store();
 
     private static EventData Event(string type) => new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
-    /// <summary>Waits for the sequencer to pass a position, which it does on the tail's cadence.</summary>
-    private Task NumberedAsync(long position) => NumberedAsync(Store, position);
+    /// <summary>Waits for the sequencer to pass a position, which it does on the tail's cadence, and the tail to say so.</summary>
+    private Task<long> NumberedAsync(long position) => NumberedAsync(_host!.Tail(), position);
 
-    private static async Task NumberedAsync(IStreamStore store, long position)
+    private static async Task<long> NumberedAsync(IStoreTail tail, long position)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        while (await store.NumberedThroughAsync(timeout.Token) < position)
-        {
-            await Task.Delay(100, timeout.Token);
-        }
+        return await tail.WaitForNumberedAsync(position, timeout.Token);
     }
 }

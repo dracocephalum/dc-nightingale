@@ -85,6 +85,11 @@ internal sealed partial class PolecatTenantTails(
         return _tails.GetOrAdd(storeTenantId, id => new TenantTail(this, id));
     }
 
+    /// <summary>The numbering of a tenant's sequence as it is followed: where the sequencer, or whoever follows it for this process, publishes how far it has come.</summary>
+    /// <param name="storeTenantId">The id the store keeps for the tenant.</param>
+    /// <returns>The followed numbering.</returns>
+    internal FollowedHead NumberingOf(string storeTenantId) => ((TenantTail)For(storeTenantId)).Numbering;
+
     /// <summary>Waits until any tenant's head has moved since a count of advances was read; for whoever follows every tenant, the sequencer.</summary>
     /// <param name="seen">The count of advances the caller has already acted on.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -281,12 +286,18 @@ internal sealed partial class PolecatTenantTails(
 
         public FollowedHead Followed { get; } = new();
 
+        public FollowedHead Numbering { get; } = new();
+
         public DateTimeOffset? GapSince { get; set; }
 
         public long Head => Followed.Head;
 
+        public long Numbered => Numbering.Head;
+
         public ValueTask<long> RefreshAsync(CancellationToken cancellationToken) => owner.RefreshAsync(this, cancellationToken);
 
         public ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken) => Followed.WaitForAdvanceAsync(beyond, cancellationToken);
+
+        public ValueTask<long> WaitForNumberedAsync(long through, CancellationToken cancellationToken) => Numbering.WaitForReachAsync(through, cancellationToken);
     }
 }

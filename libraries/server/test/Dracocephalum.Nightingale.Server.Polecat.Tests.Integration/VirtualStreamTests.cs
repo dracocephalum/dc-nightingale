@@ -103,7 +103,6 @@ public sealed class VirtualStreamTests(SqlServerTestDatabase database)
         sut.OrdinalsEnabled.ShouldBeFalse();
         (await Should.ThrowAsync<OrdinalsNotEnabledException>(() => sut.ReadByOrdinalAsync(orders, Direction.Forwards, 0, 1, TestContext.Current.CancellationToken))).Stream.ShouldBe("$ce-vso-none");
         await Should.ThrowAsync<OrdinalsNotEnabledException>(() => sut.OrdinalHeadAsync(orders, TestContext.Current.CancellationToken));
-        await Should.ThrowAsync<OrdinalsNotEnabledException>(() => sut.NumberedThroughAsync(TestContext.Current.CancellationToken));
     }
 
     private static (string Orders, string Shipments, string Placed) Names()
