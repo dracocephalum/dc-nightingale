@@ -223,32 +223,23 @@ public sealed class StoreInitializerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Start_WhenAnIndexBatchIsBlockedPastTheIndexTimeout_ShouldStopItAndNameItAndLeaveOtherBatchesUnderTheConnectionsTimeout()
+    public async Task Start_WhenAnIndexBatchRunsPastTheIndexTimeout_ShouldStopItAndNameIt()
     {
         // Arrange: an initialized store missing an index, and another session holding the events
-        // table locked, as a long transaction would, so the index cannot be built.
+        // table locked, as a long transaction would, so the batch cannot finish; the lock wait is
+        // longer than the index timeout, so it is the latter that ends it.
         await TestDatabases.ProvisionAsync(_name);
         await TestDatabases.ExecuteAsync(_name, "DROP INDEX ix_pc_events_category_seq ON dbo.pc_events");
-        await using var holder = new Microsoft.Data.SqlClient.SqlConnection(TestDatabases.ConnectionStringFor(_name));
-        await holder.OpenAsync(TestContext.Current.CancellationToken);
-        await using (var hold = holder.CreateCommand())
-        {
-            hold.CommandText = "BEGIN TRANSACTION; SELECT TOP 1 seq_id FROM dbo.pc_events WITH (TABLOCKX, HOLDLOCK);";
-            await hold.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-        }
+        await using var holder = await HoldTheEventsTableAsync();
 
         // Act
         var stopped = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options =>
         {
             options.SchemaMode = SchemaMode.Migrate;
             options.IndexMigrationStatementTimeout = TimeSpan.FromSeconds(1);
+            options.SchemaLockWaitTimeout = TimeSpan.FromSeconds(10);
         }));
-        await using (var release = holder.CreateCommand())
-        {
-            release.CommandText = "ROLLBACK TRANSACTION;";
-            await release.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-        }
-
+        await holder.DisposeAsync();
         using var repaired = await TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Migrate);
 
         // Assert: stopped after the second, naming the setting and the batch; once the lock is
@@ -259,6 +250,66 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name = 'ix_pc_events_category_seq'")).ShouldBe(1);
         repaired.Logged().ShouldContain(entry => entry.Message.Contains("Applied to the event store's tables", StringComparison.Ordinal) && entry.Message.Contains("ix_pc_events_category_seq", StringComparison.Ordinal));
         await repaired.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Start_WhenABatchIsBlockedByAnotherSession_ShouldWaitNoLongerThanTheLockWaitAtATimeAndGiveUpAfterTheTries()
+    {
+        // Arrange: a store behind by one index, and the events table held by another session.
+        await TestDatabases.ProvisionAsync(_name);
+        await TestDatabases.ExecuteAsync(_name, "DROP INDEX ix_pc_events_category_seq ON dbo.pc_events");
+        await using var holder = await HoldTheEventsTableAsync();
+
+        // Act: the lock wait is a second, well inside the index timeout, so the wait is what ends
+        // each try; between tries nothing of ours queues on the table.
+        var started = TimeProvider.System.GetTimestamp();
+        var blocked = await Should.ThrowAsync<StoreInitializationException>(() => TestDatabases.StartHostAsync(_name, options =>
+        {
+            options.SchemaMode = SchemaMode.Migrate;
+            options.SchemaLockWaitTimeout = TimeSpan.FromSeconds(1);
+        }));
+        var tookAtLeast = TimeProvider.System.GetElapsedTime(started);
+
+        // Assert
+        blocked.Message.ShouldContain("blocked by a lock another session holds");
+        blocked.Message.ShouldContain($"{StoreSchema.LockWaitAttempts} tries of 00:00:01");
+        blocked.Message.ShouldContain("Nightingale:SchemaLockWaitTimeout");
+        blocked.Message.ShouldContain("CREATE INDEX ix_pc_events_category_seq");
+        tookAtLeast.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds((2 * StoreSchema.LockWaitAttempts) - 1), "each try waits a second and sleeps a second, but the last");
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name = 'ix_pc_events_category_seq'")).ShouldBe(0);
+    }
+
+    /// <summary>A session holding the events table exclusively in an open transaction, as a long one would; disposing it rolls the transaction back and lets go.</summary>
+    private async Task<TableHold> HoldTheEventsTableAsync()
+    {
+        var holder = new Microsoft.Data.SqlClient.SqlConnection(TestDatabases.ConnectionStringFor(_name));
+        await holder.OpenAsync(TestContext.Current.CancellationToken);
+        await using var hold = holder.CreateCommand();
+        hold.CommandText = "BEGIN TRANSACTION; SELECT TOP 1 seq_id FROM dbo.pc_events WITH (TABLOCKX, HOLDLOCK);";
+        await hold.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        return new TableHold(holder);
+    }
+
+    private sealed class TableHold(Microsoft.Data.SqlClient.SqlConnection holder) : IAsyncDisposable
+    {
+        private bool _released;
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_released)
+            {
+                return;
+            }
+
+            _released = true;
+            await using (var release = holder.CreateCommand())
+            {
+                release.CommandText = "ROLLBACK TRANSACTION;";
+                await release.ExecuteNonQueryAsync();
+            }
+
+            await holder.DisposeAsync();
+        }
     }
 
     [Fact]

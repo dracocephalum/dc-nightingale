@@ -125,7 +125,14 @@ what the report prints is exactly what the apply runs, each batch is logged
 as it starts and when it ends with how long it took, a batch that creates or
 alters an index runs under `Nightingale:IndexMigrationStatementTimeout`, an
 hour by default, rather than the connection's command timeout, and a batch
-that fails is named. A connection that fails under the apply, as the store's
+that fails is named. Every batch waits for a table's lock no longer than
+`Nightingale:SchemaLockWaitTimeout`, thirty seconds by default, then sleeps
+as long and tries again, six times before giving up: a statement queued for
+a schema lock behind a long reader has every later reader and writer queue
+behind it, so a schema change on a system being served must never wait
+unboundedly, and the sleep between tries lets the queue drain. When online
+index builds arrive (`PENDING.md`), the same setting becomes the index
+statement's own low-priority wait. A connection that fails under the apply, as the store's
 tooling judges such failures, has the whole apply begun again, which is safe
 because both tools apply only what is missing. `StoreSchema` is the one
 place that reports what is pending in both and applies it; startup, the

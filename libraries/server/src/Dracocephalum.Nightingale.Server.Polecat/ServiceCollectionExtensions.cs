@@ -95,6 +95,11 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.IndexMigrationStatementTimeout)} must be positive. It was {options.IndexMigrationStatementTimeout}.");
         }
 
+        if (options.SchemaLockWaitTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptions.SchemaLockWaitTimeout)} must be positive. It was {options.SchemaLockWaitTimeout}.");
+        }
+
         services.AddNightingaleOptions(options);
 
         // The signal every append pulses, which whichever tail the host runs waits on: the store's

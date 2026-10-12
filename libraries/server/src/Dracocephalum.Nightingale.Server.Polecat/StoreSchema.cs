@@ -65,8 +65,14 @@ internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactor
 
     private const string GatewayTables = "gateway's tables";
 
+    /// <summary>How many times a batch is tried while a lock another session holds keeps it waiting.</summary>
+    internal const int LockWaitAttempts = 6;
+
     /// <summary>SQL Server's error number for a command that ran out of its timeout.</summary>
     private const int TimeoutError = -2;
+
+    /// <summary>SQL Server's error number for a lock request that ran out of the session's lock timeout.</summary>
+    private const int LockTimeoutError = 1222;
 
     /// <summary>The store's tooling's judgement of which failures are the connection's and worth another attempt: deliberately narrow, a command timeout is not one.</summary>
     private static readonly Migrator TransientFailures = new SqlServerMigrator();
@@ -301,7 +307,10 @@ internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactor
 
     /// <summary>
     /// Runs batches one by one on the context's connection, each logged as it starts and ends,
-    /// the ones that build an index under the host's index timeout.
+    /// the ones that build an index under the host's index timeout, and every one under the
+    /// host's lock wait: a batch kept waiting for a lock another session holds gives the wait up,
+    /// sleeps as long, and is tried again, so that the table is never frozen behind it for longer
+    /// than the wait at a time.
     /// </summary>
     private async Task RunAsync(NightingaleDbContext context, string tables, IReadOnlyList<string> batches, CancellationToken cancellationToken)
     {
@@ -310,42 +319,66 @@ internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactor
             return;
         }
 
+        var lockWait = options.SchemaLockWaitTimeout;
         await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var connection = context.Database.GetDbConnection();
+            await using (var session = connection.CreateCommand())
+            {
+                session.CommandText = string.Format(CultureInfo.InvariantCulture, "SET LOCK_TIMEOUT {0};", (int)Math.Ceiling(lockWait.TotalMilliseconds));
+                await session.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             foreach (var batch in batches)
             {
-                await using var command = connection.CreateCommand();
-                command.CommandText = batch;
                 var indexTimeout = SchemaBatches.BuildsAnIndex(batch);
-                if (indexTimeout)
+                for (var attempt = 1; ; attempt++)
                 {
-                    command.CommandTimeout = (int)Math.Ceiling(options.IndexMigrationStatementTimeout.TotalSeconds);
-                }
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = batch;
+                    if (indexTimeout)
+                    {
+                        command.CommandTimeout = (int)Math.Ceiling(options.IndexMigrationStatementTimeout.TotalSeconds);
+                    }
 
-                LogApplying(database.Name, tables, batch);
-                var watch = Stopwatch.StartNew();
-                try
-                {
-                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-                }
-                catch (SqlException exception) when (exception.Number == TimeoutError)
-                {
-                    LogFailed(exception, database.Name, tables, watch.Elapsed, batch);
-                    var timeout = TimeSpan.FromSeconds(command.CommandTimeout);
-                    throw new StoreInitializationException(
-                        $"A batch on the {tables} of database {database.Name} did not finish within {timeout}{(indexTimeout ? " (Nightingale:IndexMigrationStatementTimeout)" : string.Empty)} and was stopped; it may have waited on a lock another session holds, or the change is too large to run at startup and is one to run by hand. The batch:{Environment.NewLine}{batch}",
-                        exception);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    LogFailed(exception, database.Name, tables, watch.Elapsed, batch);
-                    throw;
-                }
+                    LogApplying(database.Name, tables, batch);
+                    var watch = Stopwatch.StartNew();
+                    try
+                    {
+                        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (SqlException exception) when (exception.Number == LockTimeoutError && attempt < LockWaitAttempts)
+                    {
+                        LogBlocked(database.Name, tables, lockWait, attempt, LockWaitAttempts, SchemaBatches.FirstLineOf(batch));
+                        await Task.Delay(lockWait, time, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+                    catch (SqlException exception) when (exception.Number == LockTimeoutError)
+                    {
+                        LogFailed(exception, database.Name, tables, watch.Elapsed, batch);
+                        throw new StoreInitializationException(
+                            $"A batch on the {tables} of database {database.Name} was blocked by a lock another session holds, through {LockWaitAttempts} tries of {lockWait} each (Nightingale:SchemaLockWaitTimeout), and was given up; sys.dm_exec_requests names the session holding the table. The batch:{Environment.NewLine}{batch}",
+                            exception);
+                    }
+                    catch (SqlException exception) when (exception.Number == TimeoutError)
+                    {
+                        LogFailed(exception, database.Name, tables, watch.Elapsed, batch);
+                        var timeout = TimeSpan.FromSeconds(command.CommandTimeout);
+                        throw new StoreInitializationException(
+                            $"A batch on the {tables} of database {database.Name} did not finish within {timeout}{(indexTimeout ? " (Nightingale:IndexMigrationStatementTimeout)" : string.Empty)} and was stopped; the change may be too large to run at startup, and is then one to run by hand. The batch:{Environment.NewLine}{batch}",
+                            exception);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        LogFailed(exception, database.Name, tables, watch.Elapsed, batch);
+                        throw;
+                    }
 
-                var firstLine = SchemaBatches.FirstLineOf(batch);
-                LogApplied(database.Name, tables, watch.Elapsed, firstLine);
+                    var firstLine = SchemaBatches.FirstLineOf(batch);
+                    LogApplied(database.Name, tables, watch.Elapsed, firstLine);
+                    break;
+                }
             }
         }
         finally
@@ -379,6 +412,9 @@ internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactor
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Applied to the {Tables} of database {Database} in {Elapsed}: {FirstLine}")]
     private partial void LogApplied(string database, string tables, TimeSpan elapsed, string firstLine);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A batch on the {Tables} of database {Database} waited {Wait} for a lock another session holds, try {Attempt} of {Attempts}; trying again after as long: {FirstLine}")]
+    private partial void LogBlocked(string database, string tables, TimeSpan wait, int attempt, int attempts, string firstLine);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed applying to the {Tables} of database {Database} after {Elapsed}; the batch that failed:\n{Sql}")]
     private partial void LogFailed(Exception exception, string database, string tables, TimeSpan elapsed, string sql);
