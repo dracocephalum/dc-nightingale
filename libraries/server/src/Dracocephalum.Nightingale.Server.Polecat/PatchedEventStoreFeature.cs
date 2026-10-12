@@ -10,7 +10,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// and two filtered indexes that make a category or event-type read a seek instead of a scan; and,
 /// on a store initialized with ordinals, two nullable columns holding each event's place within
 /// its category stream and its event-type stream, each with a filtered index over the numbered
-/// rows only, so a read by ordinal is one seek and never returns an unnumbered row. They are
+/// rows only, so a read by ordinal is one seek and never returns an unnumbered row, and a third
+/// over the unnumbered rows, so the sequencer finds what it has yet to number, the lag and any
+/// row committed late below its progress, without a scan. They are
 /// declared rather than applied by hand because the migration drops any column or index it does
 /// not know; declared, they are created when missing and left alone afterwards, and the store's own
 /// changes to the table still flow through the same definition. Every index leads with the tenant
@@ -73,6 +75,14 @@ internal sealed class PatchedEventStoreFeature(IFeatureSchema inner, bool ordina
                 {
                     Columns = [TenantColumn, "type", TypeOrdinalColumn],
                     Predicate = TypeOrdinalColumn + " IS NOT NULL",
+                });
+
+                // The rows still to number: a handful at any time, the sequencer's lag, so the
+                // index is small whatever the table's size.
+                table.Indexes.Add(new IndexDefinition("ix_pc_events_unnumbered")
+                {
+                    Columns = [TenantColumn, "seq_id"],
+                    Predicate = CategoryOrdinalColumn + " IS NULL",
                 });
             }
 

@@ -8,8 +8,13 @@ namespace Dracocephalum.Nightingale.Server;
 /// lease that says which instance runs it. A message is in at most one of parked and outbox: a
 /// replay moves it from parked to the outbox, a delivery that fails again moves it back. The
 /// runtime of a group, its in-flight events and their retries, is in memory in the owning
-/// instance and is not here. A backend reports expected failures as the domain exceptions and
-/// never lets its own exception types cross this interface.
+/// instance and is not here. What a running group writes, its checkpoint, a parked message, a
+/// message off the outbox, how it stands, is fenced by its lease: the write names the instance
+/// making it and lands only while that instance holds the group's lease, unexpired, at the
+/// moment the write commits, and answers false otherwise, so an instance that stalled past its
+/// lease while another took the group over writes nothing when it wakes. A backend reports
+/// expected failures as the domain exceptions and never lets its own exception types cross this
+/// interface.
 /// </summary>
 public interface ISubscriptionGroupStore
 {
@@ -48,9 +53,10 @@ public interface ISubscriptionGroupStore
     /// </summary>
     /// <param name="groupId">The group's id.</param>
     /// <param name="live">How the group stands, or <see langword="null"/> when its consumer has left.</param>
+    /// <param name="owner">The instance writing, which must hold the group's lease.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the row is written; a group deleted meanwhile is left alone.</returns>
-    Task SaveLiveAsync(Guid groupId, SubscriptionGroupLive? live, CancellationToken cancellationToken);
+    /// <returns>True when the row is written, or the group was deleted meanwhile and left alone; false when the lease is not the owner's.</returns>
+    Task<bool> SaveLiveAsync(Guid groupId, SubscriptionGroupLive? live, string owner, CancellationToken cancellationToken);
 
     /// <summary>Reads a group with what the store knows around it: its counts and who holds its lease.</summary>
     /// <param name="stream">The stream.</param>
@@ -65,21 +71,23 @@ public interface ISubscriptionGroupStore
     /// <returns>The summaries.</returns>
     Task<IReadOnlyList<SubscriptionGroupSummary>> ListAsync(string? stream, CancellationToken cancellationToken);
 
-    /// <summary>Writes the group's checkpoint: the last position every event up to which is done.</summary>
+    /// <summary>Writes the group's checkpoint: the last position every event up to which is done. A checkpoint only ever advances; one behind the row's is left unwritten.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <param name="checkpoint">The position.</param>
+    /// <param name="owner">The instance writing, which must hold the group's lease.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the checkpoint is written.</returns>
-    Task SaveCheckpointAsync(Guid groupId, long checkpoint, CancellationToken cancellationToken);
+    /// <returns>True when the checkpoint is written, or needed no writing; false when the lease is not the owner's.</returns>
+    Task<bool> SaveCheckpointAsync(Guid groupId, long checkpoint, string owner, CancellationToken cancellationToken);
 
     /// <summary>
     /// Parks a message: it is done for the group's checkpoint and kept until a replay. A message
     /// on the outbox that is parked is moved back: its outbox row goes with the same write.
     /// </summary>
     /// <param name="message">The parked message.</param>
+    /// <param name="owner">The instance writing, which must hold the group's lease.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the row exists.</returns>
-    Task ParkAsync(SubscriptionParkedMessage message, CancellationToken cancellationToken);
+    /// <returns>True when the row exists, or the group was deleted meanwhile; false when the lease is not the owner's.</returns>
+    Task<bool> ParkAsync(SubscriptionParkedMessage message, string owner, CancellationToken cancellationToken);
 
     /// <summary>
     /// Moves parked messages to the outbox, due at once: all of the group's, or the one with a
@@ -139,9 +147,10 @@ public interface ISubscriptionGroupStore
     /// <summary>Removes a message from the outbox: it was delivered and is done, or its event is gone.</summary>
     /// <param name="groupId">The group's id.</param>
     /// <param name="position">The event's global position, the row's key.</param>
+    /// <param name="owner">The instance writing, which must hold the group's lease.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the row is gone.</returns>
-    Task DequeueAsync(Guid groupId, long position, CancellationToken cancellationToken);
+    /// <returns>True when the row is gone; false when the lease is not the owner's.</returns>
+    Task<bool> DequeueAsync(Guid groupId, long position, string owner, CancellationToken cancellationToken);
 
     /// <summary>
     /// Takes or renews a lease. A lease that is free, expired, or already the owner's is granted;

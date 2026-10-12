@@ -51,6 +51,8 @@ CREATE INDEX ix_pc_events_type_seq ON dbo.pc_events (tenant_id, type, seq_id) WH
 CREATE INDEX ix_pc_events_category_ordinal ON dbo.pc_events (tenant_id, category, category_ordinal) WHERE (category_ordinal IS NOT NULL);
 
 CREATE INDEX ix_pc_events_type_ordinal ON dbo.pc_events (tenant_id, type, type_ordinal) WHERE (type_ordinal IS NOT NULL);
+
+CREATE INDEX ix_pc_events_unnumbered ON dbo.pc_events (tenant_id, seq_id) WHERE (category_ordinal IS NULL);
 IF OBJECT_ID('dbo.pc_event_progression') IS NULL
 BEGIN
 CREATE TABLE dbo.pc_event_progression (

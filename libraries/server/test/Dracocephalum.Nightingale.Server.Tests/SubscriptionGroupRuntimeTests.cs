@@ -16,6 +16,7 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 /// </summary>
 public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
 {
+    private const string Me = "this-instance";
     private static readonly DateTimeOffset Now = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
@@ -29,6 +30,12 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     public SubscriptionGroupRuntimeTests()
     {
         A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<SubscriptionOutboxMessage>());
+
+        // The lease is this instance's unless a test says otherwise: every fenced write lands.
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, A<long>._, Me, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>._, Me, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _groups.DequeueAsync(A<Guid>._, A<long>._, Me, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _groups.SaveLiveAsync(A<Guid>._, A<SubscriptionGroupLive?>._, Me, A<CancellationToken>._)).Returns(true);
     }
 
     public ValueTask DisposeAsync() => _router?.DisposeAsync() ?? ValueTask.CompletedTask;
@@ -53,7 +60,7 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         first.RetryCount.ShouldBe(0);
         new[] { first, second, third }.Select(message => message.Record.Revision).ShouldBe([0, 1, 2]);
         sut.Checkpoint.ShouldBe(1);
-        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 1, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 1, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -93,7 +100,7 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         // Assert
         again.RetryCount.ShouldBe(1);
         again.Record.Id.ShouldBe(first.Record.Id);
-        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>.That.Matches(parked => parked.Position == 10 && parked.Revision == 0 && parked.Ordinal == null && parked.Attempts == 1 && parked.Reason == "still not"), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>.That.Matches(parked => parked.Position == 10 && parked.Revision == 0 && parked.Ordinal == null && parked.Attempts == 1 && parked.Reason == "still not"), A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         sut.Checkpoint.ShouldBe(0);
     }
 
@@ -110,7 +117,7 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         await sut.RefuseAsync([first.Record.Id], NackAction.Park, "poison");
 
         // Assert
-        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>.That.Matches(parked => parked.EventId == first.Record.Id && parked.Reason == "poison"), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>.That.Matches(parked => parked.EventId == first.Record.Id && parked.Reason == "poison"), A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         sut.Checkpoint.ShouldBe(0);
     }
 
@@ -155,7 +162,7 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         first.Record.Revision.ShouldBe(5);
         first.RetryCount.ShouldBe(3);
         second.Record.Revision.ShouldBe(9);
-        A.CallTo(() => _groups.DequeueAsync(A<Guid>._, 50, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.DequeueAsync(A<Guid>._, 50, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         sut.Checkpoint.ShouldBe(8, "acknowledging a replayed message below the checkpoint must not move it back");
     }
 
@@ -263,7 +270,7 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         await sut.DisposeAsync();
 
         // Assert
-        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -288,8 +295,8 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         first.Record.Ordinal.ShouldBe(0);
         second.Record.Ordinal.ShouldBe(1);
         sut.Checkpoint.ShouldBe(1);
-        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 1, A<CancellationToken>._)).MustHaveHappened();
-        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>.That.Matches(parked => parked.Position == 17 && parked.Ordinal == 1 && parked.Revision == 0 && parked.EventId == second.Record.Id), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 1, A<string>._, A<CancellationToken>._)).MustHaveHappened();
+        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>.That.Matches(parked => parked.Position == 17 && parked.Ordinal == 1 && parked.Revision == 0 && parked.EventId == second.Record.Id), A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -431,6 +438,29 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Acknowledging_WhenTheStoreRefusesTheWriteAsAnotherInstances_ShouldEndEveryConsumerWithWhoOwnsTheGroup()
+    {
+        // Arrange: the checkpoint is written on every acknowledgement, and the store refuses it:
+        // the lease is no longer this instance's, and another holds it.
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10)]));
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, Me, A<CancellationToken>._)).Returns(false);
+        A.CallTo(() => _groups.LeaseHolderAsync(A<string>._, A<CancellationToken>._)).Returns(new LeaseHolder("two", new Uri("http://two:5000")));
+        await using var sut = Group("orders-1", -1, 1, settings => settings with { Start = StreamPosition.Start, CheckpointUpperBound = 1, CheckpointLowerBound = 1 });
+        var first = await Next(sut);
+
+        // Act
+        await sut.AcknowledgeAsync([first.Record.Id]);
+        var ended = await Should.ThrowAsync<GroupOwnedElsewhereException>(async () => await _consumer!.Outgoing.Reader.Completion.WaitAsync(Wait, TestContext.Current.CancellationToken));
+
+        // Assert: the consumer's call ends with who owns the group, and a late joiner is refused the same way.
+        ended.Owner.ShouldBe("two");
+        ended.Address.ShouldBe(new Uri("http://two:5000"));
+        var late = sut.Join(1, "late");
+        late.Outgoing.Reader.Completion.IsFaulted.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Fail_ShouldEndEveryConsumerWithTheCauseAndRefuseTheNext()
     {
         // Arrange
@@ -502,7 +532,7 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     {
         var settings = (adjust ?? (defaults => defaults))(GroupSettings.Default);
         _router ??= new StreamRouter(_store, _tail, StringComparer.Ordinal);
-        var runtime = new SubscriptionGroupRuntime(_store, _tail, _router, _groups, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint));
+        var runtime = new SubscriptionGroupRuntime(_store, _tail, _router, _groups, Me, _time, new SubscriptionGroupDefinition(stream, "g", settings, checkpoint));
         _consumer = runtime.Join(consumerBuffer, "one");
         return runtime;
     }

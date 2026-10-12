@@ -239,7 +239,14 @@ as long as any consumer is there.
 The lease is a row that only a free, expired or already owned lease lets an
 instance write, two instances racing for it told apart by the row's
 concurrency tokens, renewed while a consumer stays, released when the last
-leaves. The lease carries the owner's address, derived from what the owner
+leaves. The same tokens fence everything a running group writes: its
+checkpoint, a parked message, a message off the outbox, how it stands. Each
+such write reads the lease, checks it is this instance's and unexpired, and
+saves the lease row with it, unchanged but token-checked, in one transaction,
+so an instance that stalled past its lease while another took the group over
+writes nothing when it wakes; the refused write ends its consumers' calls
+with who owns the group now, the same answer a refused renewal gives. The
+checkpoint never moves back. The lease carries the owner's address, derived from what the owner
 listens on unless configured, and an instance asked for a group another runs
 refuses with that address; the client goes there itself, once, and keeps the
 connection, the way the reference client follows a not-leader answer to the
@@ -337,11 +344,16 @@ key found with one backward seek. The append path is untouched, because
 numbering at append time would serialize every append to a category. A batch
 and the progress row, the position numbered through, are one transaction, and
 the progress row is read under an update lock, so a sequencer whose lease
-overlapped a takeover continues from what the other committed. The price is
-lag: ordinals trail the high-water mark by the sequencer's cadence, which is
-the tail's, and a removed event leaves a numbered hole the reader skips and
-the sequencer never reuses, which is what a link whose event is gone does in
-the reference.
+overlapped a takeover continues from what the other committed. A batch is
+every unnumbered row up to its end, found through a third filtered index,
+over the unnumbered rows, which holds only the lag: so an event whose
+position the tail gave up as a gap and that committed late, below the
+sequencer's progress, is numbered by the next batch with the next ordinal of
+its key. By ordinal it follows what was appended after it; it is never left
+out. The price is lag: ordinals trail the high-water mark by the sequencer's
+cadence, which is the tail's, and a removed event leaves a numbered hole the
+reader skips and the sequencer never reuses, which is what a link whose event
+is gone does in the reference.
 
 The numbering is the caller's explicit choice per read or subscription,
 global by default, and the service refuses an ordinal read on anything but

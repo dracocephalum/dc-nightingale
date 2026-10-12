@@ -444,7 +444,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
             throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, owner);
         }
 
-        var runtime = new SubscriptionGroupRuntime(GetStreams(definition), GetTail(definition), routers.For(TenantScope.OfStoreTenant(definition.TenantId)), GetGroups(definition), timeProvider, definition);
+        var runtime = new SubscriptionGroupRuntime(GetStreams(definition), GetTail(definition), routers.For(TenantScope.OfStoreTenant(definition.TenantId)), GetGroups(definition), registry.InstanceId, timeProvider, definition);
         return new SubscriptionGroupHost(definition, runtime, (live, token) => KeepAsync(live, definition, lease, token));
     }
 
@@ -460,7 +460,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
             // Cleared before the lease goes, so the row never says a consumer is connected under
             // no lease; an instance that dies first leaves it, and readers go by the lease.
             var groups = GetGroups(host.Definition);
-            await groups.SaveLiveAsync(host.Definition.Id, null, CancellationToken.None).ConfigureAwait(false);
+            _ = await groups.SaveLiveAsync(host.Definition.Id, null, registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
             await groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(host.Definition.Id), registry.InstanceId, CancellationToken.None).ConfigureAwait(false);
         }
     }
@@ -655,8 +655,10 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
         try
         {
             // Written now, so a listing shows the consumer as soon as it is connected, and again
-            // with every renewal of the lease.
-            await GetGroups(live.Definition).SaveLiveAsync(live.Definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
+            // with every renewal of the lease. Refused, the lease is no longer this instance's,
+            // and the keeper's next renewal ends the call with who owns the group; the
+            // confirmation goes out all the same, and the end follows.
+            _ = await GetGroups(live.Definition).SaveLiveAsync(live.Definition.Id, live.Describe(), registry.InstanceId, cancellationToken).ConfigureAwait(false);
             await responseStream.WriteAsync(
                 new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = consumer.Id.ToString("D"), Checkpoint = live.Checkpoint } },
                 cancellationToken).ConfigureAwait(false);
@@ -748,7 +750,12 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
             }
 
             await live.ExpireAsync().ConfigureAwait(false);
-            await GetGroups(definition).SaveLiveAsync(definition.Id, live.Describe(), cancellationToken).ConfigureAwait(false);
+            if (!await GetGroups(definition).SaveLiveAsync(definition.Id, live.Describe(), registry.InstanceId, cancellationToken).ConfigureAwait(false))
+            {
+                // Refused between two renewals: the lease changed hands under the write.
+                var holder = await GetGroups(definition).LeaseHolderAsync(lease, cancellationToken).ConfigureAwait(false);
+                throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, holder);
+            }
         }
     }
 

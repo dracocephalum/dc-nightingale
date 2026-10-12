@@ -86,18 +86,19 @@ public static class NightingaleErrors
     public static RpcException GroupNotFound(string stream, string group) =>
         Build(StatusCode.NotFound, ErrorReason.GroupNotFound, $"Group '{group}' was not found on stream '{stream}'.", ("stream", stream), ("group", group));
 
-    /// <summary>Another instance owns the group; the answer names it and, when it advertised one, its address, so the client can go there.</summary>
+    /// <summary>Another instance owns the group, or this instance no longer does; the answer names the owner and, when it advertised one, its address, so the client can go there, or neither while nobody holds the lease yet.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="group">The group.</param>
-    /// <param name="holder">The owning instance and where it is reached.</param>
+    /// <param name="holder">The owning instance and where it is reached, or <see langword="null"/> when the lease lapsed and no instance has taken it.</param>
     /// <returns>The exception to throw.</returns>
-    public static RpcException GroupOwnedElsewhere(string stream, string group, LeaseHolder holder)
+    public static RpcException GroupOwnedElsewhere(string stream, string group, LeaseHolder? holder)
     {
-        ArgumentNullException.ThrowIfNull(holder);
-        var message = holder.Address is null
+        var message = holder is null
+            ? $"Group '{group}' on stream '{stream}' is no longer owned by this instance: its lease lapsed, and no instance holds it yet."
+            : holder.Address is null
             ? $"Group '{group}' on stream '{stream}' is owned by instance {holder.Owner}, which advertises no address."
             : $"Group '{group}' on stream '{stream}' is owned by instance {holder.Owner} at {holder.Address}.";
-        return Build(StatusCode.Unavailable, ErrorReason.GroupOwnedElsewhere, message, ("stream", stream), ("group", group), ("owner", holder.Owner), ("address", holder.Address?.ToString() ?? string.Empty));
+        return Build(StatusCode.Unavailable, ErrorReason.GroupOwnedElsewhere, message, ("stream", stream), ("group", group), ("owner", holder?.Owner ?? string.Empty), ("address", holder?.Address?.ToString() ?? string.Empty));
     }
 
     /// <summary>The group has as many consumers as it allows.</summary>

@@ -23,8 +23,10 @@ it says nothing while the store moves on without it. On a store initialized
 with `Nightingale:Store:AssignOrdinals`, a read or subscription of `$ce-` or `$et-`
 may ask for ordinal numbering instead: dense, zero-based numbers assigned
 after commit by one sequencer per cluster, so they trail the global head by
-its cadence, and a deleted event leaves a hole that is skipped and never
-reused. The choice is explicit per call, global by default, and refused with
+its cadence, a deleted event leaves a hole that is skipped and never reused,
+and an event that committed late, after the head had passed its position,
+gets the next ordinal when the sequencer finds it, so by ordinal it follows
+what was appended after it. The choice is explicit per call, global by default, and refused with
 `ORDINALS_NOT_ENABLED` on a store without the feature; under it every number
 in the conversation is an ordinal and each event carries its ordinal beside
 its position.

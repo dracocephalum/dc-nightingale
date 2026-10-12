@@ -28,6 +28,9 @@ public sealed class OrdinalTests : IAsyncLifetime
             options.Store.AssignOrdinals = true;
             options.Deletion.AllowDelete = true;
             options.Deletion.AllowTombstone = true;
+
+            // A short lease, so the sequencer's quiet-store pass, on renewal, comes within a second.
+            options.SequencerLeaseDuration = TimeSpan.FromSeconds(3);
         });
     }
 
@@ -228,6 +231,37 @@ public sealed class OrdinalTests : IAsyncLifetime
         {
             await other.StopAsync(TestContext.Current.CancellationToken);
         }
+    }
+
+    [Fact]
+    public async Task Sequencer_WhenAnEventCommitsAfterTheTailGaveItsPositionUp_ShouldNumberItWithTheNextOrdinalWithoutWaitingForAnAppend()
+    {
+        // Arrange: an append the database refuses inside the insert, an event type longer than its
+        // column, takes position 2 and never commits it; the next append lands at 3, the tail
+        // gives the gap up after the store's threshold, and the sequencer numbers past it.
+        var sut = Store;
+        await sut.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<ValueTooLongException>(async () => await sut.AppendAsync("orders-1", StreamState.StreamRevision(0), [new EventData(Guid.NewGuid(), new string('x', 501), "{}"u8.ToArray())], TestContext.Current.CancellationToken));
+        var pastTheGap = await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await NumberedAsync(pastTheGap.Position);
+        var before = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+
+        // Act: the gap's transaction commits after all, played by a row at its position; nothing
+        // else is appended, so no head moves, and the sequencer finds it on its quiet pass.
+        await TestDatabases.ExecuteAsync(_name, "SET IDENTITY_INSERT dbo.pc_events ON; INSERT INTO dbo.pc_events (seq_id, id, stream_id, version, data, type) SELECT 2, NEWID(), 'orders-1', 2, data, type FROM dbo.pc_events WHERE seq_id = 1; SET IDENTITY_INSERT dbo.pc_events OFF;");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        var after = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, timeout.Token);
+        while (after.Count < 3)
+        {
+            await Task.Delay(100, timeout.Token);
+            after = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, timeout.Token);
+        }
+
+        // Assert: numbered late, with the next ordinal of its category, never left out.
+        pastTheGap.Position.ShouldBe(3, "the refused append's number is gone");
+        before.Select(record => (record.Position, record.Ordinal)).ShouldBe([(1L, (long?)0), (3L, 1)]);
+        after.Select(record => (record.Position, record.Ordinal)).ShouldBe([(1L, (long?)0), (3L, 1), (2L, 2)]);
     }
 
     private IStreamStore Store => _host!.Store();

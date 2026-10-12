@@ -7,9 +7,12 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// The group store over the gateway's own tables through the context: groups with their settings
 /// as columns and their checkpoint, parked messages one row each, the outbox a replay
 /// moves them to, and leases. Every operation is plain reads and writes, so it runs on any
-/// provider and the in-memory one stands in for a test; the one race that matters, two
-/// instances taking one lease, is settled by the lease row's concurrency tokens rather than by a
-/// statement only one database has.
+/// provider and the in-memory one stands in for a test; the races that matter, two instances
+/// taking one lease and a running group writing under a lease another instance has taken over,
+/// are settled by the lease row's concurrency tokens rather than by a statement only one
+/// database has: a running group's write reads the lease, checks it is the writer's and
+/// unexpired, and saves the lease row with the write, unchanged but token-checked, so a lease
+/// that changed hands in between fails the whole write.
 /// </summary>
 /// <param name="contexts">Where a context comes from, one per operation.</param>
 /// <param name="tenantId">The tenant every group belongs to.</param>
@@ -18,6 +21,9 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
 {
     /// <summary>How many times a delete is tried while the group's rows change under it.</summary>
     private const int DeleteAttempts = 5;
+
+    /// <summary>How many times a fenced write is tried while the lease or the rows change under it: once more than once, for the writer's own renewal landing in between.</summary>
+    private const int FencedWriteAttempts = 3;
 
     /// <summary>The longest consumer address the row holds; a longer one is cut, being for reading only.</summary>
     private const int MaxConsumerAddressLength = 200;
@@ -122,34 +128,83 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     }
 
     /// <inheritdoc/>
-    public async Task SaveLiveAsync(Guid groupId, SubscriptionGroupLive? live, CancellationToken cancellationToken)
-    {
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await context.SubscriptionGroups
-            .SingleOrDefaultAsync(row => row.Id == groupId, cancellationToken)
-            .ConfigureAwait(false);
-        if (row is null)
+    public Task<bool> SaveLiveAsync(Guid groupId, SubscriptionGroupLive? live, string owner, CancellationToken cancellationToken) =>
+        WriteFencedAsync(groupId, owner, async (context, token) =>
         {
-            // The group was deleted under its consumer; there is nothing to write this on.
-            return;
-        }
+            var row = await context.SubscriptionGroups
+                .SingleOrDefaultAsync(row => row.Id == groupId, token)
+                .ConfigureAwait(false);
+            if (row is null)
+            {
+                // The group was deleted under its consumer; there is nothing to write this on.
+                return;
+            }
 
-        row.LiveSnapshotAt = live?.AsOf;
-        row.LiveConnectedAt = live?.ConnectedAt;
-        row.LiveConsumerCount = live?.ConsumerCount;
-        row.LiveConsumerAddress = live?.ConsumerAddress is { Length: > MaxConsumerAddressLength } address ? address[..MaxConsumerAddressLength] : live?.ConsumerAddress;
-        row.LiveConsumerBufferSize = live?.ConsumerBufferSize;
-        row.LiveInFlightCount = live?.InFlightCount;
-        row.LiveAwaitingRetryCount = live?.AwaitingRetryCount;
-        row.LiveCheckpointPosition = live?.Checkpoint;
-        row.LiveOldestInFlightAt = live?.OldestInFlightAt;
-        try
+            row.LiveSnapshotAt = live?.AsOf;
+            row.LiveConnectedAt = live?.ConnectedAt;
+            row.LiveConsumerCount = live?.ConsumerCount;
+            row.LiveConsumerAddress = live?.ConsumerAddress is { Length: > MaxConsumerAddressLength } address ? address[..MaxConsumerAddressLength] : live?.ConsumerAddress;
+            row.LiveConsumerBufferSize = live?.ConsumerBufferSize;
+            row.LiveInFlightCount = live?.InFlightCount;
+            row.LiveAwaitingRetryCount = live?.AwaitingRetryCount;
+            row.LiveCheckpointPosition = live?.Checkpoint;
+            row.LiveOldestInFlightAt = live?.OldestInFlightAt;
+        }, cancellationToken);
+
+    /// <summary>
+    /// A running group's write, fenced by its lease. The lease row is read and checked, then
+    /// saved with the write, unchanged but with its concurrency tokens, so the write lands only
+    /// if the lease was the owner's and unexpired when read and still the same when the write
+    /// commits. A lease or a row that changed in between fails the save; it is looked at again,
+    /// since the change may be the owner's own renewal, and given up as lost after a few tries.
+    /// A group deleted meanwhile has nothing to write on and is not a loss.
+    /// </summary>
+    /// <param name="groupId">The group whose lease fences the write.</param>
+    /// <param name="owner">The instance writing.</param>
+    /// <param name="write">Reads and changes what the write is about, on the context the lease is read on.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>True when the write landed, or the group was gone; false when the lease is not the owner's.</returns>
+    private async Task<bool> WriteFencedAsync(Guid groupId, string owner, Func<NightingaleDbContext, CancellationToken, Task> write, CancellationToken cancellationToken)
+    {
+        var name = SubscriptionGroupRegistry.GetLeaseName(groupId);
+        for (var attempt = 1; ; attempt++)
         {
-            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // Deleted between the read and the write; the same as not being there.
+            await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            var lease = await context.Leases.SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
+            if (lease is null || lease.Owner != owner || lease.ExpiresAt <= timeProvider.GetUtcNow())
+            {
+                return false;
+            }
+
+            // Written back as it is: the update carries the tokens, and is refused if the row
+            // is no longer as it was read.
+            context.Entry(lease).Property(row => row.ExpiresAt).IsModified = true;
+            await write(context, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < FencedWriteAttempts)
+            {
+                // The lease, or a row the write touched, changed under it; see above.
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return false;
+            }
+            catch (DbUpdateException)
+            {
+                // The group was deleted under its consumer: the foreign key refuses a row for a
+                // group that is gone, and there is nothing to write for it. Anything else the
+                // database refused is not that, and is the caller's to see.
+                if (await GroupExistsAsync(groupId, cancellationToken).ConfigureAwait(false))
+                {
+                    throw;
+                }
+
+                return true;
+            }
         }
     }
 
@@ -263,71 +318,57 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     }
 
     /// <inheritdoc/>
-    public async Task SaveCheckpointAsync(Guid groupId, long checkpoint, CancellationToken cancellationToken)
-    {
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await context.SubscriptionGroups
-            .SingleOrDefaultAsync(row => row.Id == groupId, cancellationToken)
-            .ConfigureAwait(false);
-        if (row is null)
+    public Task<bool> SaveCheckpointAsync(Guid groupId, long checkpoint, string owner, CancellationToken cancellationToken) =>
+        WriteFencedAsync(groupId, owner, async (context, token) =>
         {
-            // The group was deleted under its consumer; there is nothing to record the checkpoint on.
-            return;
-        }
+            var row = await context.SubscriptionGroups
+                .SingleOrDefaultAsync(row => row.Id == groupId, token)
+                .ConfigureAwait(false);
 
-        row.CheckpointPosition = checkpoint;
-        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-    }
+            // A group deleted under its consumer has nothing to record the checkpoint on; a
+            // checkpoint behind the row's is an earlier write's arriving late, and never moves it back.
+            if (row is not null && row.CheckpointPosition < checkpoint)
+            {
+                row.CheckpointPosition = checkpoint;
+            }
+        }, cancellationToken);
 
     /// <inheritdoc/>
-    public async Task ParkAsync(SubscriptionParkedMessage message, CancellationToken cancellationToken)
+    public Task<bool> ParkAsync(SubscriptionParkedMessage message, string owner, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(message);
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await context.SubscriptionParkedEvents
-            .SingleOrDefaultAsync(row => row.SubscriptionGroupId == message.GroupId && row.Position == message.Position, cancellationToken)
-            .ConfigureAwait(false);
-        if (row is null)
+        return WriteFencedAsync(message.GroupId, owner, async (context, token) =>
         {
-            row = new SubscriptionParkedEvent
+            var row = await context.SubscriptionParkedEvents
+                .SingleOrDefaultAsync(row => row.SubscriptionGroupId == message.GroupId && row.Position == message.Position, token)
+                .ConfigureAwait(false);
+            if (row is null)
             {
-                SubscriptionGroupId = message.GroupId,
-                Position = message.Position,
-                Revision = message.Revision,
-                Ordinal = message.Ordinal,
-                EventId = message.EventId,
-                Reason = message.Reason,
-            };
-            context.SubscriptionParkedEvents.Add(row);
-        }
-
-        row.Reason = message.Reason;
-        row.Attempts = message.Attempts;
-        row.ParkedAt = message.ParkedAt;
-
-        // Moved back: a message that was on the outbox is parked again, not in both places.
-        var queued = await context.SubscriptionOutboxEntries
-            .SingleOrDefaultAsync(row => row.SubscriptionGroupId == message.GroupId && row.Position == message.Position, cancellationToken)
-            .ConfigureAwait(false);
-        if (queued is not null)
-        {
-            context.SubscriptionOutboxEntries.Remove(queued);
-        }
-
-        try
-        {
-            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (DbUpdateException)
-        {
-            // The group was deleted under its consumer, and its parked events with it: the foreign
-            // key refuses a row for a group that is gone, and there is nothing to park it for.
-            // Anything else the database refused is not that, and is the caller's to see.
-            if (await GroupExistsAsync(message.GroupId, cancellationToken).ConfigureAwait(false))
-            {
-                throw;
+                row = new SubscriptionParkedEvent
+                {
+                    SubscriptionGroupId = message.GroupId,
+                    Position = message.Position,
+                    Revision = message.Revision,
+                    Ordinal = message.Ordinal,
+                    EventId = message.EventId,
+                    Reason = message.Reason,
+                };
+                context.SubscriptionParkedEvents.Add(row);
             }
-        }
+
+            row.Reason = message.Reason;
+            row.Attempts = message.Attempts;
+            row.ParkedAt = message.ParkedAt;
+
+            // Moved back: a message that was on the outbox is parked again, not in both places.
+            var queued = await context.SubscriptionOutboxEntries
+                .SingleOrDefaultAsync(row => row.SubscriptionGroupId == message.GroupId && row.Position == message.Position, token)
+                .ConfigureAwait(false);
+            if (queued is not null)
+            {
+                context.SubscriptionOutboxEntries.Remove(queued);
+            }
+        }, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -485,20 +526,17 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     }
 
     /// <inheritdoc/>
-    public async Task DequeueAsync(Guid groupId, long position, CancellationToken cancellationToken)
-    {
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await context.SubscriptionOutboxEntries
-            .SingleOrDefaultAsync(row => row.SubscriptionGroupId == groupId && row.Position == position, cancellationToken)
-            .ConfigureAwait(false);
-        if (row is null)
+    public Task<bool> DequeueAsync(Guid groupId, long position, string owner, CancellationToken cancellationToken) =>
+        WriteFencedAsync(groupId, owner, async (context, token) =>
         {
-            return;
-        }
-
-        context.SubscriptionOutboxEntries.Remove(row);
-        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-    }
+            var row = await context.SubscriptionOutboxEntries
+                .SingleOrDefaultAsync(row => row.SubscriptionGroupId == groupId && row.Position == position, token)
+                .ConfigureAwait(false);
+            if (row is not null)
+            {
+                context.SubscriptionOutboxEntries.Remove(row);
+            }
+        }, cancellationToken);
 
     /// <inheritdoc/>
     public async Task<LeaseHolder?> AcquireLeaseAsync(string name, string owner, Uri? ownerAddress, TimeSpan duration, CancellationToken cancellationToken)

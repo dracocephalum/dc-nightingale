@@ -35,6 +35,12 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         A.CallTo(() => _groups.AcquireLeaseAsync(A<string>._, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns((LeaseHolder?)null);
         A.CallTo(() => _groups.LeaseHolderAsync(A<string>._, A<CancellationToken>._)).Returns((LeaseHolder?)null);
         A.CallTo(() => _groups.DueAsync(A<Guid>._, A<DateTimeOffset>._, A<CancellationToken>._)).Returns(new List<SubscriptionOutboxMessage>());
+
+        // The lease is this instance's unless a test says otherwise: every fenced write lands.
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, A<long>._, A<string>._, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>._, A<string>._, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _groups.DequeueAsync(A<Guid>._, A<long>._, A<string>._, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _groups.SaveLiveAsync(A<Guid>._, A<SubscriptionGroupLive?>._, A<string>._, A<CancellationToken>._)).Returns(true);
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
@@ -427,7 +433,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         // One lease for the two, taken when the first arrived and given back when the last left.
         A.CallTo(() => _groups.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<Uri?>._, PersistentSubscriptionsService.LeaseDuration, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         await Until(() => A.CallTo(() => _groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<CancellationToken>._)).MustHaveHappenedOnceExactly());
-        A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -445,7 +451,7 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
         var messages = await Next(call, 3);
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Ack = new Ack { Ids = { messages[1].Event.Event.Id } } }, TestContext.Current.CancellationToken);
-        await Until(() => A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<CancellationToken>._)).MustHaveHappened());
+        await Until(() => A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<string>._, A<CancellationToken>._)).MustHaveHappened());
         await call.RequestStream.CompleteAsync();
 
         // Assert
@@ -710,8 +716,8 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         listed[1].Live.InFlightCount.ShouldBe(99);
 
         // The group wrote how it stands when its consumer connected, and cleared it when the consumer left.
-        A.CallTo(() => _groups.SaveLiveAsync(definition.Id, A<SubscriptionGroupLive>.That.Matches(written => written != null && written.ConsumerBufferSize == 5), A<CancellationToken>._)).MustHaveHappened();
-        await Until(() => A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<CancellationToken>._)).MustHaveHappened());
+        A.CallTo(() => _groups.SaveLiveAsync(definition.Id, A<SubscriptionGroupLive>.That.Matches(written => written != null && written.ConsumerBufferSize == 5), A<string>._, A<CancellationToken>._)).MustHaveHappened();
+        await Until(() => A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<string>._, A<CancellationToken>._)).MustHaveHappened());
     }
 
     [Fact]
