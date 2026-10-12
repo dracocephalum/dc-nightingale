@@ -49,13 +49,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   revision that was no longer current. Close by: a conditional archive
   statement that carries the expected revision, which is asked for in
   `UPSTREAM.md`.
-- **Only the appending instance's tail is woken.** An append wakes the tail of
-  the process it was made through; the other instances' tails find it at
-  their next poll, up to a quarter of a second later while events flow and a
-  second when they do not. A subscriber connected to another instance than
-  the writer waits that long. Close by: a signal across instances, which on
-  SQL Server is Service Broker or query notifications, once a measurement
-  shows the interval matters there.
 - **An initialization interrupted after the gateway's migrations and before
   the settings rows is not recognized.** A start that dies between the two
   halves is carried on by the next, which finds only the server's own tables,

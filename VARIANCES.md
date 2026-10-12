@@ -299,8 +299,14 @@ first, so an append that has returned is in what they see, with one exception:
 while a lower number's transaction is still open, the mark stops before it and
 every higher event waits, until that transaction commits or the poller gives
 the gap up as abandoned after the store's threshold. A subscription's live
-phase follows the poller, at most its interval behind an append. Per-stream
-reads are unaffected: versions are dense under the stream lock.
+phase follows the poller: an append made through the same instance wakes it,
+so the event is delivered within milliseconds; one made through another
+instance is found at that instance's next look, at most
+`Nightingale:TailPollingInterval` later, a second by default, where the
+reference delivers to every node once its replication has the event. A host
+that wants less sets the interval shorter and pays a small query per interval
+per instance, whatever the number of subscriptions. Per-stream reads are
+unaffected: versions are dense under the stream lock.
 
 **Why:** reading past the high-water mark can skip an event forever.
 

@@ -9,7 +9,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 /// <summary>
 /// The per-tenant poller over positions a test writes by hand: each tenant's head follows its own
 /// committed prefix, a gap in one tenant holds that tenant alone, a gap held past the threshold
-/// is given up the store's way, a refresh extends but never skips, whoever follows every tenant
+/// is given up the store's way, a look says whether a head is catching up, which is what calls
+/// for the fast interval, a refresh extends but never skips, whoever follows every tenant
 /// is woken by any of them, and the loop looks on its cadence. The two tenants' positions
 /// overlap, as they do under a sequence per tenant. The queries themselves are
 /// <c>EventRowPositionsTests</c>'.
@@ -41,12 +42,12 @@ public sealed class PolecatTenantTailsTests : IAsyncDisposable
         var b = _sut.For("b");
 
         // Act
-        var moved = await _sut.LookAsync(TestContext.Current.CancellationToken);
+        var catchingUp = await _sut.LookAsync(TestContext.Current.CancellationToken);
         var again = await _sut.LookAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        moved.ShouldBeTrue();
-        again.ShouldBeFalse("nothing was appended between the looks");
+        catchingUp.ShouldBeTrue("tenant a moved and was left short of 5");
+        again.ShouldBeFalse("nothing moved between the looks: a gap that holds a head is waited out on the slow interval");
         a.Head.ShouldBe(3);
         b.Head.ShouldBe(2);
         _sut.For("a").ShouldBeSameAs(a);
@@ -89,14 +90,37 @@ public sealed class PolecatTenantTailsTests : IAsyncDisposable
         await _sut.LookAsync(TestContext.Current.CancellationToken);
         var stillHeld = a.Head;
         _time.Advance(TimeSpan.FromMilliseconds(1));
-        var moved = await _sut.LookAsync(TestContext.Current.CancellationToken);
+        var catchingUp = await _sut.LookAsync(TestContext.Current.CancellationToken);
 
         // Assert: the head moves to 6, the last position appended before the threshold, and
-        // on through 7, which follows it without a gap.
+        // on through 7, which follows it without a gap: caught up.
         held.ShouldBe(3);
         stillHeld.ShouldBe(3);
-        moved.ShouldBeTrue();
+        catchingUp.ShouldBeFalse();
         a.Head.ShouldBe(7);
+    }
+
+    [Fact]
+    public async Task Look_ShouldCallForTheFastIntervalOnlyWhileAHeadItMovedIsStillBehind()
+    {
+        // Arrange: tenant a's positions follow one another to the last; tenant b has more
+        // than one window of them.
+        _positions.Append("a", 1, 2, 3);
+        _positions.Append("b", Enumerable.Range(1, PolecatTenantTails.RefreshWindow + 1).Select(position => (long)position).ToArray());
+        var a = _sut.For("a");
+
+        // Act
+        var caughtUp = await _sut.LookAsync(TestContext.Current.CancellationToken);
+        var b = _sut.For("b");
+        var windowFull = await _sut.LookAsync(TestContext.Current.CancellationToken);
+        var rest = await _sut.LookAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        caughtUp.ShouldBeFalse("a moved to its last position");
+        a.Head.ShouldBe(3);
+        windowFull.ShouldBeTrue("b moved one window and has more past it");
+        rest.ShouldBeFalse("the second window reached b's last position");
+        b.Head.ShouldBe(PolecatTenantTails.RefreshWindow + 1);
     }
 
     [Fact]
@@ -110,10 +134,10 @@ public sealed class PolecatTenantTailsTests : IAsyncDisposable
         // Act
         await _sut.LookAsync(TestContext.Current.CancellationToken);
         _time.Advance(PolecatTenantTails.StaleAfter);
-        var moved = await _sut.LookAsync(TestContext.Current.CancellationToken);
+        var catchingUp = await _sut.LookAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        moved.ShouldBeFalse();
+        catchingUp.ShouldBeFalse();
         a.Head.ShouldBe(2);
     }
 
