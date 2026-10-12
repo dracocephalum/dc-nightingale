@@ -21,14 +21,21 @@ internal sealed class FollowedHead
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The head, greater than <paramref name="beyond"/>.</returns>
     /// <exception cref="InvalidOperationException">The head will not advance again; the cause is the inner exception.</exception>
-    public async ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken)
+    public ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken) => WaitForReachAsync(beyond + 1, cancellationToken);
+
+    /// <summary>Waits until the head is at a mark or beyond it.</summary>
+    /// <param name="mark">The mark the caller needs reached.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The head, at least <paramref name="mark"/>.</returns>
+    /// <exception cref="InvalidOperationException">The head will not advance again; the cause is the inner exception.</exception>
+    public async ValueTask<long> WaitForReachAsync(long mark, CancellationToken cancellationToken)
     {
         while (true)
         {
             Task advanced;
             lock (_gate)
             {
-                if (_head > beyond)
+                if (_head >= mark)
                 {
                     return _head;
                 }

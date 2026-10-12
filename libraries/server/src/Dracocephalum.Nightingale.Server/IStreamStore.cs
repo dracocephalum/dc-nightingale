@@ -151,15 +151,6 @@ public interface IStreamStore
     Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken);
 
     /// <summary>
-    /// The global position up to which every event has its ordinals, so a subscription under ordinal
-    /// numbering can tell "nothing new for this stream" from "not numbered yet". 0 when nothing is.
-    /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The position.</returns>
-    /// <exception cref="OrdinalsNotEnabledException">The store has no ordinals.</exception>
-    Task<long> NumberedThroughAsync(CancellationToken cancellationToken);
-
-    /// <summary>
     /// Deletes a stream: its events leave every read and it cannot be appended to again, but its
     /// rows stay in the store. The expected state is checked first, against the stream's current
     /// revision.

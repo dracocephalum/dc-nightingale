@@ -775,9 +775,9 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     /// carries the highest one assigned, or -1 when none is, and from the end means after that.
     /// The catch-up drains the numbered rows; the live phase waits on the tail like every other
     /// subscription, then looks for newly numbered rows, and while the sequencer is still behind
-    /// the head it woke for, looks again on the feed's poll interval rather than waiting for an
-    /// advance that a quiet store would never bring. A store advance that brings this
-    /// stream nothing is silent, as under global numbering.
+    /// the head it woke for, waits for the numbering to reach it rather than for an advance that
+    /// a quiet store would never bring. A store advance that brings this stream nothing is
+    /// silent, as under global numbering.
     /// </summary>
     private async Task SubscribeOrdinal(IStreamStore store, IStoreTail tail, VirtualStreamName stream, ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
@@ -797,7 +797,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         while (true)
         {
             var behind = false;
-            var numbered = await store.NumberedThroughAsync(cancellationToken).ConfigureAwait(false);
+            var numbered = tail.Numbered;
             while (true)
             {
                 var page = await store.ReadByOrdinalAsync(stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
@@ -840,8 +840,8 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
             // If everything up to the observed head was numbered before the read began, the read
             // saw it all and the next thing to wait for is an advance; otherwise the sequencer
-            // is behind, and the next look is soon.
-            observed = await EventSource.AwaitNumberingAsync(tail, numbered, observed, timeProvider, cancellationToken).ConfigureAwait(false);
+            // is behind, and the next look follows its progress.
+            observed = await EventSource.AwaitNumberingAsync(tail, numbered, observed, cancellationToken).ConfigureAwait(false);
         }
     }
 

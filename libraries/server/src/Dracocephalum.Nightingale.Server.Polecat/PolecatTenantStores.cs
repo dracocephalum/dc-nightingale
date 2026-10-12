@@ -47,7 +47,7 @@ internal sealed class PolecatTenantStores(
 {
     private readonly ConcurrentDictionary<string, PolecatStreamStore> _streams = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SubscriptionGroupStore> _groups = new(StringComparer.Ordinal);
-    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStore, contexts, null, appended, timeProvider, logger));
+    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStore, appended, timeProvider, logger));
 
     /// <inheritdoc/>
     public bool SupportsAllTenants => supportsAllTenants;
@@ -69,8 +69,7 @@ internal sealed class PolecatTenantStores(
             return _allTenants.Value;
         }
 
-        // Under a sequence per tenant, the sequencer keeps a progress row per tenant.
-        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStore, contexts, supportsAllTenants ? null : id, appended, timeProvider, logger));
+        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStore, appended, timeProvider, logger));
     }
 
     /// <inheritdoc/>

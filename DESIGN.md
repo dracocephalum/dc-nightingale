@@ -352,8 +352,13 @@ position it always carries; a consumer keeps the numbering with its checkpoint
 and never resumes under the other. A bounded read is a snapshot of what is
 numbered and needs no head, because a batch is atomic. A subscription waits
 on the tail like every other, then looks for newly numbered rows; while the
-sequencer is behind the head it woke for, it looks again on a short interval
-rather than waiting for an advance a quiet store would never bring. A
+sequencer is behind the head it woke for, it waits for the numbering to reach
+that head rather than for an advance a quiet store would never bring. The
+tail carries the numbering beside the head, as the process knows it: the
+instance that numbers publishes each batch as it commits, and every other
+instance follows the progress rows with one reader per process, on the
+tail's cadence and only while a followed sequence is behind, so no
+subscription polls the store for the sequencer. A
 persistent-subscription group chooses its numbering once, when it is created,
 and keeps it for life: its start, its checkpoint and the key of a parked
 message are all in that numbering, so a consumer resuming the group can never

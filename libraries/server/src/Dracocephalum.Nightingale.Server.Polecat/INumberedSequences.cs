@@ -11,10 +11,14 @@ internal interface INumberedSequences
     /// <summary>Gets a count that grows whenever any sequence's head moves; what <see cref="WaitForAnyAdvanceAsync"/> is asked against.</summary>
     long Advances { get; }
 
-    /// <summary>Lists the sequences as they are now.</summary>
+    /// <summary>Lists the sequences as they are now: every one there is, for the sequencer that numbers them all.</summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The sequences.</returns>
     ValueTask<IReadOnlyList<NumberedSequence>> ListAsync(CancellationToken cancellationToken);
+
+    /// <summary>Lists the sequences this process follows, without asking the store: those something in the process waits on, for the follower that keeps their numbering current.</summary>
+    /// <returns>The sequences followed here.</returns>
+    IReadOnlyList<NumberedSequence> ListFollowed();
 
     /// <summary>Waits until any sequence's head has moved since a count was read.</summary>
     /// <param name="seen">The count the caller has already acted on.</param>

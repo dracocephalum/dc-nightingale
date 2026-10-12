@@ -190,11 +190,18 @@ public static class ServiceCollectionExtensions
             // After the tailer, so the sequencer's first look at the head is a real one. The
             // registry is the server's, but a host that registers only the backend still numbers.
             services.TryAddSingleton<SubscriptionGroupRegistry>();
+            services.AddSingleton<INumberedSequences>(provider => partitionedByTenant
+                ? new TenantSequences(provider.GetRequiredService<PolecatTenantTails>(), provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>())
+                : new SharedSequence(provider.GetRequiredService<IStoreTail>(), provider.GetRequiredService<PolecatStoreTail>().Numbering));
             services.AddSingleton<IHostedService>(provider => new OrdinalSequencer(
                 provider.GetRequiredService<ISubscriptionGroupStore>(),
-                partitionedByTenant
-                    ? new TenantSequences(provider.GetRequiredService<PolecatTenantTails>(), provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>())
-                    : new SharedSequence(provider.GetRequiredService<IStoreTail>()),
+                provider.GetRequiredService<INumberedSequences>(),
+                new NumberingFollower(
+                    provider.GetRequiredService<INumberedSequences>(),
+                    new SequencerProgressReader(provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>()),
+                    provider.GetService<TimeProvider>() ?? TimeProvider.System,
+                    provider.GetService<ILogger<NumberingFollower>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NumberingFollower>.Instance,
+                    options.TailPollingInterval),
                 provider.GetRequiredService<SubscriptionGroupRegistry>(),
                 connectionString,
                 provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,

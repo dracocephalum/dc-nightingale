@@ -521,7 +521,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         {
             await DrainOutboxAsync(cancellationToken).ConfigureAwait(false);
             var from = _from ?? await HeadAsync(cancellationToken).ConfigureAwait(false) + 1;
-            await foreach (var record in EventSource.FollowAsync(_store, _tail, _router, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, _time, cancellationToken).ConfigureAwait(false))
+            await foreach (var record in EventSource.FollowAsync(_store, _tail, _router, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, cancellationToken).ConfigureAwait(false))
             {
                 await _live.Writer.WriteAsync(record, cancellationToken).ConfigureAwait(false);
             }

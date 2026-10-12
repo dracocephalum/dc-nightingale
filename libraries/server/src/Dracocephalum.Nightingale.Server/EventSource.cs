@@ -12,14 +12,6 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 internal static class EventSource
 {
-    /// <summary>
-    /// How long an ordinal feed waits between looks while the sequencer is behind the head it
-    /// woke up for. Ordinals are assigned after commit, so an advance of the tail says events
-    /// were committed, not that they are numbered yet; the feed looks again on this cadence
-    /// until the sequencer has passed the head, then waits on the tail once more.
-    /// </summary>
-    public static readonly TimeSpan NumberingPollInterval = TimeSpan.FromMilliseconds(250);
-
     /// <summary>Follows a stream, <c>$all</c> or a virtual stream from a position, inclusive, forever.</summary>
     /// <param name="store">The store.</param>
     /// <param name="tail">The tail.</param>
@@ -28,10 +20,9 @@ internal static class EventSource
     /// <param name="from">Where to begin, inclusive: a revision for a stream, a position otherwise, an ordinal under ordinal numbering.</param>
     /// <param name="pageSize">How many events one store call asks for.</param>
     /// <param name="numbering">How <paramref name="from"/> and the feed are numbered; ordinal only for a virtual stream.</param>
-    /// <param name="timeProvider">The clock an ordinal feed paces its looks with.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events, in order, without end.</returns>
-    public static IAsyncEnumerable<EventRecord> FollowAsync(IStreamStore store, IStoreTail tail, StreamRouter router, string stream, long from, int pageSize, Numbering numbering, TimeProvider timeProvider, CancellationToken cancellationToken)
+    public static IAsyncEnumerable<EventRecord> FollowAsync(IStreamStore store, IStoreTail tail, StreamRouter router, string stream, long from, int pageSize, Numbering numbering, CancellationToken cancellationToken)
     {
         if (stream == StreamNames.All)
         {
@@ -41,7 +32,7 @@ internal static class EventSource
         if (StreamNames.TryParseVirtual(stream, out var virtualStream))
         {
             return numbering == Numbering.Ordinal
-                ? FollowOrdinal(store, tail, virtualStream, from, pageSize, timeProvider, cancellationToken)
+                ? FollowOrdinal(store, tail, virtualStream, from, pageSize, cancellationToken)
                 : FollowByPosition(store, tail, router, virtualStream, from, pageSize, cancellationToken);
         }
 
@@ -51,11 +42,11 @@ internal static class EventSource
     /// <summary>
     /// What an ordinal reader does once it has read every numbered row: if the sequencer had
     /// passed the head the reader last observed, wait for the tail to move beyond it; otherwise
-    /// look again after the poll interval, because the rows the reader is waiting for are
-    /// committed and only not numbered yet.
+    /// wait for the numbering to reach that head, because the rows the reader is waiting for are
+    /// committed and only not numbered yet, and look again when it has.
     /// </summary>
     /// <remarks>
-    /// How far the sequencer had come is asked before the read, never after it. Asked after, the
+    /// How far the sequencer had come is taken before the read, never after it. Taken after, the
     /// answer can be "through the head" for a row the sequencer numbered between the read and
     /// the question: the read missed it, the reader then waits for the tail to move, and on a
     /// store nothing more is appended to it waits for good with the row never delivered.
@@ -63,10 +54,9 @@ internal static class EventSource
     /// <param name="tail">The tail.</param>
     /// <param name="numberedBeforeRead">How far the sequencer had numbered when the reader began the read it has just finished.</param>
     /// <param name="observed">The head the reader last took from the tail.</param>
-    /// <param name="timeProvider">The clock.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The head to observe next: a new one after an advance, the same one after a poll.</returns>
-    public static async Task<long> AwaitNumberingAsync(IStoreTail tail, long numberedBeforeRead, long observed, TimeProvider timeProvider, CancellationToken cancellationToken)
+    /// <returns>The head to observe next: a new one after an advance, the same one once it is numbered.</returns>
+    public static async Task<long> AwaitNumberingAsync(IStoreTail tail, long numberedBeforeRead, long observed, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(tail);
         if (numberedBeforeRead >= observed)
@@ -74,7 +64,7 @@ internal static class EventSource
             return await tail.WaitForAdvanceAsync(observed, cancellationToken).ConfigureAwait(false);
         }
 
-        await Task.Delay(NumberingPollInterval, timeProvider, cancellationToken).ConfigureAwait(false);
+        await tail.WaitForNumberedAsync(observed, cancellationToken).ConfigureAwait(false);
         return observed;
     }
 
@@ -172,12 +162,12 @@ internal static class EventSource
         }
     }
 
-    private static async IAsyncEnumerable<EventRecord> FollowOrdinal(IStreamStore store, IStoreTail tail, VirtualStreamName virtualStream, long next, int pageSize, TimeProvider timeProvider, [EnumeratorCancellation] CancellationToken cancellationToken)
+    private static async IAsyncEnumerable<EventRecord> FollowOrdinal(IStreamStore store, IStoreTail tail, VirtualStreamName virtualStream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var observed = tail.Head;
         while (true)
         {
-            var numbered = await store.NumberedThroughAsync(cancellationToken).ConfigureAwait(false);
+            var numbered = tail.Numbered;
             while (true)
             {
                 var page = await store.ReadByOrdinalAsync(virtualStream, Direction.Forwards, next, pageSize, cancellationToken).ConfigureAwait(false);
@@ -193,7 +183,7 @@ internal static class EventSource
                 }
             }
 
-            observed = await AwaitNumberingAsync(tail, numbered, observed, timeProvider, cancellationToken).ConfigureAwait(false);
+            observed = await AwaitNumberingAsync(tail, numbered, observed, cancellationToken).ConfigureAwait(false);
         }
     }
 }

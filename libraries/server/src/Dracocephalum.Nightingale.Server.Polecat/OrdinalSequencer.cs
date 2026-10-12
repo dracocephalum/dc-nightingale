@@ -19,10 +19,13 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// after numbering keeps or vacates its ordinal, and the next ordinal of the key is never reused.
 /// Under a sequence per tenant there is a sequence, a head and a progress row per tenant, and
 /// the sequencer walks each in turn; positions are the tenant's own, so every batch is one
-/// tenant's.
+/// tenant's. How far each sequence is numbered is published in process as each batch commits,
+/// for the subscriptions that wait on it; while another instance holds the lease, the follower
+/// publishes it from the progress rows instead, between one ask for the lease and the next.
 /// </summary>
 /// <param name="leases">Where the lease is taken.</param>
 /// <param name="sequences">The sequences to number, each with the head the sequencer never passes.</param>
+/// <param name="follower">Keeps the numbering current while another instance holds the lease.</param>
 /// <param name="registry">The instance id the lease is taken under.</param>
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="schemaName">The schema the event store's tables live in.</param>
@@ -33,6 +36,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 internal sealed partial class OrdinalSequencer(
     ISubscriptionGroupStore leases,
     INumberedSequences sequences,
+    NumberingFollower follower,
     SubscriptionGroupRegistry registry,
     string connectionString,
     string schemaName,
@@ -196,8 +200,10 @@ internal sealed partial class OrdinalSequencer(
                     var holder = await leases.AcquireLeaseAsync(LeaseName, owner, null, _leaseDuration, stopping).ConfigureAwait(false);
                     if (holder is not null)
                     {
+                        // Another instance numbers; this one follows its progress until it is
+                        // time to ask again.
                         holding = false;
-                        await Task.Delay(RenewInterval, timeProvider, stopping).ConfigureAwait(false);
+                        await follower.FollowAsync(RenewInterval, stopping).ConfigureAwait(false);
                         continue;
                     }
 
@@ -212,9 +218,10 @@ internal sealed partial class OrdinalSequencer(
                     var seen = sequences.Advances;
                     if (!await CatchUpAsync(owner, stopping).ConfigureAwait(false))
                     {
-                        // The lease was lost mid-way; the loop asks again after the interval.
+                        // The lease was lost mid-way; the loop follows the new holder's
+                        // progress and asks again after the interval.
                         holding = false;
-                        await Task.Delay(RenewInterval, timeProvider, stopping).ConfigureAwait(false);
+                        await follower.FollowAsync(RenewInterval, stopping).ConfigureAwait(false);
                         continue;
                     }
 
@@ -278,6 +285,7 @@ internal sealed partial class OrdinalSequencer(
             {
                 var head = sequence.Tail.Head;
                 var numbered = await NumberBatchAsync(sequence.TenantId, head, stopping).ConfigureAwait(false);
+                sequence.Numbering.Publish(numbered);
                 if (numbered >= head)
                 {
                     break;

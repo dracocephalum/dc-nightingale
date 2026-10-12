@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
-/// <summary>A sequence per tenant: every tenant the gateway keeps, each with its own tail, which the listing asks for and so has polled.</summary>
+/// <summary>A sequence per tenant: every tenant the gateway keeps, each with its own tail, which the listing asks for and so has polled; those followed in this process are the tenants whose tail was asked for.</summary>
 /// <param name="tails">The tails.</param>
 /// <param name="contexts">Makes the gateway's own context, where the tenants are.</param>
 internal sealed class TenantSequences(PolecatTenantTails tails, IDbContextFactory<NightingaleDbContext> contexts) : INumberedSequences
@@ -16,9 +16,14 @@ internal sealed class TenantSequences(PolecatTenantTails tails, IDbContextFactor
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var ids = await context.Tenants.AsNoTracking().Select(tenant => tenant.StoreTenantId).ToListAsync(cancellationToken).ConfigureAwait(false);
-        return ids.Select(id => new NumberedSequence(id, tails.For(id))).ToList();
+        return ids.Select(SequenceOf).ToList();
     }
 
     /// <inheritdoc/>
+    public IReadOnlyList<NumberedSequence> ListFollowed() => tails.PolledTenants.Select(SequenceOf).ToList();
+
+    /// <inheritdoc/>
     public Task<long> WaitForAnyAdvanceAsync(long seen, CancellationToken cancellationToken) => tails.WaitForAnyAdvanceAsync(seen, cancellationToken);
+
+    private NumberedSequence SequenceOf(string storeTenantId) => new(storeTenantId, tails.For(storeTenantId), tails.NumberingOf(storeTenantId));
 }
