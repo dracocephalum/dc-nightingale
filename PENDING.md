@@ -266,6 +266,21 @@ the tenant and store refresh is the cadence `TenantRefresher` already runs. A
 tenant moving between stores is an export and an import with positions
 renumbered, never a transparent feature.
 
+## Range partitioning of the events table
+
+The store partitions events by tenant or by the archived flag only, and adds
+the partition column to its unique stream-and-version index when it does. A
+sliding window by sequence, for an events table too large to manage whole,
+is not a store feature, so it would be ours to add through the patched
+schema: a partition function on `seq_id` with a new range switched in ahead
+of the head and old ranges switched out to archive. It forces the sequence
+into the stream-and-version unique index, as every aligned unique index must
+carry the partition column, which leaves per-stream version uniqueness to
+the store's own commit-time check rather than the index. It would be a fourth
+value of `Nightingale:Store:Partitioning`, fixed at initialization and
+exclusive with the others, since a table has one partition scheme. Built when
+sizing demands it.
+
 ## Ordinals on a store initialized without them
 
 Ordinal numbering of the virtual streams (`DESIGN.md`, seam 6) is a store
