@@ -143,11 +143,13 @@ parity comes first, in the order the client exposes it:
 
 Parity is not bought with the core's speed. The gateway is not a clone, and
 some of the reference's behaviour is there for its history or its single
-writer rather than for an application. Appends, reads and subscriptions stay
-as efficient as they are; a behaviour that would add a read, a write or a
-lock to all of them is a second-class feature, served on a path of its own
-at best effort, or a third-class one, written down as a variance with the
-client-side way around it. *Stream metadata* below is the worked example.
+writer rather than for an application. Features come in three tiers. The
+first tier is appends, reads and subscriptions, which stay as efficient as
+they are. A behaviour that would add a read, a write or a lock to all of
+them goes to the second tier, served on a path of its own at best effort and
+paid for only by the callers who use it, or to the third tier, written down
+as a variance with the client-side way around it. *Stream metadata* below is
+the worked example.
 
 What the gateway has that the reference does not, deferred delivery, a
 client that resubscribes on its own, server-computed lag counts, waits for a
