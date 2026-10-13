@@ -250,6 +250,18 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     }
 
     /// <inheritdoc/>
+    public Task<ScannedSlice> ScanAllAsync(EventFilter filter, Direction direction, long from, long head, int window, int count, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(window);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        // The main connection, whichever tenant: the mirror scopes the stretch to the tenant, or
+        // to all of them under the wildcard, as it does for every read of $all by position.
+        return _virtual.ScanAllAsync(filter, direction, from, head, window, count, cancellationToken);
+    }
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<EventPointer>> ReadPointersAsync(long from, long head, int count, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);

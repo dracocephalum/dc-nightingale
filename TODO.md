@@ -39,9 +39,11 @@ undecided adds it here rather than mentioning it once in a conversation.
   host's switches, persistent subscriptions with create, delete, one
   consumer with acknowledgements, retries, parking and replay, on a lease per
   group, and the virtual streams by ordinal on a store initialized with
-  `Nightingale:Store:AssignOrdinals`; the samples under `examples/` are the
-  end-to-end runs. Not yet: filters and checkpoints on `$all` (they answer
-  unimplemented) and the ordinal backfill, both in `PENDING.md`. Close by: see `PENDING.md`.
+  `Nightingale:Store:AssignOrdinals`, and filters on `$all` with their
+  checkpoints, for reads and catch-up subscriptions; the samples under
+  `examples/` are the end-to-end runs. Not yet: filters on persistent
+  subscriptions to `$all`, and the ordinal backfill, in `PENDING.md`. Close
+  by: see `PENDING.md`.
 - **A delete's expected-revision check is not atomic with the archive.** The
   adapter reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,

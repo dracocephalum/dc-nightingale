@@ -81,6 +81,53 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         return await PageAsync(FilterByPosition(QueryLive(context, null), direction, from, head), count, Plain, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// One scan of a stretch of <c>$all</c> under a filter; see the port for the bounds. A prefix
+    /// filter is the database's predicate, through the indexes where a prefix is a whole category or
+    /// type; a regular expression is matched in process over the names of the stretch, read first
+    /// without their bodies, and then the bodies of what it kept are read.
+    /// </summary>
+    /// <param name="filter">What to keep.</param>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
+    /// <param name="head">The highest position a forwards scan may examine.</param>
+    /// <param name="window">The most positions the scan examines.</param>
+    /// <param name="count">The most events to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events kept and the last position examined.</returns>
+    public async Task<ScannedSlice> ScanAllAsync(EventFilter filter, Direction direction, long from, long head, int window, int count, CancellationToken cancellationToken)
+    {
+        var forwards = direction == Direction.Forwards;
+        var (low, high) = forwards ? (from, Math.Min(head, from + window - 1)) : (Math.Max(1, from - window + 1), from);
+        count = Math.Min(count, window);
+        await using var context = OpenContext();
+        var stretch = QueryLive(context, null).Where(e => e.SeqId >= low && e.SeqId <= high);
+        IReadOnlyList<EventRecord> events;
+        if (filter.Regex is null)
+        {
+            var kept = stretch.Where(FilterPredicates.ByPrefixes(filter));
+            events = await PageAsync(forwards ? kept.OrderBy(e => e.SeqId) : kept.OrderByDescending(e => e.SeqId), count, Plain, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var ordered = forwards ? stretch.OrderBy(e => e.SeqId) : stretch.OrderByDescending(e => e.SeqId);
+            var names = await ordered.Select(e => new { e.SeqId, e.StreamId, e.Type }).ToListAsync(cancellationToken).ConfigureAwait(false);
+            var positions = names.Where(name => filter.Matches(name.StreamId, name.Type)).Take(count).Select(name => name.SeqId).ToList();
+            if (positions.Count == 0)
+            {
+                events = [];
+            }
+            else
+            {
+                var rows = context.EventRows.AsNoTracking().Where(e => positions.Contains(e.SeqId));
+                events = await PageAsync(forwards ? rows.OrderBy(e => e.SeqId) : rows.OrderByDescending(e => e.SeqId), positions.Count, Plain, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        var through = events.Count == count ? events[^1].Position : forwards ? high : low;
+        return new ScannedSlice(events, through);
+    }
+
     /// <summary>Where the live events of the tenant at positions within a range are: stream, revision and type, in position order, without bodies.</summary>
     /// <param name="from">The first position, inclusive.</param>
     /// <param name="head">The highest position the page may hold.</param>

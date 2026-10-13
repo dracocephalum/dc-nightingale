@@ -343,7 +343,14 @@ delivers only in revision order, reading its stream again when the router
 brings something ahead of its next revision; one by position skips what it
 delivered already. A follower that leaves too much unread lapses and catches
 up itself from where it stands, the reference server's own answer to a full
-live buffer. One router per tenant is the one shape that fits both tenant
+live buffer. A subscription to `$all` under a filter catches up through the
+store's scan, a stretch of positions at a time, the prefixes the database's
+predicate through the category and type indexes and a regular expression
+matched in process, and then keeps, of what the router brings, what the
+filter keeps; positions examined without an event to deliver are counted,
+and at the filter's interval a checkpoint carries the last of them, so a
+consumer's position advances over a quiet stretch (`VARIANCES.md`,
+*Regular-expression filters*). One router per tenant is the one shape that fits both tenant
 modes: a stream name is per tenant, and under a sequence per tenant so is
 the tail.
 

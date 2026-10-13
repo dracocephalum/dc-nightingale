@@ -30,6 +30,20 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     /// </summary>
     public const int PageSize = 512;
 
+    /// <summary>
+    /// The most positions one scan of <c>$all</c> under a filter examines: what bounds a call
+    /// over a stretch the filter keeps nothing of, and what a subscription's checkpoint advances
+    /// by at most at a time.
+    /// </summary>
+    public const int ScanWindow = 4096;
+
+    /// <summary>
+    /// After how many positions examined without an event to deliver a filtered subscription is
+    /// sent a checkpoint, unless the filter says otherwise: the reference's window times its
+    /// multiplier, sized for a scan window rather than for its batch of thirty-two.
+    /// </summary>
+    public const int DefaultCheckpointInterval = 1024;
+
     /// <inheritdoc/>
     public override async Task Read(ReadRequest request, IServerStreamWriter<ReadResponse> responseStream, ServerCallContext context)
     {
@@ -43,9 +57,28 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         var stream = RequireValidStreamName(request.Stream);
         var all = stream == StreamNames.All;
         var isVirtual = StreamNames.TryParseVirtual(stream, out var virtualStream);
+        EventFilter? filter = null;
+        var checkpointInterval = DefaultCheckpointInterval;
         if (request.Filter is not null)
         {
-            throw all ? NightingaleErrors.NotImplemented("Filtering $all") : NightingaleErrors.FilterNotAllowed(stream);
+            if (!all)
+            {
+                throw NightingaleErrors.FilterNotAllowed(stream);
+            }
+
+            try
+            {
+                filter = request.Filter.ToEventFilter();
+            }
+            catch (ArgumentException exception)
+            {
+                throw NightingaleErrors.InvalidArgument(exception.Message);
+            }
+
+            if (request.Filter.CheckpointInterval > 0)
+            {
+                checkpointInterval = (int)Math.Min(request.Filter.CheckpointInterval, int.MaxValue);
+            }
         }
 
         var ordinal = request.Numbering.ToNumbering() == Numbering.Ordinal;
@@ -71,7 +104,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             case ReadRequest.ModeOneofCase.Count when request.Count > 0:
                 if (all)
                 {
-                    await ReadAllBounded(store, tail, request, direction, responseStream, cancellationToken).ConfigureAwait(false);
+                    await ReadAllBounded(store, tail, request, direction, filter, responseStream, cancellationToken).ConfigureAwait(false);
                 }
                 else if (ordinal)
                 {
@@ -93,7 +126,11 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                     throw NightingaleErrors.InvalidArgument("A subscription reads forwards.");
                 }
 
-                if (all)
+                if (all && filter is not null)
+                {
+                    await SubscribeAllFiltered(store, tail, routers.For(scope), request, filter, checkpointInterval, responseStream, cancellationToken).ConfigureAwait(false);
+                }
+                else if (all)
                 {
                     await SubscribeAll(store, tail, routers.For(scope), request, responseStream, cancellationToken).ConfigureAwait(false);
                 }
@@ -310,6 +347,9 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     private static ReadResponse CaughtUpAt(long head, DateTimeOffset at) =>
         new() { CaughtUp = new CaughtUp { Head = head, At = Timestamp.FromDateTimeOffset(at) } };
 
+    private static ReadResponse CheckpointAt(long position, DateTimeOffset at) =>
+        new() { Checkpoint = new Checkpoint { Position = position, At = Timestamp.FromDateTimeOffset(at) } };
+
     private static ReadResponse FellBehindAt(long head, long behind, DateTimeOffset at) =>
         new() { FellBehind = new FellBehind { Head = head, EventsBehind = behind, At = Timestamp.FromDateTimeOffset(at) } };
 
@@ -367,7 +407,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     /// first page, so an append that returned before the read is in it, and no page reads past it,
     /// so events committed during the read are not delivered.
     /// </summary>
-    private static async Task ReadAllBounded(IStreamStore store, IStoreTail tail, ReadRequest request, Direction direction, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    private static async Task ReadAllBounded(IStreamStore store, IStoreTail tail, ReadRequest request, Direction direction, EventFilter? filter, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
     {
         var head = await tail.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var from = request.FromCase switch
@@ -379,6 +419,24 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
         await responseStream.WriteAsync(new ReadResponse { Head = new StreamBounds { First = 0, Last = head } }, cancellationToken).ConfigureAwait(false);
         var remaining = request.Count;
+        if (filter is not null)
+        {
+            // Stretch by stretch to the end, whatever each keeps; the scan says how far it looked.
+            while (remaining > 0 && head > 0 && (direction == Direction.Forwards ? from <= head : from >= 1))
+            {
+                var slice = await store.ScanAllAsync(filter, direction, from, head, ScanWindow, (int)Math.Min(remaining, PageSize), cancellationToken).ConfigureAwait(false);
+                foreach (var record in slice.Events)
+                {
+                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                }
+
+                remaining -= (ulong)slice.Events.Count;
+                from = direction == Direction.Forwards ? slice.Through + 1 : slice.Through - 1;
+            }
+
+            return;
+        }
+
         while (remaining > 0)
         {
             if (head == 0 || (direction == Direction.Forwards ? from > head : from <= 0))
@@ -565,6 +623,95 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                         next = record.Position + 1;
                         head = record.Position;
                         delivered = true;
+                    }
+
+                    if (delivered)
+                    {
+                        await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                following.Dispose();
+                following = router.Follow(StreamNames.All);
+                head = tail.Head;
+            }
+        }
+        finally
+        {
+            following.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A subscription to <c>$all</c> under a filter: the shape of the unfiltered one, catching up
+    /// stretch by stretch through the store's scan and then keeping, of what the router brings,
+    /// what the filter keeps. Positions examined without an event to deliver are counted, and at
+    /// the interval a checkpoint carries the last of them, so a consumer's position advances over
+    /// a quiet stretch; an event delivered starts the count again. The head said with caught up
+    /// is the last position examined. No fell-behind: how many events a stretch holds for the
+    /// filter is not known until it is scanned.
+    /// </summary>
+    private async Task SubscribeAllFiltered(IStreamStore store, IStoreTail tail, StreamRouter router, ReadRequest request, EventFilter filter, int checkpointInterval, IServerStreamWriter<ReadResponse> responseStream, CancellationToken cancellationToken)
+    {
+        var id = Guid.NewGuid().ToString("D");
+        var following = router.Follow(StreamNames.All);
+        try
+        {
+            var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
+            var next = request.FromCase switch
+            {
+                ReadRequest.FromOneofCase.Position => request.Position,
+                ReadRequest.FromOneofCase.End => head + 1,
+                _ => 0,
+            };
+            await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = head } }, cancellationToken).ConfigureAwait(false);
+
+            // Positions examined since the last event delivered or checkpoint sent.
+            var quiet = 0L;
+            while (true)
+            {
+                while (head > 0 && next <= head)
+                {
+                    var slice = await store.ScanAllAsync(filter, Direction.Forwards, next, head, ScanWindow, PageSize, cancellationToken).ConfigureAwait(false);
+                    foreach (var record in slice.Events)
+                    {
+                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    quiet = slice.Events.Count > 0 ? slice.Through - slice.Events[^1].Position : quiet + slice.Through - next + 1;
+                    next = slice.Through + 1;
+                    if (quiet >= checkpointInterval)
+                    {
+                        await responseStream.WriteAsync(CheckpointAt(slice.Through, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                        quiet = 0;
+                    }
+                }
+
+                await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+
+                while (await following.Events.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    var delivered = false;
+                    while (following.Events.TryRead(out var record))
+                    {
+                        if (record.Position < next)
+                        {
+                            continue;
+                        }
+
+                        next = record.Position + 1;
+                        head = record.Position;
+                        if (filter.Matches(record.Stream, record.Type))
+                        {
+                            await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                            delivered = true;
+                            quiet = 0;
+                        }
+                        else if (++quiet >= checkpointInterval)
+                        {
+                            await responseStream.WriteAsync(CheckpointAt(record.Position, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                            quiet = 0;
+                        }
                     }
 
                     if (delivered)

@@ -102,6 +102,69 @@ public static class WireConversions
     public static Numbering ToNumbering(this Protocols.Grpc.V1.Numbering numbering) =>
         numbering == Protocols.Grpc.V1.Numbering.Ordinal ? Numbering.Ordinal : Numbering.Global;
 
+    /// <summary>
+    /// Maps a filter from the wire, checking it as the server does: it looks at the stream name or
+    /// the event type, and has prefixes or a regular expression, not both and not neither.
+    /// </summary>
+    /// <param name="filter">The wire message.</param>
+    /// <returns>The filter.</returns>
+    /// <exception cref="ArgumentException">The filter is not one the server runs; the message says why.</exception>
+    public static EventFilter ToEventFilter(this Filter filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        var expression = filter.KindCase switch
+        {
+            Filter.KindOneofCase.StreamName => filter.StreamName,
+            Filter.KindOneofCase.EventType => filter.EventType,
+            _ => throw new ArgumentException("A filter says what it looks at: the stream name or the event type.", nameof(filter)),
+        };
+        var hasPrefixes = expression.Prefix.Count > 0;
+        var hasRegex = expression.Regex.Length > 0;
+        if (hasPrefixes == hasRegex)
+        {
+            throw new ArgumentException("A filter has prefixes or a regular expression, not both and not neither.", nameof(filter));
+        }
+
+        var byStreamName = filter.KindCase == Filter.KindOneofCase.StreamName;
+        return (byStreamName, hasRegex) switch
+        {
+            (true, false) => StreamFilter.Prefix([.. expression.Prefix]),
+            (true, true) => StreamFilter.RegularExpression(expression.Regex),
+            (false, false) => EventTypeFilter.Prefix([.. expression.Prefix]),
+            (false, true) => EventTypeFilter.RegularExpression(expression.Regex),
+        };
+    }
+
+    /// <summary>Maps a filter to its wire form.</summary>
+    /// <param name="filter">The filter.</param>
+    /// <param name="checkpointInterval">After how many positions examined without an event to deliver a subscription is sent a checkpoint; 0 for the server's default.</param>
+    /// <returns>The wire message.</returns>
+    public static Filter ToWire(this EventFilter filter, uint checkpointInterval = 0)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        var expression = new Expression();
+        if (filter.Regex is not null)
+        {
+            expression.Regex = filter.Regex;
+        }
+        else
+        {
+            expression.Prefix.AddRange(filter.Prefixes);
+        }
+
+        var wire = new Filter { CheckpointInterval = checkpointInterval };
+        if (filter.Target == EventFilterTarget.StreamName)
+        {
+            wire.StreamName = expression;
+        }
+        else
+        {
+            wire.EventType = expression;
+        }
+
+        return wire;
+    }
+
     /// <summary>Maps a credential role to its wire form.</summary>
     /// <param name="role">The role.</param>
     /// <returns>The wire value.</returns>

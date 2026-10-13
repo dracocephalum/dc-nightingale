@@ -284,17 +284,69 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Read_WhenFilteringAll_ShouldAnswerUnimplemented()
+    public async Task Read_WhenTheFilterIsNotOneTheServerRuns_ShouldAnswerInvalidArgument()
     {
-        // Arrange
+        // Arrange: prefixes and a regular expression at once.
         var client = new Streams.StreamsClient(_channel);
-        var request = new ReadRequest { Stream = "$all", Start = new(), Count = 1, Filter = new Filter { EventType = new Expression { Prefix = { "order" } } } };
+        var request = new ReadRequest { Stream = "$all", Start = new(), Count = 1, Filter = new Filter { EventType = new Expression { Prefix = { "order" }, Regex = "^order" } } };
 
         // Act
         var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
 
         // Assert
-        exception.StatusCode.ShouldBe(StatusCode.Unimplemented);
+        exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        exception.Status.Detail.ShouldContain("not both and not neither");
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingAllWithAFilter_ShouldScanStretchByStretchToTheHead()
+    {
+        // Arrange: the store's scan keeps two of the first stretch and says it looked through 4095,
+        // then one of the rest up to the head.
+        _tail.Advance(5000);
+        A.CallTo(() => _store.ScanAllAsync(A<EventFilter>.That.Matches(filter => filter.Target == EventFilterTarget.EventType && filter.Prefixes.Count == 1 && filter.Prefixes[0] == "order"), Direction.Forwards, 0, 5000, StreamsService.ScanWindow, 10, A<CancellationToken>._))
+            .Returns(new ScannedSlice([Record("orders-1", 0, 7, "order_placed"), Record("orders-2", 0, 900, "order_paid")], 4095));
+        A.CallTo(() => _store.ScanAllAsync(A<EventFilter>._, Direction.Forwards, 4096, 5000, StreamsService.ScanWindow, 8, A<CancellationToken>._))
+            .Returns(new ScannedSlice([Record("orders-3", 0, 4500, "order_placed")], 5000));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$all", Start = new(), Count = 10, Filter = new Filter { EventType = new Expression { Prefix = { "order" } } } });
+
+        // Assert
+        messages[0].Head.Last.ShouldBe(5000);
+        messages.Skip(1).Select(message => message.Event.Position).ShouldBe([7, 900, 4500]);
+    }
+
+    [Fact]
+    public async Task Read_WhenSubscribingToAllWithAFilter_ShouldCheckpointOverQuietStretchesThenKeepOfTheLiveWhatTheFilterKeeps()
+    {
+        // Arrange: nothing of the first three thousand positions is an order; the checkpoint
+        // interval is two positions. Then the tail advances by three events, one of them an order.
+        _tail.Advance(3000);
+        A.CallTo(() => _store.ScanAllAsync(A<EventFilter>._, Direction.Forwards, 0, 3000, StreamsService.ScanWindow, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns(new ScannedSlice([], 3000));
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 3001, 3003, StreamsService.PageSize, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 3001, "order_placed"), Record("shipments-1", 0, 3002, "shipment_sent"), Record("shipments-1", 1, 3003, "shipment_sent")]);
+        var client = new Streams.StreamsClient(_channel);
+        using var call = client.Read(
+            new ReadRequest { Stream = "$all", Start = new(), Subscription = new SubscriptionOptions(), Filter = new Filter { EventType = new Expression { Prefix = { "order" } }, CheckpointInterval = 2 } },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Act
+        var catchUp = await Next(call, 3);
+        _tail.Advance(3003);
+        var live = await Next(call, 3);
+
+        // Assert: the quiet stretch is checkpointed at its end before caught up; live, the order is
+        // delivered, the two shipments count towards a checkpoint, and caught up names the last
+        // position examined.
+        catchUp[0].Confirmed.Head.ShouldBe(3000);
+        catchUp[1].Checkpoint.Position.ShouldBe(3000);
+        catchUp[2].CaughtUp.Head.ShouldBe(3000);
+        live[0].Event.Position.ShouldBe(3001);
+        live[1].Checkpoint.Position.ShouldBe(3003);
+        live[2].CaughtUp.Head.ShouldBe(3003);
     }
 
     [Fact]

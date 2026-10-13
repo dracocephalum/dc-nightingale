@@ -101,7 +101,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToAllAsync(StreamPosition.End, TestContext.Current.CancellationToken);
+        await using var subscription = sut.SubscribeToAllAsync(StreamPosition.End, cancellationToken: TestContext.Current.CancellationToken);
         var confirmed = await subscription.Confirmed;
 
         // Assert
@@ -110,6 +110,51 @@ public sealed class StreamSubscriptionTests
         sent.Stream.ShouldBe("$all");
         sent.ModeCase.ShouldBe(ReadRequest.ModeOneofCase.Subscription);
         sent.FromCase.ShouldBe(ReadRequest.FromOneofCase.End);
+    }
+
+    [Fact]
+    public async Task SubscribeToAllAsync_WithAFilter_ShouldSendItWithTheIntervalAndYieldTheCheckpoints()
+    {
+        // Arrange
+        var (invoker, request) = FakeStreamsCall.Read(
+        [
+            new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = "s-3", Head = 40 } },
+            new ReadResponse { Checkpoint = new Checkpoint { Position = 1024, At = Timestamp.FromDateTimeOffset(At) } },
+            new ReadResponse { Event = Recorded("orders-1", 0, 1030) },
+        ]);
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        await using var subscription = sut.SubscribeToAllAsync(StreamPosition.Start, EventTypeFilter.Prefix("Order"), checkpointInterval: 7, cancellationToken: TestContext.Current.CancellationToken);
+        var messages = new List<SubscriptionMessage>();
+        await foreach (var message in subscription.Messages.WithCancellation(TestContext.Current.CancellationToken))
+        {
+            messages.Add(message);
+        }
+
+        // Assert
+        messages[1].ShouldBe(new SubscriptionMessage.Checkpoint(1024, At));
+        messages[2].ShouldBeOfType<SubscriptionMessage.Recorded>().Record.Position.ShouldBe(1030);
+        var sent = request().ShouldNotBeNull();
+        sent.Filter.EventType.Prefix.ShouldBe(["Order"]);
+        sent.Filter.CheckpointInterval.ShouldBe(7u);
+    }
+
+    [Fact]
+    public async Task ReadAllAsync_WithAFilter_ShouldSendIt()
+    {
+        // Arrange
+        var (invoker, request) = FakeStreamsCall.Read([new ReadResponse { Head = new StreamBounds { First = 0, Last = 0 } }]);
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        await using var read = sut.ReadAllAsync(Direction.Backwards, StreamPosition.End, 5, StreamFilter.RegularExpression("^orders-"), TestContext.Current.CancellationToken);
+        await read.Head;
+
+        // Assert
+        var sent = request().ShouldNotBeNull();
+        sent.Filter.StreamName.Regex.ShouldBe("^orders-");
+        sent.Direction.ShouldBe(ReadDirection.Backwards);
     }
 
     [Fact]
@@ -161,7 +206,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var read = sut.ReadAllAsync(Direction.Forwards, StreamPosition.Start, 2, TestContext.Current.CancellationToken);
+        await using var read = sut.ReadAllAsync(Direction.Forwards, StreamPosition.Start, 2, cancellationToken: TestContext.Current.CancellationToken);
         var positions = new List<long>();
         await foreach (var record in read.WithCancellation(TestContext.Current.CancellationToken))
         {

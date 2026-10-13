@@ -161,24 +161,38 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
     }
 
-    private StreamSubscription Subscribe(string stream, StreamPosition from, Numbering numbering, CancellationToken cancellationToken)
+    private StreamSubscription Subscribe(string stream, StreamPosition from, Numbering numbering, Filter? filter, CancellationToken cancellationToken)
     {
-        var request = new ReadRequest { Stream = stream, Direction = ReadDirection.Forwards, Subscription = new SubscriptionOptions(), Numbering = numbering.ToWire() };
+        var request = new ReadRequest { Stream = stream, Direction = ReadDirection.Forwards, Subscription = new SubscriptionOptions(), Numbering = numbering.ToWire(), Filter = filter };
         SetFrom(request, from);
         return new StreamSubscription(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
 
     /// <summary>
-    /// Reads <c>$all</c>, every event in position order. The head the result reports is the
-    /// high-water mark, 0 when there are no events; the result never reports a missing stream.
+    /// Reads <c>$all</c>, every event in position order, or those a filter keeps. The head the
+    /// result reports is the high-water mark, 0 when there are no events; the result never reports
+    /// a missing stream.
     /// </summary>
     /// <param name="direction">The direction to read in.</param>
     /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
     /// <param name="maxCount">The most events to return.</param>
+    /// <param name="filter">What to keep, by stream name or event type; everything when null.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The read in progress.</returns>
-    public ReadStreamResult ReadAllAsync(Direction direction, StreamPosition from, long maxCount = long.MaxValue, CancellationToken cancellationToken = default) =>
-        ReadStreamAsync(direction, StreamNames.All, from, maxCount, Numbering.Global, cancellationToken);
+    /// <exception cref="ArgumentOutOfRangeException">The count is not positive.</exception>
+    public ReadStreamResult ReadAllAsync(Direction direction, StreamPosition from, long maxCount = long.MaxValue, EventFilter? filter = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCount);
+        var request = new ReadRequest
+        {
+            Stream = StreamNames.All,
+            Direction = direction == Direction.Backwards ? ReadDirection.Backwards : ReadDirection.Forwards,
+            Count = (ulong)maxCount,
+            Filter = filter?.ToWire(),
+        };
+        SetFrom(request, from);
+        return new ReadStreamResult(StreamNames.All, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
+    }
 
     /// <summary>
     /// Subscribes to a stream: every event from <paramref name="from"/> to the head, a caught-up
@@ -195,15 +209,23 @@ public sealed class NightingaleClient : IAsyncDisposable
     public StreamSubscription SubscribeToStreamAsync(string stream, StreamPosition from, Numbering numbering = Numbering.Global, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return Subscribe(stream, from, numbering, cancellationToken);
+        return Subscribe(stream, from, numbering, null, cancellationToken);
     }
 
-    /// <summary>Subscribes to <c>$all</c>; see <see cref="SubscribeToStreamAsync"/>.</summary>
+    /// <summary>
+    /// Subscribes to <c>$all</c>; see <see cref="SubscribeToStreamAsync"/>. With a filter, only the
+    /// events it keeps are delivered, and the server sends a checkpoint, in
+    /// <see cref="StreamSubscription.Messages"/>, whenever it has examined
+    /// <paramref name="checkpointInterval"/> positions without one to deliver, so a consumer's
+    /// position advances over a quiet stretch and a resubscription from it reads nothing twice.
+    /// </summary>
     /// <param name="from">Where to begin, inclusive; <see cref="StreamPosition.End"/> for only what comes after.</param>
+    /// <param name="filter">What to keep, by stream name or event type; everything when null.</param>
+    /// <param name="checkpointInterval">After how many positions examined without an event to deliver a checkpoint is sent; 0 for the server's default.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The subscription in progress.</returns>
-    public StreamSubscription SubscribeToAllAsync(StreamPosition from, CancellationToken cancellationToken = default) =>
-        Subscribe(StreamNames.All, from, Numbering.Global, cancellationToken);
+    public StreamSubscription SubscribeToAllAsync(StreamPosition from, EventFilter? filter = null, uint checkpointInterval = 0, CancellationToken cancellationToken = default) =>
+        Subscribe(StreamNames.All, from, Numbering.Global, filter?.ToWire(checkpointInterval), cancellationToken);
 
     /// <summary>
     /// Deletes a stream: its events leave every read and it cannot be appended to again. Only when

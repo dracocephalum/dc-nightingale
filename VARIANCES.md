@@ -464,9 +464,24 @@ CLR types would have to use the names the clients send.
 **Reference:** prefix and regular-expression filters on `$all` run in the
 server's index.
 
-**Nightingale:** prefix filters on stream name and event type are index
-predicates. Regular-expression filters are applied to each page after it is
-read, so a selective regex over a large store reads more rows than it returns.
+**Nightingale:** prefix filters on stream name and event type are the
+database's predicates: a stream prefix that is a category and its hyphen,
+`orders-`, is the category column's equality, which the category index seeks,
+less the stream named just `orders`, which the reference's prefix filter
+leaves out too; any other prefix is a `LIKE`. A regular expression is matched
+in process over the names of each stretch the scan examines, read without
+their bodies, and the bodies of what it kept are read after; it runs without
+backtracking, so a pattern from a client takes time linear in what it reads,
+and the constructs that need backtracking, lookarounds and backreferences, are
+refused. A scan examines at most a window of positions at a time, 4096, so a
+selective filter over a large store answers in bounded time and says how far
+it looked. A filtered subscription sends a checkpoint after the filter's
+`checkpoint_interval` positions examined without an event to deliver, 1024
+unless the filter says otherwise, as the reference does after its window
+times its multiplier; it reports no fell-behind count, since how many events
+a stretch holds for the filter is not known until the stretch is scanned.
+Filters are on `$all` only, as in the reference; a virtual stream is already
+a selection.
 
 ## Authentication is Basic, roles are three, and a credential has a tenant
 

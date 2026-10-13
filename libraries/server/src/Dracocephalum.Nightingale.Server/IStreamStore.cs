@@ -70,6 +70,25 @@ public interface IStreamStore
     Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Scans a stretch of <c>$all</c> for the events a filter keeps: forwards, the positions from
+    /// <paramref name="from"/> up to the lower of <paramref name="head"/> and
+    /// <paramref name="from"/> plus the window; backwards, from <paramref name="from"/> down through
+    /// the window. The stretch bounds what one call examines, whatever the filter keeps of it, so a
+    /// selective filter over a large store answers in bounded time and says how far it looked. A
+    /// prefix filter is the database's to evaluate, through the indexes where a prefix is a whole
+    /// category or type; a regular expression is evaluated in process over the stretch's names.
+    /// </summary>
+    /// <param name="filter">What to keep.</param>
+    /// <param name="direction">The direction to read in.</param>
+    /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
+    /// <param name="head">The highest position a forwards scan may examine.</param>
+    /// <param name="window">The most positions one call examines. Positive.</param>
+    /// <param name="count">The most events to return. Positive, at most the window.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events kept and the last position examined.</returns>
+    Task<ScannedSlice> ScanAllAsync(EventFilter filter, Direction direction, long from, long head, int window, int count, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Reads where the live events of a range of <c>$all</c> are, in position order, without
     /// their bodies: the stream and revision of each event at positions from <paramref name="from"/>
     /// up to <paramref name="head"/>, both inclusive. What <see cref="StreamRouter"/> reads of each

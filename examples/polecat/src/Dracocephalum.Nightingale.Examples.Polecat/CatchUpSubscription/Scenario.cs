@@ -64,7 +64,7 @@ public static class Scenario
         await output.WriteLineAsync($"4. Subscribed to {orders} from the start: confirmed at head {confirmed.Head}; caught up after {string.Join(", ", caughtUp)}; head {caughtUpNote.Head}.").ConfigureAwait(false);
 
         await ExampleMark.WaitUntilCoversAsync(client, appended.Position, cancellationToken).ConfigureAwait(false);
-        await using var allSubscription = client.SubscribeToAllAsync(StreamPosition.End, cancellationToken);
+        await using var allSubscription = client.SubscribeToAllAsync(StreamPosition.End, cancellationToken: cancellationToken);
         var allMessages = allSubscription.Messages.GetAsyncEnumerator(cancellationToken);
         var allConfirmed = await allSubscription.Confirmed.ConfigureAwait(false);
         await ReadUntil<SubscriptionMessage.CaughtUp>(allMessages, []).ConfigureAwait(false);
