@@ -77,6 +77,66 @@ public sealed class VirtualStreamReaderTests
     }
 
     [Fact]
+    public async Task ScanAllAsync_WithAStreamPrefix_ShouldKeepTheTenantsLiveEventsUnderItAndSayHowFarItLooked()
+    {
+        // Arrange: a stream named just the category, which the category holds and the prefix does
+        // not, beside the seeded ones.
+        using (var context = new Seeding(_root))
+        {
+            context.Set<EventRow>().Add(Row(9, "orders", 1, "order_placed"));
+            context.SaveChanges();
+        }
+
+        var orders = EventFilter.StreamName("orders-");
+
+        // Act
+        var whole = await _sut.ScanAllAsync(orders, Direction.Forwards, 1, 100, 100, 10, TestContext.Current.CancellationToken);
+        var counted = await _sut.ScanAllAsync(orders, Direction.Forwards, 1, 100, 100, 2, TestContext.Current.CancellationToken);
+        var windowed = await _sut.ScanAllAsync(orders, Direction.Forwards, 1, 100, 4, 10, TestContext.Current.CancellationToken);
+        var toTheHead = await _sut.ScanAllAsync(orders, Direction.Forwards, 7, 8, 100, 10, TestContext.Current.CancellationToken);
+        var backwards = await _sut.ScanAllAsync(orders, Direction.Backwards, 8, 8, 3, 10, TestContext.Current.CancellationToken);
+
+        // Assert: not the shipment at 2, the deleted stream's event at 4, the other tenant's at 5
+        // nor the bare name at 9; the stretch ends at the window, the head, or the last event kept
+        // when as many were kept as asked for.
+        whole.Events.Select(record => record.Position).ShouldBe([1, 3, 6, 7, 8]);
+        whole.Through.ShouldBe(100);
+        counted.Events.Select(record => record.Position).ShouldBe([1, 3]);
+        counted.Through.ShouldBe(3);
+        windowed.Events.Select(record => record.Position).ShouldBe([1, 3]);
+        windowed.Through.ShouldBe(4);
+        toTheHead.Events.Select(record => record.Position).ShouldBe([7, 8]);
+        toTheHead.Through.ShouldBe(8);
+        backwards.Events.Select(record => record.Position).ShouldBe([8, 7, 6]);
+        backwards.Through.ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task ScanAllAsync_ByTypePrefixAndByRegularExpression_ShouldKeepWhatMatches()
+    {
+        // Arrange
+        var placedOrPaid = EventFilter.EventType("order_p");
+        var ordersTwoOrFour = EventFilter.StreamNameMatches("^orders-[24]$");
+        var paidAnywhere = EventFilter.EventTypeMatches("paid$");
+
+        // Act
+        var byType = await _sut.ScanAllAsync(placedOrPaid, Direction.Forwards, 1, 100, 100, 10, TestContext.Current.CancellationToken);
+        var byStreamRegex = await _sut.ScanAllAsync(ordersTwoOrFour, Direction.Forwards, 1, 100, 100, 10, TestContext.Current.CancellationToken);
+        var byTypeRegexCounted = await _sut.ScanAllAsync(paidAnywhere, Direction.Forwards, 1, 100, 100, 1, TestContext.Current.CancellationToken);
+        var nothing = await _sut.ScanAllAsync(EventFilter.StreamNameMatches("^invoices-"), Direction.Forwards, 1, 100, 5, 10, TestContext.Current.CancellationToken);
+
+        // Assert: the regular expression is matched in process, and the events it kept come back
+        // hydrated like any other, in position order, as many as asked for.
+        byType.Events.Select(record => record.Position).ShouldBe([1, 3, 6, 7]);
+        byStreamRegex.Events.Select(record => record.Position).ShouldBe([6, 7, 8]);
+        byTypeRegexCounted.Events.ShouldHaveSingleItem().Position.ShouldBe(3);
+        byTypeRegexCounted.Through.ShouldBe(3);
+        byTypeRegexCounted.Events[0].Stream.ShouldBe("orders-1");
+        nothing.Events.ShouldBeEmpty();
+        nothing.Through.ShouldBe(5);
+    }
+
+    [Fact]
     public async Task ReadPointersAsync_ShouldPointAtTheTenantsLiveEventsInPositionOrderWithinTheBounds()
     {
         // Act
@@ -237,7 +297,7 @@ public sealed class VirtualStreamReaderTests
             CausationId = $"k-{position}",
             Headers = "{\"source\":\"test\"}",
             IsArchived = archived,
-            Category = stream[..stream.IndexOf('-', StringComparison.Ordinal)],
+            Category = stream.Contains('-', StringComparison.Ordinal) ? stream[..stream.IndexOf('-', StringComparison.Ordinal)] : stream,
             CategoryOrdinal = categoryOrdinal,
             TypeOrdinal = typeOrdinal,
         };

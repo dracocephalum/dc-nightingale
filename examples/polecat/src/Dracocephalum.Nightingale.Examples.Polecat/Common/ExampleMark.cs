@@ -25,7 +25,7 @@ public static class ExampleMark
         {
             // Consumed to its end, so the server completes the call itself.
             StreamHead? head;
-            await using (var read = client.ReadAllAsync(Direction.Backwards, StreamPosition.End, maxCount: 1, cancellationToken))
+            await using (var read = client.ReadAllAsync(Direction.Backwards, StreamPosition.End, maxCount: 1, cancellationToken: cancellationToken))
             {
                 head = await read.Head.ConfigureAwait(false);
                 await foreach (var record in read.WithCancellation(cancellationToken).ConfigureAwait(false))
