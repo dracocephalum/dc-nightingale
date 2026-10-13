@@ -125,7 +125,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var subscription = sut.SubscribeToAllAsync(StreamPosition.Start, EventFilter.EventType("Order"), checkpointInterval: 7, cancellationToken: TestContext.Current.CancellationToken);
+        await using var subscription = sut.SubscribeToAllAsync(StreamPosition.Start, EventTypeFilter.Prefix("Order"), checkpointInterval: 7, cancellationToken: TestContext.Current.CancellationToken);
         var messages = new List<SubscriptionMessage>();
         await foreach (var message in subscription.Messages.WithCancellation(TestContext.Current.CancellationToken))
         {
@@ -148,7 +148,7 @@ public sealed class StreamSubscriptionTests
         await using var sut = new NightingaleClient(invoker);
 
         // Act
-        await using var read = sut.ReadAllAsync(Direction.Backwards, StreamPosition.End, 5, EventFilter.StreamNameMatches("^orders-"), TestContext.Current.CancellationToken);
+        await using var read = sut.ReadAllAsync(Direction.Backwards, StreamPosition.End, 5, StreamFilter.RegularExpression("^orders-"), TestContext.Current.CancellationToken);
         await read.Head;
 
         // Assert

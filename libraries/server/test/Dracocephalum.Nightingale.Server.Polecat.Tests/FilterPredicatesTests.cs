@@ -30,7 +30,7 @@ public sealed class FilterPredicatesTests
     public void ByPrefixes_WithACategoryPrefix_ShouldKeepTheCategoryLessTheBareName()
     {
         // Arrange
-        var keep = FilterPredicates.ByPrefixes(EventFilter.StreamName("orders-")).Compile();
+        var keep = FilterPredicates.ByPrefixes(StreamFilter.Prefix("orders-")).Compile();
 
         // Assert
         keep(Row("orders-1", "orders", "x")).ShouldBeTrue();
@@ -43,8 +43,8 @@ public sealed class FilterPredicatesTests
     public void ByPrefixes_WithOtherPrefixes_ShouldBeAnyOfThemOnTheNameOrTheType()
     {
         // Arrange
-        var byName = FilterPredicates.ByPrefixes(EventFilter.StreamName("ord", "invoices-")).Compile();
-        var byType = FilterPredicates.ByPrefixes(EventFilter.EventType("Order")).Compile();
+        var byName = FilterPredicates.ByPrefixes(StreamFilter.Prefix("ord", "invoices-")).Compile();
+        var byType = FilterPredicates.ByPrefixes(EventTypeFilter.Prefix("Order")).Compile();
 
         // Assert
         byName(Row("orders-1", "orders", "x")).ShouldBeTrue();
@@ -58,7 +58,7 @@ public sealed class FilterPredicatesTests
     public void ByPrefixes_WithARegularExpression_ShouldRefuse()
     {
         // Act & Assert
-        Should.Throw<ArgumentException>(() => FilterPredicates.ByPrefixes(EventFilter.StreamNameMatches("^orders")));
+        Should.Throw<ArgumentException>(() => FilterPredicates.ByPrefixes(StreamFilter.RegularExpression("^orders")));
     }
 
     private static EventRow Row(string stream, string category, string type) =>

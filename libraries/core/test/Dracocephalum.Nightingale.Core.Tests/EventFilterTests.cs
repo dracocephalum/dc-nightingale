@@ -9,10 +9,10 @@ namespace Dracocephalum.Nightingale.Tests;
 public sealed class EventFilterTests
 {
     [Fact]
-    public void StreamName_ShouldKeepTheStreamsThatBeginWithAnyPrefixOrdinally()
+    public void StreamFilterPrefix_ShouldKeepTheStreamsThatBeginWithAnyPrefixOrdinally()
     {
         // Arrange
-        var sut = EventFilter.StreamName("orders-", "invoices-");
+        var sut = StreamFilter.Prefix("orders-", "invoices-");
 
         // Assert
         sut.Target.ShouldBe(EventFilterTarget.StreamName);
@@ -26,10 +26,10 @@ public sealed class EventFilterTests
     }
 
     [Fact]
-    public void EventType_ShouldKeepTheTypesThatBeginWithAnyPrefix()
+    public void EventTypeFilterPrefix_ShouldKeepTheTypesThatBeginWithAnyPrefix()
     {
         // Arrange
-        var sut = EventFilter.EventType("Order");
+        var sut = EventTypeFilter.Prefix("Order");
 
         // Assert
         sut.Target.ShouldBe(EventFilterTarget.EventType);
@@ -41,8 +41,8 @@ public sealed class EventFilterTests
     public void Matches_WithARegularExpression_ShouldMatchTheTargetWithoutBacktracking()
     {
         // Arrange
-        var streams = EventFilter.StreamNameMatches("^orders-[0-9]+$");
-        var types = EventFilter.EventTypeMatches("Placed$");
+        var streams = StreamFilter.RegularExpression("^orders-[0-9]+$");
+        var types = EventTypeFilter.RegularExpression("Placed$");
 
         // Assert
         streams.Regex.ShouldBe("^orders-[0-9]+$");
@@ -57,10 +57,10 @@ public sealed class EventFilterTests
     [InlineData("(")]
     [InlineData("(a)\\1")]
     [InlineData("a(?=b)")]
-    public void StreamNameMatches_WhenTheExpressionCannotRunWithoutBacktracking_ShouldRefuseIt(string regex)
+    public void RegularExpression_WhenTheExpressionCannotRunWithoutBacktracking_ShouldRefuseIt(string regex)
     {
         // Act
-        var exception = Should.Throw<ArgumentException>(() => EventFilter.StreamNameMatches(regex));
+        var exception = Should.Throw<ArgumentException>(() => StreamFilter.RegularExpression(regex));
 
         // Assert
         exception.Message.ShouldContain("regular expression");
@@ -70,16 +70,16 @@ public sealed class EventFilterTests
     public void Prefixes_ShouldBeAtLeastOneAndNoneEmpty()
     {
         // Act & Assert
-        Should.Throw<ArgumentException>(() => EventFilter.StreamName());
-        Should.Throw<ArgumentException>(() => EventFilter.EventType("Order", string.Empty));
-        Should.Throw<ArgumentException>(() => EventFilter.EventTypeMatches(string.Empty));
+        Should.Throw<ArgumentException>(() => StreamFilter.Prefix());
+        Should.Throw<ArgumentException>(() => EventTypeFilter.Prefix("Order", string.Empty));
+        Should.Throw<ArgumentException>(() => EventTypeFilter.RegularExpression(string.Empty));
     }
 
     [Fact]
     public void ToString_ShouldSayWhatTheFilterKeeps()
     {
         // Act & Assert
-        EventFilter.StreamName("orders-", "invoices-").ToString().ShouldBe("StreamName begins with orders- | invoices-");
-        EventFilter.EventTypeMatches("^Order").ToString().ShouldBe("EventType matches /^Order/");
+        StreamFilter.Prefix("orders-", "invoices-").ToString().ShouldBe("StreamName begins with orders- | invoices-");
+        EventTypeFilter.RegularExpression("^Order").ToString().ShouldBe("EventType matches /^Order/");
     }
 }

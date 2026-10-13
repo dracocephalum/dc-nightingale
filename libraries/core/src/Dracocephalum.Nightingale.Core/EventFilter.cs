@@ -4,9 +4,10 @@ namespace Dracocephalum.Nightingale;
 
 /// <summary>
 /// What a read or subscription of <c>$all</c> keeps: the events whose stream name, or whose event
-/// type, begins with one of some prefixes, or matches a regular expression. One target and one
-/// kind per filter, as the reference protocol has it; <c>$all</c> only, since a stream and a
-/// virtual stream are already a selection. The regular expression runs without backtracking, so
+/// type, begins with one of some prefixes, or matches a regular expression. Made through
+/// <see cref="StreamFilter"/> and <see cref="EventTypeFilter"/>, named as the reference client
+/// names them. One target and one kind per filter, as the reference protocol has it; <c>$all</c>
+/// only, since a stream and a virtual stream are already a selection. The regular expression runs without backtracking, so
 /// a pattern from a client can take only time linear in what it reads; the constructs that need
 /// backtracking, lookarounds and backreferences, are refused. Names are matched ordinally, as the
 /// server matches them in process: the database compares them under its own collation, which a
@@ -47,25 +48,17 @@ public sealed class EventFilter
     /// <summary>Gets the regular expression the name must match, or <see langword="null"/> for a prefix filter.</summary>
     public string? Regex { get; }
 
-    /// <summary>Keeps the events whose stream name begins with one of the prefixes.</summary>
+    /// <summary>Keeps the events whose target begins with one of the prefixes.</summary>
+    /// <param name="target">What to look at.</param>
     /// <param name="prefixes">The prefixes, at least one, none empty.</param>
     /// <returns>The filter.</returns>
-    public static EventFilter StreamName(params string[] prefixes) => new(EventFilterTarget.StreamName, RequirePrefixes(prefixes), null);
+    internal static EventFilter ByPrefixes(EventFilterTarget target, string[] prefixes) => new(target, RequirePrefixes(prefixes), null);
 
-    /// <summary>Keeps the events whose stream name matches a regular expression.</summary>
+    /// <summary>Keeps the events whose target matches a regular expression.</summary>
+    /// <param name="target">What to look at.</param>
     /// <param name="regex">The expression; anchor it to match from the start.</param>
     /// <returns>The filter.</returns>
-    public static EventFilter StreamNameMatches(string regex) => new(EventFilterTarget.StreamName, [], RequireRegex(regex));
-
-    /// <summary>Keeps the events whose type begins with one of the prefixes.</summary>
-    /// <param name="prefixes">The prefixes, at least one, none empty.</param>
-    /// <returns>The filter.</returns>
-    public static EventFilter EventType(params string[] prefixes) => new(EventFilterTarget.EventType, RequirePrefixes(prefixes), null);
-
-    /// <summary>Keeps the events whose type matches a regular expression.</summary>
-    /// <param name="regex">The expression; anchor it to match from the start.</param>
-    /// <returns>The filter.</returns>
-    public static EventFilter EventTypeMatches(string regex) => new(EventFilterTarget.EventType, [], RequireRegex(regex));
+    internal static EventFilter ByRegularExpression(EventFilterTarget target, string regex) => new(target, [], RequireRegex(regex));
 
     /// <summary>Whether the filter keeps an event, by its stream name and type.</summary>
     /// <param name="stream">The event's stream name.</param>

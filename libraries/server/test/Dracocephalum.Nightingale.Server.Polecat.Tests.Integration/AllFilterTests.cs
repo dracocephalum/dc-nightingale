@@ -31,7 +31,7 @@ public sealed class AllFilterTests(SqlServerTestDatabase database)
         var head = await ReachAsync(last.Position);
 
         // Act
-        var scanned = await sut.ScanAllAsync(EventFilter.StreamName(category + "-"), Direction.Forwards, first.Position, head, 1000, 10, TestContext.Current.CancellationToken);
+        var scanned = await sut.ScanAllAsync(StreamFilter.Prefix(category + "-"), Direction.Forwards, first.Position, head, 1000, 10, TestContext.Current.CancellationToken);
 
         // Assert
         scanned.Events.Select(record => record.Stream).ShouldBe([category + "-1", category + "-2"]);
@@ -49,7 +49,7 @@ public sealed class AllFilterTests(SqlServerTestDatabase database)
         var head = await ReachAsync(lookalike.Position);
 
         // Act
-        var scanned = await sut.ScanAllAsync(EventFilter.StreamName(stem + "_"), Direction.Forwards, literal.Position, head, 1000, 10, TestContext.Current.CancellationToken);
+        var scanned = await sut.ScanAllAsync(StreamFilter.Prefix(stem + "_"), Direction.Forwards, literal.Position, head, 1000, 10, TestContext.Current.CancellationToken);
 
         // Assert
         scanned.Events.ShouldHaveSingleItem().Stream.ShouldBe(stem + "_a-1");
@@ -67,9 +67,9 @@ public sealed class AllFilterTests(SqlServerTestDatabase database)
         var from = a.Position - 1;
 
         // Act
-        var byType = await sut.ScanAllAsync(EventFilter.EventType("placed_" + suffix), Direction.Forwards, from, head, 1000, 10, TestContext.Current.CancellationToken);
-        var byRegex = await sut.ScanAllAsync(EventFilter.EventTypeMatches("^pa(id|ssed)_" + suffix + "$"), Direction.Forwards, from, head, 1000, 10, TestContext.Current.CancellationToken);
-        var backwards = await sut.ScanAllAsync(EventFilter.StreamName("flt" + suffix + "-"), Direction.Backwards, head, head, (int)(head - from + 1), 10, TestContext.Current.CancellationToken);
+        var byType = await sut.ScanAllAsync(EventTypeFilter.Prefix("placed_" + suffix), Direction.Forwards, from, head, 1000, 10, TestContext.Current.CancellationToken);
+        var byRegex = await sut.ScanAllAsync(EventTypeFilter.RegularExpression("^pa(id|ssed)_" + suffix + "$"), Direction.Forwards, from, head, 1000, 10, TestContext.Current.CancellationToken);
+        var backwards = await sut.ScanAllAsync(StreamFilter.Prefix("flt" + suffix + "-"), Direction.Backwards, head, head, (int)(head - from + 1), 10, TestContext.Current.CancellationToken);
 
         // Assert
         byType.Events.Select(record => record.Position).ShouldBe([a.Position - 1, b.Position]);

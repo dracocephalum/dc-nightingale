@@ -128,10 +128,10 @@ public static class WireConversions
         var byStreamName = filter.KindCase == Filter.KindOneofCase.StreamName;
         return (byStreamName, hasRegex) switch
         {
-            (true, false) => EventFilter.StreamName([.. expression.Prefix]),
-            (true, true) => EventFilter.StreamNameMatches(expression.Regex),
-            (false, false) => EventFilter.EventType([.. expression.Prefix]),
-            (false, true) => EventFilter.EventTypeMatches(expression.Regex),
+            (true, false) => StreamFilter.Prefix([.. expression.Prefix]),
+            (true, true) => StreamFilter.RegularExpression(expression.Regex),
+            (false, false) => EventTypeFilter.Prefix([.. expression.Prefix]),
+            (false, true) => EventTypeFilter.RegularExpression(expression.Regex),
         };
     }
 

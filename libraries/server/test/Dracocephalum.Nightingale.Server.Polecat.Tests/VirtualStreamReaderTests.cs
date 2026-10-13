@@ -87,7 +87,7 @@ public sealed class VirtualStreamReaderTests
             context.SaveChanges();
         }
 
-        var orders = EventFilter.StreamName("orders-");
+        var orders = StreamFilter.Prefix("orders-");
 
         // Act
         var whole = await _sut.ScanAllAsync(orders, Direction.Forwards, 1, 100, 100, 10, TestContext.Current.CancellationToken);
@@ -115,15 +115,15 @@ public sealed class VirtualStreamReaderTests
     public async Task ScanAllAsync_ByTypePrefixAndByRegularExpression_ShouldKeepWhatMatches()
     {
         // Arrange
-        var placedOrPaid = EventFilter.EventType("order_p");
-        var ordersTwoOrFour = EventFilter.StreamNameMatches("^orders-[24]$");
-        var paidAnywhere = EventFilter.EventTypeMatches("paid$");
+        var placedOrPaid = EventTypeFilter.Prefix("order_p");
+        var ordersTwoOrFour = StreamFilter.RegularExpression("^orders-[24]$");
+        var paidAnywhere = EventTypeFilter.RegularExpression("paid$");
 
         // Act
         var byType = await _sut.ScanAllAsync(placedOrPaid, Direction.Forwards, 1, 100, 100, 10, TestContext.Current.CancellationToken);
         var byStreamRegex = await _sut.ScanAllAsync(ordersTwoOrFour, Direction.Forwards, 1, 100, 100, 10, TestContext.Current.CancellationToken);
         var byTypeRegexCounted = await _sut.ScanAllAsync(paidAnywhere, Direction.Forwards, 1, 100, 100, 1, TestContext.Current.CancellationToken);
-        var nothing = await _sut.ScanAllAsync(EventFilter.StreamNameMatches("^invoices-"), Direction.Forwards, 1, 100, 5, 10, TestContext.Current.CancellationToken);
+        var nothing = await _sut.ScanAllAsync(StreamFilter.RegularExpression("^invoices-"), Direction.Forwards, 1, 100, 5, 10, TestContext.Current.CancellationToken);
 
         // Assert: the regular expression is matched in process, and the events it kept come back
         // hydrated like any other, in position order, as many as asked for.

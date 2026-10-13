@@ -14,8 +14,8 @@ public sealed class FilterConversionsTests
     public void ToWire_ThenToEventFilter_ShouldRoundTripEachKind()
     {
         // Arrange
-        var byPrefix = EventFilter.StreamName("orders-", "invoices-");
-        var byRegex = EventFilter.EventTypeMatches("^Order");
+        var byPrefix = StreamFilter.Prefix("orders-", "invoices-");
+        var byRegex = EventTypeFilter.RegularExpression("^Order");
 
         // Act
         var prefixWire = byPrefix.ToWire(checkpointInterval: 32);
