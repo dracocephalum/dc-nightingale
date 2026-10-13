@@ -249,7 +249,7 @@ re-derived:
 - **Enforced inside the read's own statement.** A read of a plain stream finds
   the last metadata event with a `TOP 1` seek on the same unique index, joined
   to the page by an `OUTER APPLY`, so it costs no round trip: the lower bound
-  `max(last − $maxCount + 1, $tb)` becomes a seek bound on that index, and
+  `max(last − $maxCount + 1, |$tb|)` becomes a seek bound on that index, and
   `$maxAge` a check of each row's timestamp. A stream without metadata finds
   nothing in that one probe and reads as it does today, so a store that never
   sets metadata pays a probe of a few index pages per read and nothing else.
@@ -293,31 +293,54 @@ re-derived:
   the last one, since the old events keep theirs until a scavenge, and the old
   events stay hidden. Delete cannot stand in for it, so soft delete is a call
   of its own, named when the slice starts, and a `$tb` set to its largest
-  value through `SetStreamMetadata` is the same request.
-- **Soft delete is a read rule.** It writes a metadata event of `$tb` at the
-  last revision plus one with a marker of the gateway's, replacing the other
-  keys as the reference's does. A read finds the stream deleted while the
-  marker is there and `$tb` is beyond the last revision: not found, with
-  `GetStreamMetadata` showing `$tb` at its largest value as the reference's
-  does. Recreation needs nothing of its own: the next append lands at `$tb`,
-  the stream reads again from there, and the metadata shows `$tb` as the
-  reference's does after its un-delete. Since no write has to follow the
-  append, no interleaving of an append and a soft delete on two instances
-  strands an event: an append committed before the soft delete reads the last
-  revision is hidden by it, one committed after is the recreation, the two
-  orders the reference's writer allows. The soft delete's own expected
-  revision, and a metadata set that carries `$tb` forward on a soft-deleted
-  stream as the reference's un-delete does, read the last revision and then
-  write, so both take the update lock on the stream's row in the store's
-  streams table first; every append takes that lock anyway to move the
-  version, so the lock is paid on those two paths and never by an append.
+  value through `SetStreamMetadata` on a stream that is not soft-deleted is
+  the same request.
+- **Soft delete is a read rule, stored as a negative `$tb`.** The reference
+  writes `$tb` at its largest value, replacing the other keys, and that value
+  is its only mark of a soft delete; its un-delete then rewrites `$tb` as the
+  last revision plus one. The gateway writes, in one metadata event, the
+  negative of the last revision plus one, `-6` for a stream whose last
+  revision is 5, and nothing else, so one number says both that the stream
+  was soft-deleted and where it is truncated. A read finds the stream deleted
+  while `$tb` is negative and its absolute value is beyond the last revision:
+  not found. Otherwise the absolute value is the truncation, so recreation
+  needs nothing of its own: the next append lands at 6, the stream reads
+  again from there, and the same `-6` now means what the reference's
+  un-delete writes. The value never leaves the gateway as it is stored: the
+  core's metadata call reports a soft delete as a field of its own, and the
+  KurrentDB adapter serves a read of `$$<stream>`, which is how that client
+  reads metadata, with `$tb` at its largest value while the stream is deleted
+  and at 6 after, the two values the reference's history holds; that
+  client's parser throws on a negative `$tb`. A negative `$tb` from a caller
+  is refused, where the reference ignores it; its client cannot send one. A
+  stream with no events cannot be soft-deleted, as in the reference, so the
+  value is never 0. Since no write has to follow the append, no interleaving
+  of an append and a soft delete on two instances strands an event: an
+  append committed before the soft delete reads the last revision is hidden
+  by it, one committed after is the recreation, the two orders the
+  reference's writer allows. The soft delete reads the last revision and then
+  writes, and so does a metadata set on a soft-deleted stream (next), so both
+  take the update lock on the stream's row in the store's streams table
+  first; every append takes that lock anyway to move the version, so the
+  lock is paid on those two paths and never by an append.
+- **A metadata set on a soft-deleted stream un-deletes it.** In the
+  reference, any write to `$$<stream>` while the stream is soft-deleted is
+  followed by its un-delete, which rewrites `$tb` in what was just written:
+  a set of `$tb` at 3 ends at 6, the old events stay hidden, and so does a
+  set of `$tb` at its largest value, which un-deletes rather than deletes
+  again; the other keys of the set are kept. The gateway writes that end
+  state in one event: the caller's keys with `$tb` at the absolute value of
+  the stored one, under the lock above. Once the stream is recreated, a set
+  of `$tb` at 3 is a plain set and the events from 3 read again, in both,
+  until physical removal (below) takes them.
 - **"No stream" after a soft delete, by a retry on its failure.** The
   reference accepts an append that expects no stream on a soft-deleted stream
   and numbers its events from the last revision plus one, exactly as an
   append that expects the last revision; a recreated stream never starts
   again at 0. Here such an append fails on the store's check, and only then,
   on the failure path, the gateway reads the metadata: when the stream is
-  soft-deleted with `$tb` at the revision the failure reports plus one, the
+  soft-deleted with `$tb` at the negative of the revision the failure
+  reports plus one, the
   append is retried once expecting that revision, which the store checks as
   atomically as any. An append that succeeds never reads metadata.
 - **What stays a variance**, written into `VARIANCES.md` when the slice
@@ -328,7 +351,10 @@ re-derived:
   and even then a soft delete landing between the probe and the append gets
   through; it waits for a consumer that asks, and is then built that way,
   never as a check on every append. The metadata stream's history has no
-  un-delete event. And a change of metadata that un-deletes the stream
+  un-delete event, stores the negative `$tb` the adapter translates, and
+  has one event where a set on a soft-deleted stream gives the reference
+  two, so the reference's moment between them, with the caller's `$tb` in
+  force, does not exist here. And a change of metadata that un-deletes the stream
   between a failed "no stream" append and its retry lets the retry through
   where the reference would refuse it; that window is a variance, not a
   lock.
