@@ -10,6 +10,7 @@ workaround is removed and the row with it.
 
 | Request | What it would replace | Filed |
 |---|---|---|
+| Hydrate the headers column in the raw-events query, as the stream fetch does: of the store's event hydration paths, the one behind `QueryAllRawEvents()` reads the correlation, causation and user name columns and not the headers, so an event read through it loses the metadata it was appended with | every page of `$all` is read through the gateway's own mirror of the events table, which reads the headers, whichever connection serves it (`DESIGN.md`, seam 8) | not yet |
 | Honour a caller-supplied event type name on a prebuilt event | the gateway's event type is carried through its own sticky `Event<JsonElement>` seam (`DESIGN.md`) | not yet |
 | Expose Weasel's ignored-index list or an add-index call for the events table, or a first-class category column | the patched schema, which adds the category and type columns and their indexes beside the store's (`DESIGN.md`) | not yet |
 | The event-store table ensurer should respect the tenancy database | the initializer runs the ensurer itself, over the one database, before the gateway's own migrations | not yet |
