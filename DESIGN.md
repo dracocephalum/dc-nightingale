@@ -295,7 +295,12 @@ saves the lease row with it, unchanged but token-checked, in one transaction,
 so an instance that stalled past its lease while another took the group over
 writes nothing when it wakes; the refused write ends its consumers' calls
 with who owns the group now, the same answer a refused renewal gives. The
-checkpoint never moves back. The lease carries the owner's address, derived from what the owner
+checkpoint never moves back. A group over `$all` may carry a filter, fixed at
+creation; its feed then comes from the store's scan a stretch at a time, and
+a stretch the filter keeps nothing of travels through the feed as a marker,
+after the events before it, so the runtime moves the checkpoint over it once
+everything delivered before it is done, and a consumer coming back reads
+nothing twice. The lease carries the owner's address, derived from what the owner
 listens on unless configured, and an instance asked for a group another runs
 refuses with that address; the client goes there itself, once, and keeps the
 connection, the way the reference client follows a not-leader answer to the

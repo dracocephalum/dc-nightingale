@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 {
     [DbContext(typeof(NightingaleDbContext))]
-    [Migration("20261007042227_Initial")]
+    [Migration("20261013064715_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -188,6 +188,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Filter")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int?>("LiveAwaitingRetryCount")
                         .HasColumnType("int");

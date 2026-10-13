@@ -256,7 +256,8 @@ public static class WireConversions
             settings.BufferSize > 0 ? settings.BufferSize : defaults.BufferSize,
             settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount,
             settings.Numbering.ToNumbering(),
-            settings.ConsumerStrategy.ToConsumerStrategy());
+            settings.ConsumerStrategy.ToConsumerStrategy(),
+            settings.Filter?.ToEventFilter());
     }
 
     /// <summary>Maps group settings to their wire form.</summary>
@@ -276,6 +277,7 @@ public static class WireConversions
             MaxSubscriberCount = settings.MaxSubscriberCount,
             Numbering = settings.Numbering.ToWire(),
             ConsumerStrategy = settings.ConsumerStrategy.ToWire(),
+            Filter = settings.Filter?.ToWire(),
         };
         if (settings.Start.IsEnd)
         {

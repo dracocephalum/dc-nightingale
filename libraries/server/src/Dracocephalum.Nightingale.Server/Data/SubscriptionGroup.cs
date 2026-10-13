@@ -50,6 +50,9 @@ public sealed class SubscriptionGroup
     /// <summary>Gets or sets how the group shares its events among its consumers; stored by name.</summary>
     public ConsumerStrategy ConsumerStrategy { get; set; }
 
+    /// <summary>Gets or sets what the group keeps of <c>$all</c>, as <see cref="FilterColumn"/> writes it; <see langword="null"/> for everything.</summary>
+    public string? Filter { get; set; }
+
     /// <summary>Gets or sets the checkpoint: the last number every event up to which is done, or -1.</summary>
     public long CheckpointPosition { get; set; }
 

@@ -481,7 +481,12 @@ unless the filter says otherwise, as the reference does after its window
 times its multiplier; it reports no fell-behind count, since how many events
 a stretch holds for the filter is not known until the stretch is scanned.
 Filters are on `$all` only, as in the reference; a virtual stream is already
-a selection.
+a selection. A persistent-subscription group over `$all` takes a filter too,
+fixed when the group is created, since its checkpoint means what the filter
+kept; the reference's `CreateToAll` takes one the same way. The group's
+checkpoint advances over a stretch the filter keeps nothing of, once
+everything delivered before it is acknowledged, so a consumer that comes
+back reads nothing twice.
 
 ## Authentication is Basic, roles are three, and a credential has a tenant
 

@@ -1,7 +1,8 @@
 # catch-up-subscription
 
-Two catch-up subscriptions against a Nightingale server, as a program that
-narrates each step and as a test that asserts the same run.
+Two catch-up subscriptions against a Nightingale server, then a filtered one
+and a filtered persistent group over `$all`, as a program that narrates each
+step and as a test that asserts the same run.
 
 ## What it does
 
@@ -12,7 +13,14 @@ that stream from its start and watch it catch up and say so, subscribe to
 `$all` from its end, which in a tenant is the tenant's own, append to two
 streams while both subscriptions are live, and see the stream subscription
 deliver its one new event and the `$all` subscription deliver both in
-position order. Then it disposes the subscriptions.
+position order. Then it subscribes to `$all` from the start with a filter on
+the event type, `EventTypeFilter.Prefix("order_")`, and sees the three orders
+delivered, the shipment left out, and a checkpoint carrying the shipment's
+position, so a consumer's position moves past what the filter did not keep;
+and it creates a persistent group over `$all` with a filter on the stream
+name, `StreamFilter.Prefix("orders-")`, consumes and acknowledges the three
+orders, and reads the group's checkpoint standing at the shipment's position
+too. Then it disposes the subscriptions.
 The scenario's test runs exactly the same code and asserts the report it
 returns.
 

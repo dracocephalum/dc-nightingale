@@ -12,6 +12,12 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 internal static class EventSource
 {
+    /// <summary>
+    /// The most positions one scan of <c>$all</c> under a filter examines: what bounds a call over
+    /// a stretch the filter keeps nothing of, and what a checkpoint advances by at most at a time.
+    /// </summary>
+    public const int ScanWindow = 4096;
+
     /// <summary>Follows a stream, <c>$all</c> or a virtual stream from a position, inclusive, forever.</summary>
     /// <param name="store">The store.</param>
     /// <param name="tail">The tail.</param>
@@ -20,13 +26,16 @@ internal static class EventSource
     /// <param name="from">Where to begin, inclusive: a revision for a stream, a position otherwise, an ordinal under ordinal numbering.</param>
     /// <param name="pageSize">How many events one store call asks for.</param>
     /// <param name="numbering">How <paramref name="from"/> and the feed are numbered; ordinal only for a virtual stream.</param>
+    /// <param name="filter">What to keep of <c>$all</c>; <see langword="null"/> for everything, and for any other stream.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The events, in order, without end.</returns>
-    public static IAsyncEnumerable<EventRecord> FollowAsync(IStreamStore store, IStoreTail tail, StreamRouter router, string stream, long from, int pageSize, Numbering numbering, CancellationToken cancellationToken)
+    /// <returns>The events, in order, without end; under a filter, the stretches examined that held none for it as well.</returns>
+    public static IAsyncEnumerable<FeedItem> FollowAsync(IStreamStore store, IStoreTail tail, StreamRouter router, string stream, long from, int pageSize, Numbering numbering, EventFilter? filter, CancellationToken cancellationToken)
     {
         if (stream == StreamNames.All)
         {
-            return FollowByPosition(store, tail, router, null, from, pageSize, cancellationToken);
+            return filter is null
+                ? FollowByPosition(store, tail, router, null, from, pageSize, cancellationToken)
+                : FollowAllFiltered(store, tail, router, filter, from, pageSize, cancellationToken);
         }
 
         if (StreamNames.TryParseVirtual(stream, out var virtualStream))
@@ -74,7 +83,7 @@ internal static class EventSource
     /// What is behind the next revision was read already; what is ahead of it means the stream
     /// is read again from the next revision, as it is when the follower has lapsed.
     /// </summary>
-    private static async IAsyncEnumerable<EventRecord> FollowStream(IStreamStore store, StreamRouter router, string stream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
+    private static async IAsyncEnumerable<FeedItem> FollowStream(IStreamStore store, StreamRouter router, string stream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -89,7 +98,7 @@ internal static class EventSource
 
                 foreach (var record in page.Events)
                 {
-                    yield return record;
+                    yield return FeedItem.Of(record);
                 }
 
                 next = page.Events[^1].Revision + 1;
@@ -115,7 +124,7 @@ internal static class EventSource
                         break;
                     }
 
-                    yield return record;
+                    yield return FeedItem.Of(record);
                     next = record.Revision + 1;
                 }
             }
@@ -127,7 +136,7 @@ internal static class EventSource
     /// reads up to the head as it stands, then what the router brings, skipping what the catch-up
     /// delivered already. A lapse means catching up again from where the delivery stands.
     /// </summary>
-    private static async IAsyncEnumerable<EventRecord> FollowByPosition(IStreamStore store, IStoreTail tail, StreamRouter router, VirtualStreamName? virtualStream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
+    private static async IAsyncEnumerable<FeedItem> FollowByPosition(IStreamStore store, IStoreTail tail, StreamRouter router, VirtualStreamName? virtualStream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -140,7 +149,7 @@ internal static class EventSource
                     : await store.ReadAllAsync(Direction.Forwards, next, head, pageSize, cancellationToken).ConfigureAwait(false);
                 foreach (var record in page)
                 {
-                    yield return record;
+                    yield return FeedItem.Of(record);
                 }
 
                 next = page.Count < pageSize ? head + 1 : page[^1].Position + 1;
@@ -155,14 +164,79 @@ internal static class EventSource
                         continue;
                     }
 
-                    yield return record;
+                    yield return FeedItem.Of(record);
                     next = record.Position + 1;
                 }
             }
         }
     }
 
-    private static async IAsyncEnumerable<EventRecord> FollowOrdinal(IStreamStore store, IStoreTail tail, VirtualStreamName virtualStream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
+    /// <summary>
+    /// <c>$all</c> under a filter: the shape of <see cref="FollowByPosition"/>, catching up through
+    /// the store's scan a stretch at a time and keeping, of what the router brings, what the filter
+    /// keeps. A stretch examined past the last event kept, and what the router brought that the
+    /// filter did not keep, are reported as examined, after the events before them, so a group's
+    /// checkpoint can advance over them.
+    /// </summary>
+    private static async IAsyncEnumerable<FeedItem> FollowAllFiltered(IStreamStore store, IStoreTail tail, StreamRouter router, EventFilter filter, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            using var following = router.Follow(StreamNames.All);
+            var head = tail.Head;
+            while (head > 0 && next <= head)
+            {
+                var slice = await store.ScanAllAsync(filter, Direction.Forwards, next, head, ScanWindow, pageSize, cancellationToken).ConfigureAwait(false);
+                foreach (var record in slice.Events)
+                {
+                    yield return FeedItem.Of(record);
+                }
+
+                if (slice.Events.Count == 0 || slice.Through > slice.Events[^1].Position)
+                {
+                    yield return FeedItem.Scanned(slice.Through);
+                }
+
+                next = slice.Through + 1;
+            }
+
+            while (await following.Events.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var skippedThrough = -1L;
+                while (following.Events.TryRead(out var record))
+                {
+                    if (record.Position < next)
+                    {
+                        continue;
+                    }
+
+                    next = record.Position + 1;
+                    if (!filter.Matches(record.Stream, record.Type))
+                    {
+                        skippedThrough = record.Position;
+                        continue;
+                    }
+
+                    // What was skipped before this event is reported first, so a checkpoint can
+                    // stand there while the event is in flight.
+                    if (skippedThrough >= 0)
+                    {
+                        yield return FeedItem.Scanned(skippedThrough);
+                        skippedThrough = -1;
+                    }
+
+                    yield return FeedItem.Of(record);
+                }
+
+                if (skippedThrough >= 0)
+                {
+                    yield return FeedItem.Scanned(skippedThrough);
+                }
+            }
+        }
+    }
+
+    private static async IAsyncEnumerable<FeedItem> FollowOrdinal(IStreamStore store, IStoreTail tail, VirtualStreamName virtualStream, long next, int pageSize, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var observed = tail.Head;
         while (true)
@@ -173,7 +247,7 @@ internal static class EventSource
                 var page = await store.ReadByOrdinalAsync(virtualStream, Direction.Forwards, next, pageSize, cancellationToken).ConfigureAwait(false);
                 foreach (var record in page)
                 {
-                    yield return record;
+                    yield return FeedItem.Of(record);
                     next = (record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.")) + 1;
                 }
 

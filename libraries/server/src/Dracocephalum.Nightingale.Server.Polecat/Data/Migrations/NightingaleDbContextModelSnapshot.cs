@@ -186,6 +186,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("Filter")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int?>("LiveAwaitingRetryCount")
                         .HasColumnType("int");
 

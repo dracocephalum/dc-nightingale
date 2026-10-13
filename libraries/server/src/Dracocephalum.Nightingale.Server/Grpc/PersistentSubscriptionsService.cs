@@ -53,6 +53,17 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
         {
             throw NightingaleErrors.InvalidArgument($"Group settings: {exception.ParamName} is out of range.");
         }
+        catch (ArgumentException exception)
+        {
+            throw NightingaleErrors.InvalidArgument(exception.Message);
+        }
+
+        // The filter, like the numbering, is the group's for life, so it is checked once, here,
+        // the way a read checks it: on $all only.
+        if (settings.Filter is not null && stream != StreamNames.All)
+        {
+            throw NightingaleErrors.FilterNotAllowed(stream);
+        }
 
         // The numbering is the group's for life, so it is checked once, here, the way a read checks it.
         if (settings.Numbering == Numbering.Ordinal)
@@ -121,6 +132,11 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
         if (asked.Numbering != Protocols.Grpc.V1.Numbering.Unspecified && asked.Numbering.ToNumbering() != current.Numbering)
         {
             throw NightingaleErrors.InvalidArgument("A group's numbering is fixed when it is created; a consumer that wants the other numbering creates another group.");
+        }
+
+        if (asked.Filter is not null)
+        {
+            throw NightingaleErrors.InvalidArgument("A group's filter is fixed when it is created, since its checkpoint means what the filter kept; a consumer that wants another filter creates another group.");
         }
 
         var settings = current with

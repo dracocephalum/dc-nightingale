@@ -51,6 +51,26 @@ public sealed class SubscriptionGroupStoreTests
     }
 
     [Fact]
+    public async Task Groups_WithAFilter_ShouldReadItBackAndWithoutOneReadNone()
+    {
+        // Arrange
+        var sut = Store();
+        var filtered = GroupSettings.Default with { Start = StreamPosition.Start, Filter = StreamFilter.Prefix("orders-", "invoices-") };
+
+        // Act
+        await sut.CreateAsync(new SubscriptionGroupDefinition("$all", "orders", filtered, -1) { Id = Billing }, TestContext.Current.CancellationToken);
+        await sut.CreateAsync(new SubscriptionGroupDefinition("$all", "everything", GroupSettings.Default, -1), TestContext.Current.CancellationToken);
+        var withFilter = await sut.GetAsync("$all", "orders", TestContext.Current.CancellationToken);
+        var without = await sut.GetAsync("$all", "everything", TestContext.Current.CancellationToken);
+
+        // Assert
+        var filter = withFilter.ShouldNotBeNull().Settings.Filter.ShouldNotBeNull();
+        filter.Target.ShouldBe(EventFilterTarget.StreamName);
+        filter.Prefixes.ShouldBe(["orders-", "invoices-"]);
+        without.ShouldNotBeNull().Settings.Filter.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Groups_ShouldBeKeyedByStreamAndNameTogether()
     {
         // Arrange

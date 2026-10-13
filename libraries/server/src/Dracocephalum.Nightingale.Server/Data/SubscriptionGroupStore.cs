@@ -55,6 +55,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             MaxSubscriberCount = settings.MaxSubscriberCount,
             Numbering = settings.Numbering,
             ConsumerStrategy = settings.ConsumerStrategy,
+            Filter = FilterColumn.ToColumn(settings.Filter),
             CheckpointPosition = group.Checkpoint,
             CreatedAt = timeProvider.GetUtcNow(),
         });
@@ -115,6 +116,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         row.MaxSubscriberCount = settings.MaxSubscriberCount;
         row.Numbering = settings.Numbering;
         row.ConsumerStrategy = settings.ConsumerStrategy;
+        row.Filter = FilterColumn.ToColumn(settings.Filter);
         try
         {
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -604,7 +606,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             row.BufferSize,
             row.MaxSubscriberCount,
             row.Numbering,
-            row.ConsumerStrategy);
+            row.ConsumerStrategy,
+            FilterColumn.FromColumn(row.Filter));
 
         // The names are the row's own: a case-insensitive database finds the row under another
         // spelling, and the group still goes by the names it was created with.

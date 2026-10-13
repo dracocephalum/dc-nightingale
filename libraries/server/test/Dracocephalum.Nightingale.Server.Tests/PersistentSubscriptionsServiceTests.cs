@@ -115,6 +115,41 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Create_WithAFilterOnAll_ShouldStoreTheFilterWithTheGroup()
+    {
+        // Arrange
+        SubscriptionGroupDefinition? captured = null;
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).Invokes(call => captured = call.GetArgument<SubscriptionGroupDefinition>(0));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        await client.CreateAsync(new CreateRequest { Stream = "$all", Group = "orders", Settings = new Protocols.Grpc.V1.GroupSettings { FromStart = new(), Filter = StreamFilter.Prefix("orders-").ToWire() } }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        var filter = captured.ShouldNotBeNull().Settings.Filter.ShouldNotBeNull();
+        filter.Target.ShouldBe(EventFilterTarget.StreamName);
+        filter.Prefixes.ShouldBe(["orders-"]);
+    }
+
+    [Fact]
+    public async Task Create_WithAFilterOnAnythingButAll_ShouldRefuseAsNotAllowedBeforeTouchingTheStore()
+    {
+        // Arrange
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        var onAStream = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { Filter = EventTypeFilter.Prefix("order").ToWire() } }, cancellationToken: TestContext.Current.CancellationToken));
+        var unrunnable = await Should.ThrowAsync<RpcException>(async () => await client.CreateAsync(new CreateRequest { Stream = "$all", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { Filter = new Filter { EventType = new Expression { Regex = "(" } } } }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        onAStream.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        onAStream.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("FILTER_NOT_ALLOWED");
+        unrunnable.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        unrunnable.Status.Detail.ShouldContain("regular expression");
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task Create_UnderOrdinalNumberingWithoutOrdinals_ShouldFailAsNotEnabled()
     {
         // Arrange
@@ -312,11 +347,14 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
         Fake.ClearRecordedCalls(_groups);
         var otherStart = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { FromPosition = 40 } }, cancellationToken: TestContext.Current.CancellationToken));
         var otherNumbering = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { Numbering = Protocols.Grpc.V1.Numbering.Ordinal } }, cancellationToken: TestContext.Current.CancellationToken));
+        var aFilter = await Should.ThrowAsync<RpcException>(async () => await client.UpdateAsync(new UpdateRequest { Stream = "$ce-orders", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { Filter = EventTypeFilter.Prefix("order").ToWire() } }, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         otherStart.StatusCode.ShouldBe(StatusCode.InvalidArgument);
         otherStart.Status.Detail.ShouldContain("fixed when it is created");
         otherNumbering.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        aFilter.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        aFilter.Status.Detail.ShouldContain("filter is fixed when it is created");
         A.CallTo(() => _groups.UpdateSettingsAsync(A<Guid>._, A<GroupSettings>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 

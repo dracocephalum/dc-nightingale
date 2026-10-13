@@ -36,6 +36,24 @@ public sealed class FilterConversionsTests
     }
 
     [Fact]
+    public void GroupSettings_ToWireThenBack_ShouldCarryTheFilterAndNoneWhenThereIsNone()
+    {
+        // Arrange
+        var filtered = GroupSettings.Default with { Filter = EventTypeFilter.Prefix("Order") };
+
+        // Act
+        var wire = filtered.ToWire();
+        var back = wire.ToGroupSettings();
+        var none = GroupSettings.Default.ToWire().ToGroupSettings();
+
+        // Assert
+        wire.Filter.EventType.Prefix.ShouldBe(["Order"]);
+        back.Filter.ShouldNotBeNull().Target.ShouldBe(EventFilterTarget.EventType);
+        back.Filter.Prefixes.ShouldBe(["Order"]);
+        none.Filter.ShouldBeNull();
+    }
+
+    [Fact]
     public void ToEventFilter_WhenTheWireFilterSaysNothingOrTwoThings_ShouldRefuseWithTheReason()
     {
         // Arrange
