@@ -225,29 +225,16 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
                 cancellationToken);
     }
 
-    private async Task<IReadOnlyList<EventRecord>> ReadAllFromPrimaryAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
-    {
-        if (tenantId is null)
-        {
-            // Every tenant: the store's sessions are each one tenant's, so the page is read
-            // through the mirror of the events table, which the wildcard reader leaves unfiltered.
-            return await _virtual.ReadAllAsync(direction, from, head, count, cancellationToken).ConfigureAwait(false);
-        }
-
-        // The store's query hides archived events and scopes to the session's tenant on its own.
-        await using var session = store.QuerySession(ToSessionOptions(tenantId));
-        var query = session.Events.QueryAllRawEvents();
-        var stored = direction == Direction.Forwards
-            ? await PolecatQueryableExtensions.ToListAsync(query.Where(stored => stored.Sequence >= from && stored.Sequence <= head).OrderBy(stored => stored.Sequence).Take(count), cancellationToken).ConfigureAwait(false)
-            : await PolecatQueryableExtensions.ToListAsync(query.Where(stored => stored.Sequence <= from).OrderByDescending(stored => stored.Sequence).Take(count), cancellationToken).ConfigureAwait(false);
-        var records = new EventRecord[stored.Count];
-        for (var i = 0; i < stored.Count; i++)
-        {
-            records[i] = ToRecord(stored[i]);
-        }
-
-        return records;
-    }
+    /// <summary>
+    /// A page of <c>$all</c> from the main connection, through the mirror of the events table for
+    /// every tenant alike: the mirror scopes to the tenant, or to all of them under the wildcard,
+    /// hides archived events, and hydrates a row with its headers. The store's own raw-events query
+    /// does not read the headers column (<c>UPSTREAM.md</c>), so a page read through it came back
+    /// without the metadata the events carry, which the read-only connection, serving most pages,
+    /// kept from view until a page fell to the main connection.
+    /// </summary>
+    private Task<IReadOnlyList<EventRecord>> ReadAllFromPrimaryAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken) =>
+        _virtual.ReadAllAsync(direction, from, head, count, cancellationToken);
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<EventPointer>> ReadPointersAsync(long from, long head, int count, CancellationToken cancellationToken)

@@ -78,6 +78,33 @@ public sealed class ReadOnlyConnectionTests(SqlServerTestDatabase database)
     }
 
     [Fact]
+    public async Task ReadAllAsync_FromTheMainConnection_ShouldKeepTheMetadataAnEventWasAppendedWith()
+    {
+        // Arrange: a second host over the same database with the read-only connection off, so
+        // every page of $all comes from the main connection. The store's own raw-events query
+        // loses the headers; the page must not.
+        var name = "replica" + Guid.NewGuid().ToString("N")[..8] + "-1";
+        var metadata = System.Text.Json.Nodes.JsonNode.Parse("{\"Source\":\"Checkout\",\"$correlationId\":\"c-1\"}")!.AsObject();
+        var appended = await database.Store.AppendAsync(name, StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"), metadata)], TestContext.Current.CancellationToken);
+        await ReachAsync(appended.Position);
+        using var host = await TestDatabases.StartHostAsync(database.Name, options => options.UseReadOnlyConnection = false);
+        try
+        {
+            // Act
+            var viaStream = (await host.Store().ReadAsync(name, Direction.Forwards, null, 1, TestContext.Current.CancellationToken)).ShouldNotBeNull().Events.ShouldHaveSingleItem();
+            var viaAll = (await host.Store().ReadAllAsync(Direction.Forwards, appended.Position, appended.Position, 1, TestContext.Current.CancellationToken)).ShouldHaveSingleItem();
+
+            // Assert
+            viaAll.Metadata.ToJsonString(NightingaleJson.Default).ShouldBe("{\"Source\":\"Checkout\",\"$correlationId\":\"c-1\"}");
+            viaAll.Metadata.ToJsonString(NightingaleJson.Default).ShouldBe(viaStream.Metadata.ToJsonString(NightingaleJson.Default));
+        }
+        finally
+        {
+            await host.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task ReadEventualAsync_WhenStreamsAreReadFromTheReadOnlyConnection_ShouldReturnTheStream()
     {
         // Arrange: a second host over the same database, asked to read plain streams the other way.
