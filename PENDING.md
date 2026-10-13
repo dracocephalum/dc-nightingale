@@ -215,8 +215,8 @@ here is re-derived:
 
 The reference keeps a stream's metadata as events of type `$metadata` in a
 stream of its own, `$$<stream>`, the last one in force: the reserved keys
-`$maxAge`, `$maxCount`, `$tb` (truncate before), `$cacheControl` and `$acl`,
-and whatever else the application puts there. It changes what a read of the
+`$maxAge`, `$maxCount`, `$tb` (truncate before), `$cacheControl`, `$tmp` and
+`$acl`, and whatever else the application puts there. It changes what a read of the
 stream returns and, for a soft delete alone, how an append to it is checked;
 a read of `$all` ignores it. Parity here is weighed against cost, as
 everywhere (*KurrentDB's own protocol* above): reads and appends stay as
@@ -240,12 +240,28 @@ re-derived:
   stream and a change of its metadata touch different streams and neither
   depends on the other, since metadata acts only when the stream is read.
   Tombstone removes the stream and its metadata stream in one transaction;
-  delete, the archive, leaves the metadata stream as it is.
+  delete, the archive, leaves the metadata stream as it is. A set does not
+  ask whether the stream exists, as in the reference, where setting
+  `$maxAge` before the first append is a common pattern: the metadata is in
+  force from the stream's first event. Since the gateway's tombstone frees
+  the name, a set after it is metadata for a new stream, where the reference,
+  whose tombstone keeps the name for good, refuses it.
 - **Written by the metadata call alone.** `Append` goes on refusing every `$`
-  name, so a `$$` stream is written only by `SetStreamMetadata`, which
-  validates the reserved keys' types and keeps the rest as JSON. `$acl` is
-  refused, with a reason of its own, until authentication carries stream ACLs
-  (*Authentication: what is left*).
+  name, so a `$$` stream is written only by `SetStreamMetadata`, which keeps
+  the application's keys as JSON. `$acl` is refused, with a reason of its
+  own, until authentication carries stream ACLs (*Authentication: what is
+  left*).
+- **Reserved keys are checked, and two are carried over without effect.** A
+  reserved key of the wrong type refuses the set, where the reference stores
+  it and then reads the stream's metadata as empty, every key dropped,
+  without a word. `$cacheControl`, a caching hint of the reference's HTTP
+  interface, and `$tmp`, which asks its scavenge to remove a deleted
+  stream's metadata too, are stored and returned so a client gets back what
+  it set, and have no effect in the gateway. The code keeps them in one
+  named list of keys carried over from the reference, each with what it
+  means there, so that supporting one is moving it out of that list and a
+  search shows which are still carried; `$tmp` gets its meaning with
+  physical removal (below).
 - **Enforced inside the read's own statement.** A read of a plain stream finds
   the last metadata event with a `TOP 1` seek on the same unique index, joined
   to the page by an `OUTER APPLY`, so it costs no round trip: the lower bound
@@ -354,7 +370,11 @@ re-derived:
   un-delete event, stores the negative `$tb` the adapter translates, and
   has one event where a set on a soft-deleted stream gives the reference
   two, so the reference's moment between them, with the caller's `$tb` in
-  force, does not exist here. And a change of metadata that un-deletes the stream
+  force, does not exist here. A wrongly typed reserved key is refused rather
+  than emptying the metadata; `$cacheControl` and `$tmp` are stored without
+  effect; and a set after a tombstone is accepted, a line for the existing
+  variance *A tombstoned stream reads as one that never existed*. And a
+  change of metadata that un-deletes the stream
   between a failed "no stream" append and its retry lets the retry through
   where the reference would refuse it; that window is a variance, not a
   lock.
