@@ -123,8 +123,29 @@ their license header and copyright, `NOTICE` names them, and the adapter
 says "compatible with", never more: the name is Kurrent, Inc.'s trademark,
 and the server is theirs; only the client and its protocol are Apache-2.0,
 and nothing of the server's source, which is under its own license, is read
-into this repository. What it takes, read from the client's source at its
-1.3.0 tag, so nothing here is re-derived:
+into this repository.
+
+When: once the gateway has most of what the reference's client calls, so
+the adapter is a mapping rather than a list of `Unimplemented` answers. The
+client discovers optional features through `ServerFeatures` and adapts, but
+a core call it makes unconditionally fails in front of the application, so
+parity comes first, in the order the client exposes it:
+
+1. **Stream metadata**, `$maxAge`, `$maxCount` and `$tb`, read and set as the
+   client's own calls do (*Stream metadata* below); `$acl` waits for the
+   authentication that is left.
+2. **Binary event bodies** (below): every append from the client carries a
+   content type, and one that is not JSON is refused today.
+3. **The small ones together**: `$bc-` by correlation id, `$streams`, and
+   the `Stop` action of a group's nack.
+4. **Multi-stream and conditional appends** (below), the client's newest.
+
+What the gateway has that the reference does not, deferred delivery, a
+client that resubscribes on its own, server-computed lag counts, waits for a
+consumer that asks and is not in the way.
+
+What it takes, read from the client's source at its 1.3.0 tag, so nothing
+here is re-derived:
 
 - **Services.** `event_store.client.streams.Streams`,
   `...persistent_subscriptions.PersistentSubscriptions`, `...gossip.Gossip`,
@@ -405,14 +426,67 @@ store unit `DESIGN.md` describes under *A registry of stores*: the management
 calls answer, the health endpoint says why, the operations that need nothing
 of what is missing still work, and the store is enabled once the schema is
 brought up to date, by a pipeline or by an operator. Migrations themselves
-then run beside the server rather than ahead of it. Two more pieces belong
+then run beside the server rather than ahead of it. One more piece belongs
 with it: `--schema-script <file>`, the delta the server would apply as one
 reviewable file, the event store's statements and the gateway's idempotent
 migration script in apply order, for the change too large to run at startup
 at all, an index over a very large events table say, which a database
 administrator runs by hand, the server accepting whatever matches its
-definition; and online or resumable index builds where the edition has them,
-an option appended to the index statements of that script.
+definition. How such an index is built without blocking the table is the
+next entry's.
+
+## Online and resumable index builds
+
+An index built over a large events table holds the table's schema lock for
+the whole build unless it is built online, and an online build that is
+stopped starts over unless it is resumable. The schema library writes plain
+index statements on SQL Server, where its PostgreSQL side has a concurrent
+option (`UPSTREAM.md`); since the server runs the statements the library
+writes itself (`DESIGN.md`, seam 3), it can add the options until the library
+does. The shape, decided so nothing here is re-derived:
+
+- **A rewrite of the index statements in the batches the server already
+  runs**, not a parser of SQL: a `CREATE [UNIQUE] [NONCLUSTERED] INDEX`
+  statement gets `WITH (ONLINE = ON, RESUMABLE = ON)` placed after its
+  column list, its `INCLUDE` and its `WHERE`, and before any `ON` that names
+  a filegroup or a partition scheme, where T-SQL wants it. A statement that
+  already carries a `WITH` is left alone, so the rewrite retires itself the
+  day the library writes the option. The library rebuilds an index it cannot
+  alter as a drop and a create; that pair becomes one create with
+  `DROP_EXISTING = ON`, so the old index serves until the new one is built.
+- **Where the edition has it.** Online and resumable builds are Enterprise,
+  Developer and Azure SQL only, `SERVERPROPERTY('EngineEdition')` 3, 5 or 8;
+  elsewhere the statements run as the library wrote them. The script the
+  previous entry exports carries the choice into the statement itself, built
+  in dynamic SQL with the option appended when the edition reports one of
+  those, since it runs on a server the gateway has not seen.
+- **The lock wait inside the statement.** An online build still takes the
+  table's schema lock briefly at its start and its end, and a build queued for
+  it behind a long reader queues everything after it, the reason
+  `Nightingale:SchemaLockWaitTimeout` exists. An online statement carries its
+  own low-priority wait from the same setting, `WAIT_AT_LOW_PRIORITY
+  (MAX_DURATION = …, ABORT_AFTER_WAIT = SELF)`, which waits without holding
+  anyone up; its duration counts whole minutes, and which versions accept it
+  on a create rather than a rebuild is to be checked against the servers the
+  gateway supports when the slice starts.
+- **A paused build is not a missing index.** A resumable build that was
+  stopped leaves its index in the catalog, disabled, with a row in
+  `sys.index_resumable_operations`; the schema comparison would read it as an
+  index to create and try to create it over the paused one. While such a row
+  exists for one of the store's tables, an apply refuses and names it, and
+  the operator resumes or aborts it.
+- **Nothing the comparison sees.** Online and resumable are how an index is
+  built, not what it is: nothing of them is in the catalog afterwards, so a
+  store whose indexes were built online compares as current.
+- **Held by name.** A test asserts that every index the gateway adds to the
+  events table comes out of the rewrite with the options, so a change in how
+  the library writes them fails the build rather than silently building
+  offline; the store's own indexes get the options where the rewrite finds
+  them.
+
+What it does not cover: adding a column to a large table, the persisted
+category column of a store taking ordinals later say, is a change to every
+row, online or not, and stays a change to run by hand.
 
 ## Binary event bodies, beside the JSON one
 
