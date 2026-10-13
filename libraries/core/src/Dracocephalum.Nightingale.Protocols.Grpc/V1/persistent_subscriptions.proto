@@ -165,6 +165,15 @@ message GroupSettings {
   // ROUND_ROBIN; see ConsumerStrategy in shared.proto. Changed through
   // Update like the other settings; the consumers connect again under it.
   ConsumerStrategy consumer_strategy = 12;
+
+  // What the group keeps of $all, by stream name or event type; unset for
+  // everything. $all only: FILTER_NOT_ALLOWED on any other stream. Fixed when
+  // the group is created, since the checkpoint means what the filter kept;
+  // a consumer that wants another filter creates another group, and Update
+  // refuses one with INVALID_ARGUMENT. The checkpoint advances over a
+  // stretch the filter keeps nothing of, so a restart reads nothing twice.
+  // See Filter in shared.proto.
+  Filter filter = 13;
 }
 
 message UpdateRequest {

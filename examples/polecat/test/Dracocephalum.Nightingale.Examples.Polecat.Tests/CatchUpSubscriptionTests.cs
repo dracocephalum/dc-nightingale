@@ -28,5 +28,13 @@ public sealed class CatchUpSubscriptionTests(SharedRun.Fixture fixture)
         report.AllConfirmedHead.ShouldBe(report.AppendedPosition);
         report.Live.ShouldBe(["order_shipped"]);
         report.AllLive.ShouldBe([report.Stream + ":order_shipped", "shipments-" + report.Stream["orders-".Length..] + ":shipment_dispatched"]);
+
+        // The filter keeps the three orders and not the shipment; a checkpoint carries the
+        // shipment's position, the last examined, past the last order; the group's checkpoint
+        // stands there too once the orders are acknowledged.
+        report.FilteredCaughtUp.ShouldBe(["order_placed", "order_paid", "order_shipped"]);
+        report.FilteredCheckpoint.ShouldNotBeNull().ShouldBe(report.AppendedPosition + 2);
+        report.GroupDelivered.ShouldBe(["order_placed", "order_paid", "order_shipped"]);
+        report.GroupCheckpoint.ShouldBe(report.FilteredCheckpoint);
     }
 }

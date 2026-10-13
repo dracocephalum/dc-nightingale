@@ -35,7 +35,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     /// over a stretch the filter keeps nothing of, and what a subscription's checkpoint advances
     /// by at most at a time.
     /// </summary>
-    public const int ScanWindow = 4096;
+    public const int ScanWindow = EventSource.ScanWindow;
 
     /// <summary>
     /// After how many positions examined without an event to deliver a filtered subscription is

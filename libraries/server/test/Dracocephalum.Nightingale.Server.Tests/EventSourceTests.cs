@@ -32,16 +32,16 @@ public sealed class EventSourceTests
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record(2, 20)]));
         A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 1, 10, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record(1, 22), Record(2, 20)]));
-        var feed = EventSource.FollowAsync(store, tail, router, "orders-1", 0, 10, Numbering.Global, TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        var feed = EventSource.FollowAsync(store, tail, router, "orders-1", 0, 10, Numbering.Global, null, TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
 
         // Act
         var delivered = new List<long>();
         await feed.MoveNextAsync();
-        delivered.Add(feed.Current.Revision);
+        delivered.Add(feed.Current.Record!.Revision);
         tail.Advance(20);
         while (delivered.Count < 3 && await feed.MoveNextAsync())
         {
-            delivered.Add(feed.Current.Revision);
+            delivered.Add(feed.Current.Record!.Revision);
         }
 
         await feed.DisposeAsync();
@@ -80,8 +80,8 @@ public sealed class EventSourceTests
 
         // Act: the first event the feed yields. A feed that waits on an advance instead is
         // waiting on something that never comes, and is abandoned.
-        var feed = EventSource.FollowAsync(store, tail, router, "$ce-orders", 8, 10, Numbering.Ordinal, abandon.Token).GetAsyncEnumerator(abandon.Token);
-        var delivered = await feed.MoveNextAsync() ? feed.Current : null;
+        var feed = EventSource.FollowAsync(store, tail, router, "$ce-orders", 8, 10, Numbering.Ordinal, null, abandon.Token).GetAsyncEnumerator(abandon.Token);
+        var delivered = await feed.MoveNextAsync() ? feed.Current.Record : null;
         await feed.DisposeAsync();
 
         // Assert: found on the look the numbering woke, not waited for behind an append that never comes.

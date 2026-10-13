@@ -257,6 +257,45 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Delivery_OfAFilteredAllGroup_ShouldDeliverWhatTheFilterKeepsAndAdvanceTheCheckpointOverTheRest()
+    {
+        // Arrange: a hundred positions of which one, at 40, is the group's; the scan keeps it and
+        // says it looked through 100. Then the tail brings three events of which the middle one is
+        // the group's, read by the router.
+        var filter = EventTypeFilter.Prefix("order_");
+        _tail.Advance(100);
+        A.CallTo(() => _store.ScanAllAsync(A<EventFilter>.That.Matches(f => f.Target == EventFilterTarget.EventType), Direction.Forwards, 0, 100, EventSource.ScanWindow, 500, A<CancellationToken>._))
+            .Returns(new ScannedSlice([Record("orders-1", 0, 40)], 100));
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 101, 103, A<int>._, A<CancellationToken>._))
+            .Returns([Shipment("shipments-1", 0, 101), Record("orders-2", 0, 102), Shipment("shipments-1", 1, 103)]);
+        await using var sut = Group("$all", -1, 2, settings => settings with { Start = StreamPosition.Start, Filter = filter, CheckpointUpperBound = 2, CheckpointLowerBound = 1 });
+
+        // Act
+        var first = await Next(sut);
+        var beforeAcknowledging = sut.Checkpoint;
+        await sut.AcknowledgeAsync([first.Record.Id]);
+        var afterTheStretch = sut.Checkpoint;
+        _tail.Advance(103);
+        var second = await Next(sut);
+        await WaitUntilAsync(() => sut.Checkpoint == 101, () => $"checkpoint {sut.Checkpoint} after the second event, before acknowledging it");
+        var beforeTheSecond = sut.Checkpoint;
+        await sut.AcknowledgeAsync([second.Record.Id]);
+        await WaitUntilAsync(() => sut.Checkpoint == 103, () => $"checkpoint {sut.Checkpoint} after acknowledging the second event");
+
+        // Assert: the stretch after 40 is done once 40 is; the shipment at 101 is done before the
+        // order at 102 is, and the one at 103 once it is. Two things done, the order at 40 and the
+        // stretch through 101, make a write due, and the stretch itself is what triggers it: the
+        // write carries 101, a position the filter kept nothing at, with no acknowledgement to
+        // prompt it.
+        first.Record.Position.ShouldBe(40);
+        beforeAcknowledging.ShouldBe(-1);
+        afterTheStretch.ShouldBe(100);
+        second.Record.Position.ShouldBe(102);
+        beforeTheSecond.ShouldBe(101);
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 101, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public async Task Dispose_ShouldWriteTheCheckpointWhateverThePolicySays()
     {
         // Arrange
@@ -492,6 +531,9 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     private static EventRecord Record(string stream, long revision, long position, string? correlationId = null) =>
         new(Guid.NewGuid(), stream, revision, position, "order_placed", Now, Encoding.UTF8.GetBytes("{}"), correlationId is null ? new JsonObject() : new JsonObject { [MetadataKeys.CorrelationId] = correlationId });
 
+    private static EventRecord Shipment(string stream, long revision, long position) =>
+        new(Guid.NewGuid(), stream, revision, position, "shipment_sent", Now, Encoding.UTF8.GetBytes("{}"), new JsonObject());
+
     private static async Task<PersistentSubscriptionMessage.Recorded> Next(SubscriptionConsumer consumer) =>
         await consumer.Outgoing.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(Wait);
 
@@ -509,14 +551,14 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     private async Task<PersistentSubscriptionMessage.Recorded> Next(SubscriptionGroupRuntime group) => await Next(_consumer!);
 
     /// <summary>Polls for something the group does on its own thread, within the usual wait.</summary>
-    private static async Task WaitUntilAsync(Func<bool> condition)
+    private static async Task WaitUntilAsync(Func<bool> condition, Func<string>? state = null)
     {
         var deadline = DateTimeOffset.UtcNow + Wait;
         while (!condition())
         {
             if (DateTimeOffset.UtcNow > deadline)
             {
-                throw new TimeoutException("The condition was not met in time.");
+                throw new TimeoutException(state is null ? "The condition was not met in time." : $"The condition was not met in time: {state()}.");
             }
 
             await Task.Delay(10, TestContext.Current.CancellationToken);

@@ -22,6 +22,10 @@ public static class Scenario
     /// <param name="AllConfirmedHead">The head the <c>$all</c> subscription was confirmed with.</param>
     /// <param name="Live">Event types the stream subscription delivered live.</param>
     /// <param name="AllLive">Stream and type of every event the <c>$all</c> subscription delivered live, in position order.</param>
+    /// <param name="FilteredCaughtUp">Event types the filtered <c>$all</c> subscription delivered before it reported it had caught up.</param>
+    /// <param name="FilteredCheckpoint">The position the filtered subscription's checkpoint carried: the last examined, which the filter did not keep.</param>
+    /// <param name="GroupDelivered">Event types the filtered group delivered and the run acknowledged.</param>
+    /// <param name="GroupCheckpoint">The group's checkpoint as the store has it once the orders were acknowledged.</param>
     public sealed record Report(
         string Stream,
         long AppendedPosition,
@@ -30,7 +34,11 @@ public static class Scenario
         long CaughtUpHead,
         long AllConfirmedHead,
         IReadOnlyList<string> Live,
-        IReadOnlyList<string> AllLive);
+        IReadOnlyList<string> AllLive,
+        IReadOnlyList<string> FilteredCaughtUp,
+        long? FilteredCheckpoint,
+        IReadOnlyList<string> GroupDelivered,
+        long? GroupCheckpoint);
 
     /// <summary>Runs the scenario.</summary>
     /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
@@ -86,11 +94,71 @@ public static class Scenario
 
         await output.WriteLineAsync($"8. The $all subscription delivered {string.Join(", ", allLive)} in position order.").ConfigureAwait(false);
 
+        // A filter keeps, of $all, the events whose stream name or type begins with a prefix;
+        // the shipment's position is examined and not delivered, and a checkpoint carries it.
+        await using var filteredSubscription = client.SubscribeToAllAsync(StreamPosition.Start, EventTypeFilter.Prefix("order_"), checkpointInterval: 1, cancellationToken: cancellationToken);
+        var filteredMessages = filteredSubscription.Messages.GetAsyncEnumerator(cancellationToken);
+        var filteredCaughtUp = new List<string>();
+        long? checkpointed = null;
+        while (await filteredMessages.MoveNextAsync().ConfigureAwait(false) && filteredMessages.Current is not SubscriptionMessage.CaughtUp)
+        {
+            switch (filteredMessages.Current)
+            {
+                case SubscriptionMessage.Recorded recorded:
+                    filteredCaughtUp.Add(recorded.Record.Type);
+                    break;
+                case SubscriptionMessage.Checkpoint checkpoint:
+                    checkpointed = checkpoint.Position;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        await filteredMessages.DisposeAsync().ConfigureAwait(false);
+        await output.WriteLineAsync($"9. Subscribed to $all from the start with the filter EventTypeFilter.Prefix(\"order_\"): caught up after {string.Join(", ", filteredCaughtUp)}, the shipment left out, and a checkpoint at {checkpointed} let the position move past it.").ConfigureAwait(false);
+
+        // A persistent group takes the same filter, fixed when it is created; its checkpoint
+        // advances over what the filter did not keep, so a consumer coming back reads nothing twice.
+        const string group = "orders-only";
+        await client.CreatePersistentSubscriptionAsync(StreamNames.All, group, GroupSettings.Default with { Start = StreamPosition.Start, Filter = StreamFilter.Prefix("orders-"), CheckpointUpperBound = 1, CheckpointLowerBound = 1 }, cancellationToken).ConfigureAwait(false);
+        var groupDelivered = new List<string>();
+        await using (var groupSubscription = await client.SubscribeToPersistentSubscriptionAsync(StreamNames.All, group, bufferSize: 5, cancellationToken).ConfigureAwait(false))
+        {
+            var groupMessages = groupSubscription.GetAsyncEnumerator(cancellationToken);
+            while (groupDelivered.Count < 3 && await groupMessages.MoveNextAsync().ConfigureAwait(false))
+            {
+                groupDelivered.Add(groupMessages.Current.Record.Type);
+                await groupSubscription.AckAsync(groupMessages.Current.Record.Id).ConfigureAwait(false);
+            }
+
+            await groupMessages.DisposeAsync().ConfigureAwait(false);
+        }
+
+        var groupCheckpoint = await WaitForCheckpointAsync(client, group, checkpointed ?? -1, cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"10. Created the group {group} over $all with the filter StreamFilter.Prefix(\"orders-\"), consumed and acknowledged {string.Join(", ", groupDelivered)}; its checkpoint stands at {groupCheckpoint}, the shipment's position, which the filter examined and did not keep.").ConfigureAwait(false);
+
         await streamMessages.DisposeAsync().ConfigureAwait(false);
         await allMessages.DisposeAsync().ConfigureAwait(false);
-        await output.WriteLineAsync("9. Disposed both subscriptions.").ConfigureAwait(false);
+        await output.WriteLineAsync("11. Disposed the subscriptions.").ConfigureAwait(false);
 
-        return new Report(orders, appended.Position, confirmed.Head, caughtUp, caughtUpNote.Head, allConfirmed.Head, live, allLive);
+        return new Report(orders, appended.Position, confirmed.Head, caughtUp, caughtUpNote.Head, allConfirmed.Head, live, allLive, filteredCaughtUp, checkpointed, groupDelivered, groupCheckpoint);
+    }
+
+    /// <summary>Asks about the group until its checkpoint, written after the acknowledgements, has reached a position.</summary>
+    private static async Task<long?> WaitForCheckpointAsync(NightingaleClient client, string group, long expected, CancellationToken cancellationToken)
+    {
+        var deadline = TimeProvider.System.GetUtcNow() + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            var info = await client.GetPersistentSubscriptionInfoAsync(StreamNames.All, group, cancellationToken).ConfigureAwait(false);
+            if (info.Checkpoint >= expected || TimeProvider.System.GetUtcNow() > deadline)
+            {
+                return info.Checkpoint;
+            }
+
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Reads messages, collecting the events, until a message of the given kind arrives.</summary>

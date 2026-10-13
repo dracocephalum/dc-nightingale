@@ -77,6 +77,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     MaxSubscriberCount = table.Column<int>(type: "int", nullable: false),
                     Numbering = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
                     ConsumerStrategy = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
+                    Filter = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     CheckpointPosition = table.Column<long>(type: "bigint", nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
                     LiveSnapshotAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),

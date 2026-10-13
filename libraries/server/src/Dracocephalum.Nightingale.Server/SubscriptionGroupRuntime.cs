@@ -45,7 +45,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     private readonly Queue<InFlight> _retries = [];
     private readonly HashSet<Guid> _queued = [];
     private readonly List<SubscriptionConsumer> _consumers = [];
-    private readonly Channel<EventRecord> _live = Channel.CreateBounded<EventRecord>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = true });
+    private readonly Channel<FeedItem> _live = Channel.CreateBounded<FeedItem>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = true });
     private readonly Channel<bool> _wakes = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private readonly SemaphoreSlim _draining = new(1, 1);
     private readonly DateTimeOffset _startedAt;
@@ -61,6 +61,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     private Exception? _failure;
     private long _checkpoint;
     private long _written;
+    private long _scannedThrough = -1;
     private int _doneSinceWrite;
     private DateTimeOffset _lastWrite;
 
@@ -435,6 +436,34 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
             _delivered.Remove(first.Key);
             _checkpoint = Math.Max(_checkpoint, first.Key);
         }
+
+        AdvanceOverScanned();
+    }
+
+    /// <summary>
+    /// A stretch of <c>$all</c> the group's filter kept nothing of, examined up to a position:
+    /// done as a whole, the moment nothing delivered before it is still undone. Under the lock.
+    /// </summary>
+    private void MarkScanned(long through)
+    {
+        _scannedThrough = Math.Max(_scannedThrough, through);
+        if (AdvanceOverScanned())
+        {
+            _doneSinceWrite++;
+        }
+    }
+
+    /// <summary>Moves the checkpoint to the end of the stretch examined, once nothing undone lies below it. Under the lock.</summary>
+    /// <returns>Whether the checkpoint moved.</returns>
+    private bool AdvanceOverScanned()
+    {
+        if (_scannedThrough <= _checkpoint || (_delivered.Count > 0 && _delivered.First().Key <= _scannedThrough))
+        {
+            return false;
+        }
+
+        _checkpoint = _scannedThrough;
+        return true;
     }
 
     /// <summary>Gives a delivered event's slot back to its consumer, and lets the dispatcher know there is room. Under the lock.</summary>
@@ -560,9 +589,9 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         {
             await DrainOutboxAsync(cancellationToken).ConfigureAwait(false);
             var from = _from ?? await HeadAsync(cancellationToken).ConfigureAwait(false) + 1;
-            await foreach (var record in EventSource.FollowAsync(_store, _tail, _router, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, cancellationToken).ConfigureAwait(false))
+            await foreach (var item in EventSource.FollowAsync(_store, _tail, _router, _definition.Stream, from, _definition.Settings.BufferSize, _definition.Settings.Numbering, _definition.Settings.Filter, cancellationToken).ConfigureAwait(false))
             {
-                await _live.Writer.WriteAsync(record, cancellationToken).ConfigureAwait(false);
+                await _live.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -659,8 +688,10 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         while (true)
         {
             Task arrived;
+            var scanned = false;
             lock (_gate)
             {
+                arrived = _retryArrived.Task;
                 if (_retries.TryDequeue(out var retry))
                 {
                     _queued.Remove(retry.Record.Id);
@@ -673,12 +704,25 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                     return (held, false);
                 }
 
-                if (_live.Reader.TryRead(out var record))
+                if (_live.Reader.TryRead(out var item))
                 {
-                    return (new InFlight(record, 0, default, false, Guid.Empty), false);
-                }
+                    if (item.Record is { } record)
+                    {
+                        return (new InFlight(record, 0, default, false, Guid.Empty), false);
+                    }
 
-                arrived = _retryArrived.Task;
+                    // A stretch the feed examined with nothing for the group, read after every
+                    // event before it was taken from the feed: done as a whole, and written when
+                    // that makes a write due, since no acknowledgement may follow for a long time.
+                    MarkScanned(item.ScannedThrough);
+                    scanned = true;
+                }
+            }
+
+            if (scanned)
+            {
+                await WriteCheckpointIfDueAsync(false, cancellationToken).ConfigureAwait(false);
+                continue;
             }
 
             var live = _live.Reader.WaitToReadAsync(cancellationToken).AsTask();

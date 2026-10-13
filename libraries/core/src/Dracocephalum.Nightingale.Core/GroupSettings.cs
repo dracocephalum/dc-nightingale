@@ -23,6 +23,9 @@ namespace Dracocephalum.Nightingale;
 /// the position a parked message is replayed by. <see cref="Numbering.Ordinal"/> only over a virtual stream on a
 /// store with ordinals; a consumer that wants the other numbering creates another group.</param>
 /// <param name="ConsumerStrategy">How the group shares its events among its consumers; <see cref="ConsumerStrategy.RoundRobin"/> unless said otherwise.</param>
+/// <param name="Filter">What the group keeps of <c>$all</c>, by stream name or event type, fixed when it is created; <see langword="null"/> for everything.
+/// <c>$all</c> only: a stream and a virtual stream are already a selection. The group's checkpoint advances over a stretch the filter keeps nothing of,
+/// so a restart reads nothing twice.</param>
 public sealed record GroupSettings(
     StreamPosition Start,
     TimeSpan MessageTimeout,
@@ -33,7 +36,8 @@ public sealed record GroupSettings(
     int BufferSize,
     int MaxSubscriberCount,
     Numbering Numbering = Numbering.Global,
-    ConsumerStrategy ConsumerStrategy = ConsumerStrategy.RoundRobin)
+    ConsumerStrategy ConsumerStrategy = ConsumerStrategy.RoundRobin,
+    EventFilter? Filter = null)
 {
     /// <summary>The defaults.</summary>
     public static GroupSettings Default { get; } = new(
