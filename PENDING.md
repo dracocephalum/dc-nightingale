@@ -22,7 +22,8 @@ in order:
   credential that is there.
 - **A pepper that never leaves a key vault**, an implementation of the pepper
   step that asks the vault to HMAC, behind the same seam.
-- **Stream ACLs**, with stream metadata below.
+- **Stream ACLs**, the `$acl` key of stream metadata, which is refused until
+  then (*Stream metadata* below).
 
 ## Protocols beyond gRPC
 
@@ -169,13 +170,29 @@ here is re-derived:
   `content-type` and `created` in ticks; Basic credentials in
   `authorization`, as ours; `connection-name` and `requires-leader` headers
   read and ignored.
-- **Not carried, answered `Unimplemented` until the core has them:** filters
-  on `$all`, stream metadata (the `$$` streams), multi-stream append,
-  projections, operations such as scavenge, and user management beyond what
-  the credentials table covers. The client refuses what the feature table
-  does not advertise rather than degrading.
+- **Index reads.** The reference's secondary indexes, `$idx-all`,
+  `$idx-ce-<category>` and `$idx-et-<type>`, are not streams a client reads
+  by name: a read or a catch-up subscription of `$all` whose filter is a
+  stream prefix naming exactly one index is served from the index instead of
+  the log, in `$all` positions, and the reference's groups have no such path,
+  so a group filtered that way matches nothing there. `$idx-all` holds the
+  events of non-system streams whose type is not a system one. The adapter
+  maps the filter to a stream: `$idx-all` to `$de`, `$idx-ce-<category>` to
+  `$ce-<category>` and `$idx-et-<type>` to `$et-<type>`, read by position, a
+  group's filter included, so the reference's gap is not reproduced. The
+  `$idx-` filter stays the adapter's: the gateway's own contract names the
+  streams.
+- **Not carried, answered `Unimplemented` until the core has them:** stream
+  metadata (the `$$` streams), multi-stream append, projections, operations
+  such as scavenge, and user management beyond what the credentials table
+  covers. The client refuses what the feature table does not advertise rather
+  than degrading.
 - **Tenancy.** The KurrentDB client knows no tenant: a host binds the adapter
-  to one tenant, or a credential carries its tenant.
+  to one tenant, or the credential carries it, which the gateway already
+  does: a credential bound to a tenant that names none works in its own.
+  `$all` is then the tenant's, which on a store keeping many tenants on the
+  shared sequence wants *One tenant's `$all` by index* below, or partitioning
+  by tenant.
 - **Testing.** The official client package against this server, the client's
   checkout as the reference for behaviour; its own test suite is the
   conformance suite where it can run against another server.
@@ -186,11 +203,73 @@ here is re-derived:
 
 ## Stream metadata
 
-`$maxAge`, `$maxCount` and `$tb` (truncate before) stored as one document per
-stream and enforced at read time: a read filters versions below the truncate
-point, outside the age window, or beyond the last N. Physical removal of the
-filtered events is a separate maintenance job, the analogue of a scavenge.
-`$acl` arrives with authentication.
+The reference keeps a stream's metadata as events of type `$metadata` in a
+stream of its own, `$$<stream>`, the last one in force: the reserved keys
+`$maxAge`, `$maxCount`, `$tb` (truncate before), `$cacheControl` and `$acl`,
+and whatever else the application puts there. It changes what a read of the
+stream returns, and nothing else: a read of `$all` ignores it. The shape,
+decided so nothing here is re-derived:
+
+- **Stored as events, in the events table.** `SetStreamMetadata` appends a
+  `$metadata` event to `$$<stream>` and `GetStreamMetadata` reads the last
+  one; a read of `$$<stream>` returns the history as real events. The gateway
+  keeps no table of its own for it, because a table would take the changes
+  out of the one sequence: a replication or a migration that reads `$all`
+  from the start needs a change of metadata in its place among the events
+  around it, or it applies a soft delete and the stream's recreation in the
+  wrong order, and the history is the audit of who changed a stream's
+  retention, and when. Every metadata event is kept; they are small and rare.
+- **Concurrency is the store's.** A set carries an expected revision of the
+  metadata stream, and two sets from two instances race on the store's unique
+  index of tenant, stream and version, as any two appends do. An append to the
+  stream and a change of its metadata touch different streams and neither
+  depends on the other, since metadata acts only when the stream is read.
+  Tombstone removes the stream and its metadata stream in one transaction;
+  delete, the archive, leaves the metadata stream as it is.
+- **Written by the metadata call alone.** `Append` goes on refusing every `$`
+  name, so a `$$` stream is written only by `SetStreamMetadata`, which
+  validates the reserved keys' types and keeps the rest as JSON. `$acl` is
+  refused, with a reason of its own, until authentication carries stream ACLs
+  (*Authentication: what is left*).
+- **Enforced inside the read's own statement.** A read of a plain stream finds
+  the last metadata event with a `TOP 1` seek on the same unique index, joined
+  to the page by an `OUTER APPLY`, so it costs no round trip: the lower bound
+  `max(last − $maxCount + 1, $tb)` becomes a seek bound on that index, and
+  `$maxAge` a check of each row's timestamp. A stream without metadata finds
+  nothing in that one probe and reads as it does today, so a store that never
+  sets metadata pays a probe of a few index pages per read and nothing else.
+  Reads of plain streams move from the store's fetch to the gateway's mirror
+  of the events table for it, as the pages of `$all` did. A subscription or a
+  group on the stream starts from the same bound. Neither `$all` nor a virtual
+  stream applies metadata, as in the reference. Nothing is cached: every
+  instance appends, and a cache would learn of a change only through the tail,
+  a polling interval late, serving meanwhile events a new `$maxCount` has cut.
+  If a measurement ever asks for less than the probe, the way out is a store
+  setting fixed at initialization that refuses metadata and skips it, not a
+  cache.
+- **`$all` becomes the whole log, and two streams select from it.** With
+  metadata stored as events, `$all` carries them as the reference's does, and
+  the variance *`$all` holds only application events* goes. `$de`, the data
+  events, is `$all` without the events whose type begins with `$`, the
+  reference's `ExcludeSystemEvents`, at the cost of `$all`: the same range of
+  the clustered position, with the type checked on rows that are read anyway.
+  It is read by position and has no ordinals, since numbering it would write
+  every row a second time. `$mde`, the metadata events, is `$et-$metadata`
+  under another name, one seek on `ix_pc_events_type_seq`, since `$metadata`
+  is the only system type the table holds. Both are streams, so reads,
+  catch-up subscriptions and groups all take them. Category ordinals are
+  unaffected: `$$orders-1` is in the category `$$orders`, never `orders`.
+- **Checked in the reference when the slice starts:** whether an append's
+  expected revision takes `$tb` into account, an expected "no stream" after a
+  soft delete, say. If it does not, the check stays against the stream's last
+  version and nothing more is needed. If it does, the append reads the
+  metadata stream and writes the stream, and a change landing in between from
+  another instance has to be excluded, by a lock on the metadata stream's last
+  row inside the append's transaction, which only streams with metadata pay.
+- **Physical removal** of the events metadata hides is a separate maintenance
+  job, the analogue of a scavenge, and a slice of its own; whether the store
+  can delete a stream's events below a version, or that is a request in
+  `UPSTREAM.md`, is the first thing it finds out.
 
 ## Multi-stream and conditional appends
 
@@ -286,6 +365,47 @@ multi-store one points the control plane elsewhere without a change of shape;
 the tenant and store refresh is the cadence `TenantRefresher` already runs. A
 tenant moving between stores is an export and an import with positions
 renumbered, never a transparent feature.
+
+## One tenant's `$all` by index
+
+On a store that keeps its tenants on the shared sequence, a tenant's `$all`
+is a range of the clustered position with the tenant checked on every row
+read, since the store has no index of tenant and position: a catch-up reads
+every tenant's rows to return one tenant's, a hundred for one on a store of a
+hundred tenants of a size. The live tail is short and does not notice;
+replaying history does. Partitioning by tenant avoids it, a sequence per
+tenant clustered on its own, at the price of the wildcard read across
+tenants. The other way, decided so nothing here is re-derived:
+
+- **The index.** `ix_pc_events_tenant_seq` on tenant and position, filtered
+  on the archived flag like the gateway's other indexes, with `is_system`
+  included: a computed column, whether the type begins with `$`, which `$de`
+  brings (*Stream metadata*). The column is not persisted, so no row is
+  rewritten to add it, only the index built; that a column computed and not
+  persisted can be included in a filtered index is checked on a real server
+  first, the category column of `ix_pc_events_category_seq` being persisted.
+- **One lookup per event, as in the reference.** A tenant's `$all` is a seek
+  on tenant and position, in position order so a page stops early, with a
+  lookup of each row's body in the clustered index. The reference's own index
+  reads cost the same, positions from the index and then a read of each
+  record. A tenant's `$de` checks the included flag on the index entry before
+  the lookup, so a system event costs a skipped entry, never a row.
+- **The reader chooses the path, not the optimizer.** For a tenant that is
+  the whole store the clustered range is the cheaper, and a plan cached for a
+  small tenant and reused for a large one, or the reverse, picks wrong. So
+  the index serves a tenant's scope, and the clustered range the default
+  scope and the read across all tenants.
+- **Only where it pays.** A store that keeps tenants on the shared sequence;
+  partitioned by tenant, the clustered key already leads with the tenant, and
+  a store of one tenant needs neither. Added to an existing store, it is an
+  index build over the whole table, which *Online and resumable index builds*
+  takes care of.
+- **Later, if a store asks.** Where system events are many, the flag can be a
+  key column instead, tenant, flag and position, so `$de` seeks past them. It
+  would be an index of its own beside this one, since `$all` needs one range
+  in position order and the flag in the key splits it in two, and so a store
+  setting the reader reads, since the reader chooses its path itself. Until a
+  store asks, the included flag serves both streams.
 
 ## Range partitioning of the events table
 

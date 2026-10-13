@@ -415,8 +415,10 @@ soft-deleted stream with continuing revision numbers has no counterpart.
 **Reference:** `$maxAge`, `$maxCount`, `$tb` (truncate before) and `$acl` on
 a stream's metadata change what a read returns and who may read it.
 
-**Nightingale:** stream metadata can be stored and read back but none of it is
-enforced yet. See `PENDING.md` for the intended read-time enforcement.
+**Nightingale:** there is no stream metadata yet: no call sets or reads it,
+and a `$$` stream is refused like every `$` name. See `PENDING.md`, *Stream
+metadata*, for the shape decided; `$acl` will be refused until stream ACLs
+arrive with authentication.
 
 ## An append is limited by its number of events
 
