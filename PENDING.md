@@ -441,25 +441,50 @@ An index built over a large events table holds the table's schema lock for
 the whole build unless it is built online, and an online build that is
 stopped starts over unless it is resumable. The schema library writes plain
 index statements on SQL Server, where its PostgreSQL side has a concurrent
-option (`UPSTREAM.md`); since the server runs the statements the library
-writes itself (`DESIGN.md`, seam 3), it can add the options until the library
-does. The shape, decided so nothing here is re-derived:
+option (`UPSTREAM.md`). Rather than wait for it, or rewrite the text it
+writes, the gateway takes the events table's indexes out of the library's
+hands and applies them itself. The shape, decided so nothing here is
+re-derived:
 
-- **A rewrite of the index statements in the batches the server already
-  runs**, not a parser of SQL: a `CREATE [UNIQUE] [NONCLUSTERED] INDEX`
-  statement gets `WITH (ONLINE = ON, RESUMABLE = ON)` placed after its
-  column list, its `INCLUDE` and its `WHERE`, and before any `ON` that names
-  a filegroup or a partition scheme, where T-SQL wants it. A statement that
-  already carries a `WITH` is left alone, so the rewrite retires itself the
-  day the library writes the option. The library rebuilds an index it cannot
-  alter as a drop and a create; that pair becomes one create with
-  `DROP_EXISTING = ON`, so the old index serves until the new one is built.
-- **Where the edition has it.** Online and resumable builds are Enterprise,
-  Developer and Azure SQL only, `SERVERPROPERTY('EngineEdition')` 3, 5 or 8;
-  elsewhere the statements run as the library wrote them. The script the
-  previous entry exports carries the choice into the statement itself, built
-  in dynamic SQL with the option appended when the edition reports one of
-  those, since it runs on a server the gateway has not seen.
+- **Every index of `pc_events`, the store's and the gateway's.** The
+  definitions stay where they are made: the store's come from its own feature
+  and the gateway's from the patched one, rebuilt on every build, so an
+  upgrade of the store that changes an index still shows as a difference.
+  The patched feature moves them off the table definition and names each one
+  ignored (`IgnoreIndex`, which the schema library honours on SQL Server from
+  9.27, and which refuses a name the table still defines, so it is a move, not
+  a mark); the library then neither creates, compares nor drops them, and
+  manages the columns, the key and the partitioning as before.
+- **The comparison is the gateway's, on the library's own terms.** The table
+  as it is comes from the library's `FetchExistingAsync`, and each definition
+  is held against the index of its name with the library's `Matches`, the
+  canonical comparison the library itself uses, so it is exactly as strict: a
+  definition with no index is one to create, one whose index differs is one to
+  rebuild, and an index no definition names is one to drop, as the library
+  drops it today. Nothing is parsed: the statements are written from the
+  definitions, which carry the columns, uniqueness, included columns and
+  filter.
+- **The order is the whole difficulty.** A column an index uses cannot be
+  dropped or altered while the index stands, and an index cannot be built on a
+  column that is not there yet. So an apply runs in three steps around the
+  library's batches for the table: first, the indexes to drop, and every index
+  that uses a column the library is about to drop or alter, read from the
+  difference between the table's columns as defined and as fetched; then the
+  library's batches; then the indexes to create, and the ones to rebuild, as a
+  create with `DROP_EXISTING = ON` where the old index still stands, so it
+  serves until the new one is built, and a plain create where the first step
+  dropped it. Every combination is held by an integration test against a real
+  server: an index on a column added in the same apply, one on a column
+  dropped, one on a column whose type changes, a changed filter, a changed
+  uniqueness, an index renamed, an extra index, and each of those on a table
+  partitioned by tenant and by the archived flag.
+- **Online and resumable where the edition has them.** A create carries
+  `WITH (ONLINE = ON, RESUMABLE = ON)` on Enterprise, Developer and Azure SQL,
+  `SERVERPROPERTY('EngineEdition')` 3, 5 or 8, and runs offline elsewhere. On
+  a partitioned table SQL Server aligns the index with the table's scheme by
+  itself, so no `ON` clause is written. The script `--schema-script` exports
+  makes the choice in the statement itself, as dynamic SQL, since it runs on a
+  server the gateway has not seen.
 - **The lock wait inside the statement.** An online build still takes the
   table's schema lock briefly at its start and its end, and a build queued for
   it behind a long reader queues everything after it, the reason
@@ -471,18 +496,17 @@ does. The shape, decided so nothing here is re-derived:
   gateway supports when the slice starts.
 - **A paused build is not a missing index.** A resumable build that was
   stopped leaves its index in the catalog, disabled, with a row in
-  `sys.index_resumable_operations`; the schema comparison would read it as an
-  index to create and try to create it over the paused one. While such a row
-  exists for one of the store's tables, an apply refuses and names it, and
-  the operator resumes or aborts it.
-- **Nothing the comparison sees.** Online and resumable are how an index is
-  built, not what it is: nothing of them is in the catalog afterwards, so a
-  store whose indexes were built online compares as current.
-- **Held by name.** A test asserts that every index the gateway adds to the
-  events table comes out of the rewrite with the options, so a change in how
-  the library writes them fails the build rather than silently building
-  offline; the store's own indexes get the options where the rewrite finds
-  them.
+  `sys.index_resumable_operations`; read as missing, it would be built again
+  over the paused one. While such a row exists for the table, an apply refuses
+  and names it, and the operator resumes or aborts it.
+- **What the gateway then owns.** The library's creation script no longer
+  holds the indexes, so initialization creates them after the table,
+  `--export-schema` writes them, the approved schema snapshot holds them, the
+  hash of the creation script that fast boot trusts covers the definitions,
+  and the schema report lists the indexes to create, rebuild or drop beside
+  the library's difference. Online and resumable are how an index is built,
+  not what it is, so nothing of them is in the catalog afterwards and a store
+  built that way compares as current.
 
 What it does not cover: adding a column to a large table, the persisted
 category column of a store taking ordinals later say, is a change to every
