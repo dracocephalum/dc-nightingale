@@ -445,11 +445,17 @@ tenant's rows, since a position is only unique with its tenant there.
 
 "Ordinal" here means these numbers and nothing else. The store partitioned by
 tenant has a number of its own by the same name, the `tenant_ordinal` column
-and the `ordinal` of its `pc_tenant_partitions` table, which is the number
-of the partition a tenant's rows live in. The gateway calls that the tenant's
-partition number: the store's column names appear only where the mirror maps
-them, under a property named for the partition number, never in a name,
-message or document of the gateway's own as an ordinal.
+and the `ordinal` of its `pc_tenant_partitions` table: the value of the
+partitioning column, which the store gives each tenant, or each bucket of
+tenants, and from which SQL Server's partition function finds the partition.
+The gateway calls it the tenant's partition key, not its partition number,
+which in SQL Server is the slot the function maps a value to (value `k`
+lands in partition number `k + 2` under the store's boundaries). The store's
+column names appear only where the mirror maps them, under a property named
+`PartitionKey`, never in a name, message or document of the gateway's own as
+an ordinal. A sequencer is named for what it sequences: `OrdinalSequencer`
+numbers both ordinals in one batch, and its progress rows are named for the
+ordinals they track.
 
 ### 7. The gateway's own tables are one model, and its own schema
 

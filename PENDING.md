@@ -192,6 +192,20 @@ here is re-derived:
   group's filter included, so the reference's gap is not reproduced. The
   `$idx-` filter stays the adapter's: the gateway's own contract names the
   streams.
+- **Event numbers.** A reference record's `EventNumber` is its revision in
+  its own stream, never a position; positions are the log's. A `$ce-` or
+  `$et-` stream holds link events with revisions of their own, dense, and a
+  client reading one is on the link: `OriginalEventNumber`, the number a
+  stream subscription checkpoints with, is the link's revision, the
+  gateway's ordinal, while the resolved event's `EventNumber` is its
+  revision in its own stream. So the adapter serves `$ce-` and `$et-` under
+  ordinal numbering, the ordinal as the link's revision. On a store without
+  ordinals it serves positions in its place: they only increase, so a
+  checkpoint still resumes, but two of them subtracted are no count, a
+  variance to write when the adapter ships. A property of the core's own
+  client giving the number of the stream being read, whichever numbering,
+  is booked and not planned: it is the record and the numbering the caller
+  chose, so it goes on no wire.
 - **Not carried, answered `Unimplemented` until the core has them:** stream
   metadata (the `$$` streams), multi-stream append, projections, operations
   such as scavenge, and user management beyond what the credentials table
@@ -269,14 +283,15 @@ re-derived:
   ever asks for less than the probe, the way out is a store setting fixed at
   initialization that refuses metadata and skips it, not a cache. What is left
   is soft delete, and the next bullet with it.
-- **With soft delete: the partition number in a stream's read.** On a store
+- **With soft delete: the partition key in a stream's read.** On a store
   partitioned by tenant the store's unique index of a stream's versions leads
-  with the tenant's partition number, `tenant_ordinal` in the store's names
+  with the tenant's partition key, `tenant_ordinal` in the store's names
   (not an ordinal of the gateway's, `DESIGN.md` seam 6), which the read and
-  its probe do not name, so they may not seek; the store's own fetch named it
-  no more. The store keeps the number per tenant in `pc_tenant_partitions`.
-  The read names it beside the tenant, so it seeks the existing index with
-  only the tenant's partition read, and no index is added: a second index
+  its probe do not name, so they may not seek, and a predicate on the tenant
+  alone eliminates no partition; the store's own fetch named it no more. The
+  store keeps the key per tenant in `pc_tenant_partitions`. The read names it
+  beside the tenant, so it seeks the existing index with only the tenant's
+  partition read, and no index is added: a second index
   over the same columns would cost every append a second write. The tenant
   stays in the predicate because tenants can share a partition. An
   integration test on a partitioned store reads the plan of both statements.
