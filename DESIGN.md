@@ -38,6 +38,31 @@ mapping, lives in the service above it, once, for every backend.
 
 ## The seams
 
+Every seam below follows one rule about who does what. The store does the
+heavy lifting, and the write side above all: an append's version check, the
+global sequence, the high-water mark below which nothing is still
+committing, partitions, tenants, archiving and deleting. Those are the parts
+that are hard to get right under concurrency, and the store has already got
+them right; the gateway calls them and does not rebuild them. Where the store
+cannot serve something on par with the reference, which so far has always
+been a read, the gateway serves it itself, straight from the store's tables
+through its own context, as the mirror does for every read of a stream.
+
+What the gateway adds must stay invisible to the store's own processes. An
+added column is computed or nullable and the store's statements never name
+it; an added index is one the store's migration is told about rather than one
+it would drop; a value the gateway writes into a column the store owns is one
+the store's own writes and the parts of the store the gateway runs read the
+way the store means it, and where the store's own readers would read it
+differently, the gateway does not call those readers, and says so where it
+writes the value. The gateway reaches into the store only through public
+seams: options, registrations, overridable classes, participants in its
+transaction. It uses
+no reflection into the store's internals unless the store's maintainers have
+said the member is meant to be relied on, and what it would rather have as a
+public seam is filed in [`UPSTREAM.md`](UPSTREAM.md). The same rule holds for
+the second store when its backend is written.
+
 ### 1. Events carry no CLR type
 
 The store, like every framework of its kind, wants an event to be a .NET class

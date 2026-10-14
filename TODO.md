@@ -46,10 +46,10 @@ undecided adds it here rather than mentioning it once in a conversation.
   under `examples/` are the end-to-end
   runs. Not yet: the ordinal
   backfill, in `PENDING.md`. Close by: see `PENDING.md`.
-- **A delete's expected-revision check is not atomic with the archive.** The
-  adapter reads the stream's revision, compares, then archives in the same
+- **An archive's expected-revision check is not atomic with the archive.**
+  The store reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,
-  so the outcome is still a deleted stream, but the check passed on a
+  so the outcome is still an archived stream, but the check passed on a
   revision that was no longer current. Close by: a conditional archive
   statement that carries the expected revision, which is asked for in
   `UPSTREAM.md`.
@@ -62,3 +62,19 @@ undecided adds it here rather than mentioning it once in a conversation.
   tenant of the directory, merged in position order in process, each asked
   for the next page's worth only, with an integration test over several
   tenants. Stores partitioned by tenant refuse the wildcard already.
+- **An event can be appended that no client can read back.** Neither side
+  sets gRPC's message limits, so both keep the defaults: the server receives
+  at most 4 MB in a message and sends any size, and the client the same the
+  other way round. An append sends one event a message and a read returns
+  one event a message, so 4 MB is a limit on one event, not on an append. But
+  a recorded event is larger than the proposed one, since it carries the
+  stream name, revision, position, time and metadata the proposal does not,
+  so an event just under the server's limit is stored and then refused by
+  every client that reads it, catch-up and persistent subscriptions
+  included, and the stream stalls on it. Binary data makes large events more
+  likely. Close by: the first of a set of tunables, a size the server
+  receives in one message, set on its gRPC options and checked at
+  registration, and a connection-string setting for what the client
+  receives, which by default exceeds the server's by the most a recorded
+  event adds; a test appends an event at the server's limit and reads it
+  back, by stream and by subscription.
