@@ -32,5 +32,11 @@ public sealed class StreamListingsTests(SharedRun.Fixture fixture)
         report.ByPrefixFilter.ShouldBe(["orders-1", "orders-1", "orders-1"]);
         report.ByTypeFilter.ShouldBe(["order_placed"]);
         report.LiveListed.ShouldBe("refunds-1");
+
+        // Assert: by ordinal, dense from 0, as a KurrentDB client counts a link stream; live by
+        // ordinal too, the next number of the listing.
+        report.WorkflowOrdinals.ShouldBe(["0:orders-1", "1:payments-1", "2:orders-1"]);
+        report.StreamsOrdinals.ShouldBe(["0:orders-1", "1:payments-1", "2:orders", "3:refunds-1"]);
+        report.LiveCategoryOrdinal.ShouldBe("2:orders-2");
     }
 }
