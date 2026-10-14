@@ -35,11 +35,11 @@ public sealed class StreamRouterTests : IAsyncDisposable
         // once, from the first revision pointed at, and each event goes to whoever it matches.
         A.CallTo(() => _store.ReadPointersAsync(1, 7, StreamRouter.PointerPage, A<CancellationToken>._))
             .Returns([Pointer("orders-1", 0, 1), Pointer("shipments-1", 0, 2), Pointer("orders-1", 1, 3), Pointer("audit-1", 0, 4), Pointer("invoices-1", 0, 5, "invoice_paid"), Pointer("orders-1", 2, 7, "order_paid")]);
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 3, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-1", 0, 3, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 0, 1), Record("orders-1", 1, 3), Record("orders-1", 2, 7, "order_paid")]));
-        A.CallTo(() => _store.ReadAsync("shipments-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("shipments-1", 0, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record("shipments-1", 0, 2)]));
-        A.CallTo(() => _store.ReadAsync("invoices-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("invoices-1", 0, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record("invoices-1", 0, 5, "invoice_paid")]));
         using var first = _sut.Follow("orders-1");
         using var second = _sut.Follow("orders-1");
@@ -63,7 +63,7 @@ public sealed class StreamRouterTests : IAsyncDisposable
         _sut.Routed.ShouldBe(7);
         _sut.FollowerCount.ShouldBe(5);
         A.CallTo(() => _store.ReadPointersAsync(A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
-        A.CallTo(() => _store.ReadAsync("audit-1", A<Direction>._, A<long?>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _store.ReadAsStoredAsync("audit-1", A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class StreamRouterTests : IAsyncDisposable
         toAudit.Single().Position.ShouldBe(2);
         A.CallTo(() => _store.ReadAllAsync(A<Direction>._, A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         A.CallTo(() => _store.ReadPointersAsync(A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
-        A.CallTo(() => _store.ReadAsync(A<string>._, A<Direction>._, A<long?>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _store.ReadAsStoredAsync(A<string>._, A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -124,9 +124,9 @@ public sealed class StreamRouterTests : IAsyncDisposable
         await using var sut = new StreamRouter(_store, _tail, StringComparer.OrdinalIgnoreCase);
         A.CallTo(() => _store.ReadPointersAsync(1, 2, StreamRouter.PointerPage, A<CancellationToken>._))
             .Returns([Pointer("orders-1", 0, 1, "Order_Placed"), Pointer("Orders-2", 0, 2)]);
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-1", 0, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 1, "Order_Placed")]));
-        A.CallTo(() => _store.ReadAsync("Orders-2", Direction.Forwards, 0, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("Orders-2", 0, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record("Orders-2", 0, 2)]));
         using var stream = sut.Follow("ORDERS-1");
         using var category = sut.Follow("$ce-Orders");
@@ -167,11 +167,11 @@ public sealed class StreamRouterTests : IAsyncDisposable
             .Returns(records.Take(StreamRouter.PointerPage).Select(record => Pointer("orders-1", record.Revision, record.Position)).ToList());
         A.CallTo(() => _store.ReadPointersAsync(StreamRouter.PointerPage + 1, count + 1, StreamRouter.PointerPage, A<CancellationToken>._))
             .Returns([.. records.Skip(StreamRouter.PointerPage).Select(record => Pointer("orders-1", record.Revision, record.Position)), Pointer("orders-2", 0, count + 1)]);
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, StreamRouter.PointerPage, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-1", 0, StreamRouter.PointerPage, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, count - 1), records.Take(StreamRouter.PointerPage).ToList()));
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, StreamRouter.PointerPage, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-1", StreamRouter.PointerPage, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, count - 1), records.Skip(StreamRouter.PointerPage).ToList()));
-        A.CallTo(() => _store.ReadAsync("orders-2", Direction.Forwards, 0, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-2", 0, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [last]));
         using var slow = _sut.Follow("orders-1");
         using var other = _sut.Follow("orders-2");
@@ -202,9 +202,9 @@ public sealed class StreamRouterTests : IAsyncDisposable
         // Arrange
         A.CallTo(() => _store.ReadPointersAsync(1, 2, StreamRouter.PointerPage, A<CancellationToken>._))
             .Returns([Pointer("orders-1", 3, 1), Pointer("orders-2", 0, 2)]);
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 3, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-1", 3, 1, A<CancellationToken>._))
             .Throws(new StreamDeletedException("orders-1"));
-        A.CallTo(() => _store.ReadAsync("orders-2", Direction.Forwards, 0, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-2", 0, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-2", 0, 2)]));
         using var deleted = _sut.Follow("orders-1");
         using var other = _sut.Follow("orders-2");
@@ -227,7 +227,7 @@ public sealed class StreamRouterTests : IAsyncDisposable
             .Throws(new InvalidOperationException("The database went away."));
         A.CallTo(() => _store.ReadPointersAsync(6, 8, StreamRouter.PointerPage, A<CancellationToken>._))
             .Returns([Pointer("orders-1", 4, 8)]);
-        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 4, 1, A<CancellationToken>._))
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-1", 4, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 4), [Record("orders-1", 4, 8)]));
         using var failed = _sut.Follow("orders-1");
 

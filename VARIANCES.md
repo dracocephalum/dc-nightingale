@@ -421,34 +421,42 @@ gateway exposes no un-archive.
 **Why:** archive and tombstone are the store's two primitives; recreating a
 soft-deleted stream with continuing revision numbers has no counterpart.
 
-## Stream metadata is stored but not yet enforced
+## Stream metadata keeps its history and refuses what it cannot honour
 
 **Reference:** a stream's metadata is the last `$metadata` event of
 `$$<stream>`. `$maxAge`, `$maxCount` and `$tb` (truncate before) change what
-a read of the stream returns, `$acl` who may read it, `$cacheControl` how its
-HTTP interface lets a response be cached, and `$tmp` whether its scavenge
-removes a deleted stream's metadata too. A reserved key of the wrong type is
-stored, and the stream's metadata then reads as empty, every key dropped. A
-persistent subscription can be made on any stream, a metadata stream
-included.
+a read of the stream returns, and so what a catch-up subscription or a
+persistent subscription on it starts from; events delivered live are not
+checked. `$acl` decides who may read the stream, `$cacheControl` how its HTTP
+interface lets a response be cached, and `$tmp` whether its scavenge removes a
+deleted stream's metadata too. A metadata stream reads as its last event only,
+under a `$maxCount` of one the server gives every metadata stream. A reserved
+key of the wrong type is stored, and the stream's metadata then reads as
+empty, every key dropped. A persistent subscription can be made on any
+stream, a metadata stream included.
 
 **Nightingale:** `SetStreamMetadata` and `GetStreamMetadata` store the
 metadata as the same events in the same stream, in the reference's JSON, and
-read it back; `$$<stream>` is read and followed as a stream, written only by
-the metadata call, and refused for a persistent-subscription group. The
-settings are not applied to reads yet: `PENDING.md`, *Stream metadata*, holds
-the shape decided, and `$tb` at its largest value, the reference's soft
-delete, is refused until the gateway does soft delete. `$acl` is refused as
-an invalid argument until authentication carries stream ACLs. `$cacheControl`
-and `$tmp` are stored and returned without effect, keys carried over from the
-reference. A reserved key out of range or of the wrong type refuses the set
-rather than emptying the metadata.
+read it back. A read of the stream applies `$maxCount`, `$tb` and `$maxAge`
+as the reference does, a subscription or a group starts from what the read
+leaves, and live delivery is not checked; `$maxAge` is measured by the
+database's clock, which stamped the events. The read reports the bound of
+`$maxCount` and `$tb` as the head's first revision. `$$<stream>` is read and
+followed as a stream with its whole history, written only by the metadata
+call, and refused for a persistent-subscription group. `$tb` at its largest
+value, the reference's soft delete, is refused until the gateway does soft
+delete. `$acl` is refused as an invalid argument until authentication carries
+stream ACLs. `$cacheControl` and `$tmp` are stored and returned without
+effect, keys carried over from the reference. A reserved key out of range or
+of the wrong type refuses the set rather than emptying the metadata.
 
 **Why:** metadata stored as events keeps its place in the one sequence and
-its history, and costs a stream that has none nothing; an access list stored
-and not enforced would read as a protection the stream does not have, and
-metadata silently dropped as a whole is a retention the operator thinks is in
-force and is not.
+its history, and costs a stream that has none a probe of a few index pages;
+the history is the record of who changed a stream's retention, kept until a
+maintenance job removes what metadata hides (`PENDING.md`, *Stream
+metadata*). An access list stored and not enforced would read as a protection
+the stream does not have, and metadata silently dropped as a whole is a
+retention the operator thinks is in force and is not.
 
 ## An append is limited by its number of events
 

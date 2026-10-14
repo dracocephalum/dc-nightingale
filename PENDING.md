@@ -243,24 +243,34 @@ re-derived:
   `$all` carries the metadata events; `$de`, the data events, is `$all`
   without the types that begin with `$`, at the cost of `$all`, by position
   only and followed as `$all` is; `$mde` is `$et-$metadata` under another
-  name, ordinals included. `VARIANCES.md` says what is not applied yet. What
-  is left is below: enforcement on reads, then soft delete.
-- **Enforced inside the read's own statement.** A read of a plain stream finds
-  the last metadata event with a `TOP 1` seek on the same unique index, joined
-  to the page by an `OUTER APPLY`, so it costs no round trip: the lower bound
-  `max(last − $maxCount + 1, |$tb|)` becomes a seek bound on that index, and
-  `$maxAge` a check of each row's timestamp. A stream without metadata finds
-  nothing in that one probe and reads as it does today, so a store that never
-  sets metadata pays a probe of a few index pages per read and nothing else.
-  Reads of plain streams move from the store's fetch to the gateway's mirror
-  of the events table for it, as the pages of `$all` did. A subscription or a
-  group on the stream starts from the same bound. Neither `$all` nor a virtual
-  stream applies metadata, as in the reference. Nothing is cached: every
-  instance appends, and a cache would learn of a change only through the tail,
-  a polling interval late, serving meanwhile events a new `$maxCount` has cut.
-  If a measurement ever asks for less than the probe, the way out is a store
-  setting fixed at initialization that refuses metadata and skips it, not a
-  cache.
+  name, ordinals included. `VARIANCES.md` says what differs.
+- **Landed: enforced on reads, in the statements a read already ran.** A read
+  of a plain stream goes through the gateway's mirror of the store's tables,
+  as the pages of `$all` did, in the two statements the store's own fetch
+  took. The first finds the stream's row and, in the same statement, the last
+  metadata event with a `TOP 1` seek backwards on the store's unique index of
+  a stream's versions, so the probe costs no round trip and a stream without
+  metadata finds nothing in a few index pages. The second reads the page with
+  the lower bound `max(last − $maxCount + 1, $tb)` as the start of its seek on
+  that index and `$maxAge` as a check of each row's timestamp against the
+  database's clock, `SYSUTCDATETIME()`, the clock that stamped it; the check
+  comes before the page is counted, so a short page still means the end. The
+  head's first revision is that bound, beyond the last revision when the
+  metadata hides every event, and such a stream reads empty and exists, as in
+  the reference. A catch-up subscription or a group on the stream starts from
+  the bound because its reads do, and goes on from the head after a short
+  page, whatever the metadata hid. Live delivery is not checked, as in the
+  reference: the router reads what an append brought as it is stored, for the
+  stream's followers and its category's and type's alike. Neither `$all` nor
+  a virtual stream applies metadata, and a metadata stream reads its whole
+  history (`VARIANCES.md`). Nothing is cached: every instance appends, and a
+  cache would learn of a change only through the tail, a polling interval
+  late, serving meanwhile events a new `$maxCount` has cut. If a measurement
+  ever asks for less than the probe, the way out is a store setting fixed at
+  initialization that refuses metadata and skips it, not a cache. A stream
+  long past its `$maxAge` reads its expired rows on every forwards read from
+  the start, where the reference searches by time; physical removal (below)
+  is what makes that cheap. What is left is soft delete.
 - **Appends never read metadata.** The reference checks an append against
   the soft-delete value of `$tb` and writes an un-delete after it, which is
   safe there because one writer handles every write in turn. Here every

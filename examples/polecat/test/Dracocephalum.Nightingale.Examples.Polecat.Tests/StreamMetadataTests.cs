@@ -14,7 +14,7 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.Tests;
 public sealed class StreamMetadataTests(SharedRun.Fixture fixture)
 {
     [Fact]
-    public async Task RunAsync_ShouldSetReadBackAndRaceTheMetadataAndKeepItOutOfTheDataEvents()
+    public async Task RunAsync_ShouldSetReadBackRaceAndApplyTheMetadataAndKeepItOutOfTheDataEvents()
     {
         // Arrange
         var run = fixture.Run;
@@ -35,5 +35,9 @@ public sealed class StreamMetadataTests(SharedRun.Fixture fixture)
         report.All.ShouldBe(4);
         report.DataEvents.ShouldBe(2);
         report.MetadataEvents.ShouldBe(2);
+
+        // Assert: orders-2's five events read as its last two; the category holds all seven.
+        report.Kept.ShouldBe([3, 4]);
+        report.Category.ShouldBe(7);
     }
 }

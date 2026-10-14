@@ -10,9 +10,9 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.StreamMetadata;
 /// A stream's metadata against a Nightingale server, step by step: metadata set before the
 /// stream's first event and read back, a stale set refused on the metadata stream's own revision,
 /// the history read as the <c>$metadata</c> events of <c>$$orders-1</c>, <c>$acl</c> refused, and
-/// the metadata events in <c>$all</c> and <c>$mde</c> but never in <c>$de</c>. The server stores
-/// the metadata and gives it back; it does not apply it to reads yet. The program prints the
-/// steps; the test project asserts the report.
+/// the metadata events in <c>$all</c> and <c>$mde</c> but never in <c>$de</c>, and a <c>$maxCount</c>
+/// applied to a read of its stream and to nothing else. The program prints the steps; the test
+/// project asserts the report.
 /// </summary>
 public static class Scenario
 {
@@ -27,6 +27,8 @@ public static class Scenario
     /// <param name="All">How many events of the tenant <c>$all</c> holds.</param>
     /// <param name="DataEvents">How many <c>$de</c> holds.</param>
     /// <param name="MetadataEvents">How many <c>$mde</c> holds.</param>
+    /// <param name="Kept">The revisions a read of the second stream returned under its <c>$maxCount</c>.</param>
+    /// <param name="Category">How many events <c>$ce-orders</c> holds, both streams' alike.</param>
     public sealed record Report(
         string Stream,
         long FirstSet,
@@ -37,7 +39,9 @@ public static class Scenario
         string AclRefusal,
         int All,
         int DataEvents,
-        int MetadataEvents);
+        int MetadataEvents,
+        IReadOnlyList<long> Kept,
+        int Category);
 
     /// <summary>Runs the scenario.</summary>
     /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
@@ -105,7 +109,23 @@ public static class Scenario
         var metadataEvents = await CountAsync(client, StreamNames.MetadataEvents, cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"8. The tenant's $all holds {all} events, the metadata events among them; $de, the data events, holds {dataEvents}; $mde, the metadata events, holds {metadataEvents}.").ConfigureAwait(false);
 
-        return new Report(stream, first.Revision, beforeAppend, conflictActual, final, history, aclRefusal, all, dataEvents, metadataEvents);
+        const string trimmed = "orders-2";
+        await client.AppendToStreamAsync(trimmed, StreamState.NoStream, [CreateEvent("order_placed"), CreateEvent("order_paid"), CreateEvent("order_packed"), CreateEvent("order_shipped"), CreateEvent("order_delivered")], cancellationToken).ConfigureAwait(false);
+        var trim = await client.SetStreamMetadataAsync(trimmed, StreamState.NoStream, new Nightingale.StreamMetadata { MaxCount = 2 }, cancellationToken).ConfigureAwait(false);
+        var kept = new List<long>();
+        await using (var read = client.ReadStreamAsync(Direction.Forwards, trimmed, StreamPosition.Start, cancellationToken: cancellationToken))
+        {
+            await foreach (var record in read.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                kept.Add(record.Revision);
+            }
+        }
+
+        await ExampleMark.WaitUntilCoversAsync(client, trim.Position, cancellationToken).ConfigureAwait(false);
+        var category = await CountAsync(client, "$ce-orders", cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"9. Appended five events to {trimmed} and set a $maxCount of 2: a read from the start returns revisions {string.Join(", ", kept)}, the last two; $ce-orders still holds all {category} events of the category, since metadata is the business of the stream's own reads.").ConfigureAwait(false);
+
+        return new Report(stream, first.Revision, beforeAppend, conflictActual, final, history, aclRefusal, all, dataEvents, metadataEvents, kept, category);
     }
 
     private static async Task<int> CountAsync(NightingaleClient client, string stream, CancellationToken cancellationToken)

@@ -2,6 +2,7 @@ using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Polecat;
 using Shouldly;
 using Weasel.SqlServer.Tables;
@@ -31,7 +32,7 @@ public sealed class EventsDbContextTests
 
         // Act & Assert
         var entities = context.Model.GetEntityTypes().ToList();
-        entities.Count.ShouldBe(2);
+        entities.Count.ShouldBe(3);
         foreach (var entity in entities)
         {
             var table = declared.SingleOrDefault(candidate => candidate.Identifier.Name == entity.GetTableName()).ShouldNotBeNull($"{entity.GetTableName()} is mapped but the store declares no such table");
@@ -100,11 +101,16 @@ public sealed class EventsDbContextTests
         var byCategory = context.EventRows.Where(row => row.TenantId == tenant && row.Category == key).Select(row => row.SeqId).ToQueryString();
         var byType = context.EventRows.Where(row => row.TenantId == tenant && row.Type == key).Select(row => row.SeqId).ToQueryString();
         var mark = context.ProgressionRows.Where(row => row.Name == EventsDbContext.HighWaterMark).Select(row => row.LastSeqId).ToQueryString();
+        var reader = new PlainStreamReader(() => context, tenant, NullLogger.Instance);
+        var stream = reader.FindWithMetadata(context, "orders-1", "$$orders-1").ToQueryString();
+        var page = reader.QueryRows(context, "orders-1").Select(row => row.SeqId).ToQueryString();
 
         // Assert
         byCategory.ShouldContain("varchar(250)");
         byType.ShouldContain("varchar(500)");
-        foreach (var sql in new[] { byCategory, byType, mark })
+        stream.ShouldContain("varchar(250)");
+        page.ShouldContain("varchar(250)");
+        foreach (var sql in new[] { byCategory, byType, mark, stream, page })
         {
             sql.ShouldNotContain("nvarchar");
             sql.ShouldNotContain("N'");

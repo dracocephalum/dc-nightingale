@@ -22,22 +22,25 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// events from that revision onward are compared with the batch by id, and an exact match means
 /// the append already happened.
 /// <para>
-/// With a read-only connection, a page of <c>$all</c> or of a virtual stream by position is taken
-/// from it as far as it reaches and from the main connection beyond, so the answer is the one the
-/// main connection alone would give; a bounded read of a plain stream is taken from it only when
-/// the host asks, and may then lag. Everything else uses the main connection.
+/// Every read goes through the gateway's mirror of the store's tables: a plain stream's with its
+/// metadata applied (<see cref="PlainStreamReader"/>), <c>$all</c> and the virtual streams by
+/// position or ordinal (<see cref="VirtualStreamReader"/>). With a read-only connection, a page of
+/// <c>$all</c> or of a virtual stream by position is taken from it as far as it reaches and from
+/// the main connection beyond, so the answer is the one the main connection alone would give; a
+/// bounded read of a plain stream is taken from it only when the host asks, and may then lag.
+/// Everything else uses the main connection.
 /// </para>
 /// </summary>
 /// <param name="store">The store.</param>
 /// <param name="tenantId">The tenant every session is opened for, or <see langword="null"/> for all tenants, under the wildcard: then <c>$all</c> and the virtual streams read across tenants and a stream name, which is per tenant, is refused.</param>
-/// <param name="events">Makes the mirror of the store's events table over the main connection, for the virtual streams.</param>
+/// <param name="events">Makes the mirror of the store's tables over the main connection.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
-/// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned by whoever made this instance, or <see langword="null"/> when they stay on the main connection.</param>
+/// <param name="readOnlyStreams">Makes the same mirror over the read-only connection for bounded reads of plain streams, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="appended">Pulsed after each append commits, so the tail looks at once instead of at its next poll.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDocumentStore? readOnlyStore, AppendSignal appended, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
+internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyStreams, AppendSignal appended, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
 {
     /// <summary>SQL Server's error for a value longer than its column, naming the column.</summary>
     /// <summary>
@@ -58,6 +61,8 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, tenantId);
     private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, tenantId);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
+    private readonly PlainStreamReader? _streams = tenantId is null ? null : new(events.CreateDbContext, tenantId, logger);
+    private readonly PlainStreamReader? _replicaStreams = tenantId is null || readOnlyStreams is null ? null : new(readOnlyStreams.CreateDbContext, tenantId, logger);
 
     /// <inheritdoc/>
     public bool OrdinalsEnabled => ordinals;
@@ -145,68 +150,33 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     }
 
     /// <inheritdoc/>
-    public Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken) =>
-        ReadFromAsync(store, RequireTenant(stream), stream, direction, from, count, cancellationToken);
+    public Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        return RequireStreams(stream).ReadAsync(stream, direction, from, count, cancellationToken);
+    }
 
     /// <inheritdoc/>
     public Task<StreamSlice?> ReadEventualAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
     {
-        var tenant = RequireTenant(stream);
-        return readOnlyStore is null
-            ? ReadFromAsync(store, tenant, stream, direction, from, count, cancellationToken)
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        var main = RequireStreams(stream);
+        return _replicaStreams is null
+            ? main.ReadAsync(stream, direction, from, count, cancellationToken)
             : _router.PreferReplicaAsync(
-                token => ReadFromAsync(readOnlyStore, tenant, stream, direction, from, count, token),
-                token => ReadFromAsync(store, tenant, stream, direction, from, count, token),
+                token => _replicaStreams.ReadAsync(stream, direction, from, count, token),
+                token => main.ReadAsync(stream, direction, from, count, token),
                 cancellationToken);
     }
 
-    private static async Task<StreamSlice?> ReadFromAsync(IDocumentStore reads, string tenant, string stream, Direction direction, long? from, int count, CancellationToken cancellationToken)
+    /// <inheritdoc/>
+    public Task<StreamSlice?> ReadAsStoredAsync(string stream, long from, int count, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
-
-        await using var session = reads.QuerySession(ToSessionOptions(tenant));
-        var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
-        if (state is null || state.Version == 0)
-        {
-            return null;
-        }
-
-        if (state.IsArchived)
-        {
-            throw new StreamDeletedException(stream);
-        }
-
-        var head = new StreamHead(state.CompactedVersion, state.Version - 1);
-        long lower;
-        long upper;
-        if (direction == Direction.Forwards)
-        {
-            var start = from ?? 0;
-            if (start > head.Last)
-            {
-                return new StreamSlice(head, []);
-            }
-
-            lower = start + 1;
-            upper = Math.Min(head.Last + 1, start + count);
-        }
-        else
-        {
-            var start = Math.Min(from ?? head.Last, head.Last);
-            upper = start + 1;
-            lower = Math.Max(1, upper - count + 1);
-        }
-
-        var stored = await session.Events.FetchStreamAsync(stream, version: upper, fromVersion: lower, token: cancellationToken).ConfigureAwait(false);
-        var records = new EventRecord[stored.Count];
-        for (var i = 0; i < stored.Count; i++)
-        {
-            var source = direction == Direction.Forwards ? stored[i] : stored[stored.Count - 1 - i];
-            records[i] = ToRecord(source);
-        }
-
-        return new StreamSlice(head, records);
+        return RequireStreams(stream).ReadAsStoredAsync(stream, from, count, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -407,7 +377,14 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
 
     /// <summary>The tenant a stream name is read or written in: a name is per tenant, so under the wildcard there is none to use.</summary>
     private string RequireTenant(string stream) =>
-        tenantId ?? throw new ArgumentException($"'{stream}' is a name within one tenant; the wildcard tenant reads $all and the virtual streams by position only.", nameof(stream));
+        tenantId ?? throw CreateWildcardException(stream);
+
+    /// <summary>The reader of the tenant's plain streams; under the wildcard there is none.</summary>
+    private PlainStreamReader RequireStreams(string stream) =>
+        _streams ?? throw CreateWildcardException(stream);
+
+    private static ArgumentException CreateWildcardException(string stream) =>
+        new($"'{stream}' is a name within one tenant; the wildcard tenant reads $all and the virtual streams by position only.", nameof(stream));
 
     /// <summary>The expected state against the stream's current revision; any and stream-exists always pass here, because the stream exists.</summary>
     private static void CheckExpected(string stream, StreamState expected, long actual)
@@ -417,17 +394,6 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
             throw new RevisionConflictException(stream, expected, actual);
         }
     }
-
-    private static EventRecord ToRecord(IEvent stored) =>
-        new(
-            stored.Id,
-            stored.StreamKey ?? string.Empty,
-            stored.Version - 1,
-            stored.Sequence,
-            stored.EventTypeName,
-            stored.Timestamp,
-            stored.Data is JsonElement element ? JsonSerializer.SerializeToUtf8Bytes(element, NightingaleJson.Default) : JsonSerializer.SerializeToUtf8Bytes(stored.Data, NightingaleJson.Default),
-            JsonEvent.GetMetadata(stored));
 
     /// <summary>
     /// After the store refused the append: either the same events are already there, from the

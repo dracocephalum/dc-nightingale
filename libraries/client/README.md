@@ -17,7 +17,8 @@ append, bounded reads of a plain stream, of its metadata stream
 `$et-<event type>`, `$de`, `$mde`), and catch-up subscriptions to any of
 them, delivered through a one-slot channel so a slow
 consumer holds the server back; a stream's metadata, set and read back as
-typed settings beside the application's own keys; delete and tombstone, which a server refuses
+typed settings beside the application's own keys, which the server applies to
+reads of the stream; delete and tombstone, which a server refuses
 unless its host allows them; persistent-subscription groups, created, consumed
 with acknowledgements and refusals, replayed and deleted; the mapping from the wire's failure reasons
 to the shared exceptions; and the connection string, which holds every

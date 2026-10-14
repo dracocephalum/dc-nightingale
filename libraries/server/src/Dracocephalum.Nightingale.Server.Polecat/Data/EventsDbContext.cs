@@ -5,10 +5,11 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 namespace Dracocephalum.Nightingale.Server.Polecat.Data;
 
 /// <summary>
-/// A read-only mirror of two tables the store owns: its events, with the columns the gateway
-/// adds to them, and the row its high-water mark is kept in. The store creates and migrates
-/// both; this context only reads, and refuses to save, so the gateway's reads by category, by
-/// event type and by position are LINQ a unit test can run on the in-memory provider. The column
+/// A read-only mirror of three tables the store owns: its events, with the columns the gateway
+/// adds to them, its streams, and the row its high-water mark is kept in. The store creates and
+/// migrates them; this context only reads, and refuses to save, so the gateway's reads of a
+/// stream, by category, by event type and by position are LINQ a unit test can run on the
+/// in-memory provider. The column
 /// types are the store's exactly, and the string ones matter: a parameter sent as Unicode to a
 /// column that is not makes the database convert the column and scan the index it should seek.
 /// A unit test holds every mapped column to the store's own definition. A query selects the
@@ -41,6 +42,9 @@ internal class EventsDbContext : DbContext, ISchemaScoped
 
     /// <summary>Gets the events.</summary>
     public DbSet<EventRow> EventRows => Set<EventRow>();
+
+    /// <summary>Gets the streams.</summary>
+    public DbSet<StreamRow> StreamRows => Set<StreamRow>();
 
     /// <summary>Gets the progression rows; the high-water mark is one of them.</summary>
     public DbSet<ProgressionRow> ProgressionRows => Set<ProgressionRow>();
@@ -88,6 +92,20 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             row.Property(e => e.Category).HasColumnName("category").HasColumnType("varchar(250)");
             row.Property(e => e.CategoryOrdinal).HasColumnName(PatchedEventStoreFeature.CategoryOrdinalColumn).HasColumnType("bigint");
             row.Property(e => e.TypeOrdinal).HasColumnName(PatchedEventStoreFeature.TypeOrdinalColumn).HasColumnType("bigint");
+        });
+
+        modelBuilder.Entity<StreamRow>(row =>
+        {
+            row.ToTable("pc_streams");
+
+            // The store's own key under conjoined tenancy, the tenant first. Partitioned by tenant,
+            // the store adds the tenant's ordinal after these two; the pair still identifies a row.
+            row.HasKey(s => new { s.TenantId, s.Id });
+            row.Property(s => s.TenantId).HasColumnName("tenant_id").HasColumnType("varchar(250)");
+            row.Property(s => s.Id).HasColumnName("id").HasColumnType("varchar(250)");
+            row.Property(s => s.Version).HasColumnName("version").HasColumnType("bigint");
+            row.Property(s => s.IsArchived).HasColumnName("is_archived").HasColumnType("bit");
+            row.Property(s => s.CompactedVersion).HasColumnName("compacted_version").HasColumnType("bigint");
         });
 
         modelBuilder.Entity<ProgressionRow>(row =>

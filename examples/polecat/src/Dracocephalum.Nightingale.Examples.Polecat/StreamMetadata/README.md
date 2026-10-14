@@ -15,7 +15,10 @@ stream's; set it again under the right revision and read it back; read
 `$$orders-1` as a stream and find the two `$metadata` events that are its
 history; have a set carrying `$acl` refused; and count the tenant's events in
 `$all`, which holds the metadata events, in `$de`, the data events, which
-does not, and in `$mde`, the metadata events.
+does not, and in `$mde`, the metadata events. Last, append five events to
+`orders-2` and give it a `$maxCount` of two: a read from the start returns
+its last two events, and `$ce-orders` still holds every event of both
+streams.
 The scenario's test runs exactly the same code and asserts the report it
 returns.
 
@@ -29,8 +32,10 @@ Its test is `StreamMetadataTests` in the component's test project.
 
 ## Notes
 
-The server stores the metadata and gives it back; it does not apply
-`$maxAge`, `$maxCount` or `$tb` to reads of the stream yet (`VARIANCES.md`).
-`$cacheControl` and `$tmp` are kept and returned without effect, as keys
+The server applies `$maxAge`, `$maxCount` and `$tb` to reads of the stream
+and to where a subscription to it starts, never to `$all`, the virtual
+streams or events delivered live (`VARIANCES.md`); the history in
+`$$orders-1` stays readable whole. `$cacheControl` and `$tmp` are kept and
+returned without effect, as keys
 carried over from the reference. A set replaces the metadata as a whole, so
 the second set repeats the retention it keeps.

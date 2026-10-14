@@ -53,8 +53,9 @@ service Streams {
   // Sets a stream's metadata: appends one $metadata event to $$<stream>,
   // under an expected revision of that metadata stream, never of the stream
   // itself; the new metadata replaces the old as a whole. The stream need not
-  // exist, so metadata can be set before its first event. Stored, and read
-  // back, but not yet applied to reads of the stream. Errors:
+  // exist, so metadata can be set before its first event. Applied to the
+  // stream's reads and to where a subscription to it starts, from the next
+  // read on; never to $all, the virtual streams or live delivery. Errors:
   // REVISION_CONFLICT, INVALID_STREAM_NAME, INVALID_ARGUMENT (a setting out
   // of range, a reserved key among the custom ones, or $acl, which this
   // server does not support).
@@ -144,9 +145,12 @@ message ReadResponse {
   }
 }
 
-// Revisions for a stream; positions for $all and the virtual streams. For
-// $all, `first` is 0 and `last` is the position every event up to which has
-// been committed, the high-water mark; 0 means there are no events yet.
+// Revisions for a stream; positions for $all and the virtual streams. For a
+// stream, `first` is the first revision its metadata's $maxCount and $tb
+// leave to read, beyond `last` when they hide every event; $maxAge hides
+// events by age on top of it. For $all, `first` is 0 and `last` is the
+// position every event up to which has been committed, the high-water mark;
+// 0 means there are no events yet.
 message StreamBounds {
   sint64 first = 1;
   sint64 last = 2;
