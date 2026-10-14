@@ -76,10 +76,42 @@ public sealed class EventFilterTests
     }
 
     [Fact]
+    public void StreamFilterCategory_ShouldKeepTheStreamsOfTheCategoriesTheBareNameIncluded()
+    {
+        // Arrange
+        var filter = StreamFilter.Category("orders", "invoices");
+
+        // Act & Assert: a category, not a prefix: orders-1 and orders, never ordersx-1 or orders_1.
+        filter.Matches("orders-1", "x").ShouldBeTrue();
+        filter.Matches("orders", "x").ShouldBeTrue();
+        filter.Matches("invoices-7", "x").ShouldBeTrue();
+        filter.Matches("ordersx-1", "x").ShouldBeFalse();
+        filter.Matches("orders_1", "x").ShouldBeFalse();
+        filter.Exact.ShouldBe(["orders", "invoices"]);
+        filter.Prefixes.ShouldBeEmpty();
+        filter.Regex.ShouldBeNull();
+    }
+
+    [Fact]
+    public void EventTypeFilterType_ShouldKeepTheTypesExactlyNotTheirExtensions()
+    {
+        // Arrange
+        var filter = EventTypeFilter.Type("order_placed");
+
+        // Act & Assert
+        filter.Matches("x-1", "order_placed").ShouldBeTrue();
+        filter.Matches("x-1", "order_placed_v2").ShouldBeFalse();
+        Should.Throw<ArgumentException>(() => EventTypeFilter.Type());
+        Should.Throw<ArgumentException>(() => StreamFilter.Category("orders", string.Empty));
+    }
+
+    [Fact]
     public void ToString_ShouldSayWhatTheFilterKeeps()
     {
         // Act & Assert
         StreamFilter.Prefix("orders-", "invoices-").ToString().ShouldBe("StreamName begins with orders- | invoices-");
         EventTypeFilter.RegularExpression("^Order").ToString().ShouldBe("EventType matches /^Order/");
+        StreamFilter.Category("orders").ToString().ShouldBe("Category is orders");
+        EventTypeFilter.Type("a", "b").ToString().ShouldBe("EventType is a | b");
     }
 }

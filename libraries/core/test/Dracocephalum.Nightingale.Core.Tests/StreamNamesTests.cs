@@ -50,6 +50,32 @@ public sealed class StreamNamesTests
     }
 
     [Theory]
+    [InlineData("$bc-checkout-1", VirtualStreamKind.Correlation, "checkout-1")]
+    [InlineData("$streams", VirtualStreamKind.Streams, "")]
+    [InlineData("$category-orders", VirtualStreamKind.CategoryStreams, "orders")]
+    [InlineData("$ce-orders", VirtualStreamKind.Category, "orders")]
+    public void TryParseVirtual_WhenAVirtualStream_ShouldGiveItsKindAndKeyAndNameItBack(string stream, VirtualStreamKind kind, string key)
+    {
+        // Act
+        StreamNames.TryParseVirtual(stream, out var parsed).ShouldBeTrue();
+
+        // Assert: the three listings by correlation and by stream are read by position only, until they are numbered too.
+        parsed.ShouldBe(new VirtualStreamName(kind, key));
+        parsed.Name.ShouldBe(stream);
+        parsed.HasOrdinals.ShouldBe(kind == VirtualStreamKind.Category);
+    }
+
+    [Theory]
+    [InlineData("$bc-")]
+    [InlineData("$category-")]
+    [InlineData("$streams-orders")]
+    public void TryParseVirtual_WhenAPrefixWithoutAKeyOrAListingWithOne_ShouldNotRecogniseIt(string stream)
+    {
+        // Act & Assert
+        StreamNames.TryParseVirtual(stream, out _).ShouldBeFalse();
+    }
+
+    [Theory]
     [InlineData("$mde")]
     [InlineData("$et-$metadata")]
     public void TryParseVirtual_WhenTheMetadataEvents_ShouldGiveTheEventTypeStreamOfMetadataEitherWay(string stream)
@@ -77,8 +103,11 @@ public sealed class StreamNamesTests
     [InlineData("orders-1", "orders")]
     [InlineData("orders-1-archive", "orders")]
     [InlineData("orders", "orders")]
-    [InlineData("-orders", "")]
-    public void CategoryOf_ShouldBeTheNameUpToTheFirstHyphenOrTheWholeName(string stream, string category)
+    [InlineData("-orders", "-orders")]
+    [InlineData("-", "-")]
+    [InlineData("o-", "o")]
+    [InlineData("$$orders-1", "$$orders")]
+    public void CategoryOf_ShouldBeTheNameUpToAHyphenAfterItsFirstCharacterOrTheWholeName(string stream, string category)
     {
         // Act & Assert
         StreamNames.CategoryOf(stream).ShouldBe(category);

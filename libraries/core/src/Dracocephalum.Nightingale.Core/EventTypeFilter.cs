@@ -7,6 +7,11 @@ namespace Dracocephalum.Nightingale;
 /// </summary>
 public static class EventTypeFilter
 {
+    /// <summary>Keeps the events whose type is exactly one of the types; <c>order_placed</c> does not keep <c>order_placed_v2</c>, as a prefix would.</summary>
+    /// <param name="types">The types, at least one, none empty.</param>
+    /// <returns>The filter.</returns>
+    public static EventFilter Type(params string[] types) => EventFilter.ByExactValues(EventFilterTarget.EventType, types);
+
     /// <summary>Keeps the events whose type begins with one of the prefixes.</summary>
     /// <param name="prefixes">The prefixes, at least one, none empty.</param>
     /// <returns>The filter.</returns>

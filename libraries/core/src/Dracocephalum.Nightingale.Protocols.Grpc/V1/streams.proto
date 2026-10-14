@@ -79,10 +79,13 @@ service Streams {
 }
 
 message ReadRequest {
-  // A stream name, $all, $ce-<category>, $et-<event type>, $de (every event
-  // whose type does not begin with $), $mde (every $metadata event, the same
-  // as $et-$metadata), or $$<stream>, a stream's metadata stream. $de reads
-  // by position only.
+  // A stream name, $all, $ce-<category>, $et-<event type>, $bc-<correlation
+  // id> (every event whose $correlationId is the id), $streams (the first
+  // event of every stream), $category-<category> (the first event of every
+  // stream in the category), $de (every event whose type does not begin
+  // with $), $mde (every $metadata event, the same as $et-$metadata), or
+  // $$<stream>, a stream's metadata stream. $bc-, $streams, $category- and
+  // $de read by position only.
   string stream = 1;
 
   ReadDirection direction = 2;

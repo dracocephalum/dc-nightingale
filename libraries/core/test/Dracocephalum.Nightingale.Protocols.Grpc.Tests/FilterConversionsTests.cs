@@ -36,6 +36,27 @@ public sealed class FilterConversionsTests
     }
 
     [Fact]
+    public void ToWire_ThenToEventFilter_ShouldRoundTripExactValuesOfEitherTarget()
+    {
+        // Arrange
+        var byCategory = StreamFilter.Category("orders", "invoices");
+        var byType = EventTypeFilter.Type("order_placed");
+
+        // Act
+        var categoryWire = byCategory.ToWire();
+        var typeWire = byType.ToWire();
+
+        // Assert
+        categoryWire.StreamName.Exact.ShouldBe(["orders", "invoices"]);
+        categoryWire.StreamName.Prefix.ShouldBeEmpty();
+        typeWire.EventType.Exact.ShouldBe(["order_placed"]);
+        categoryWire.ToEventFilter().Exact.ShouldBe(["orders", "invoices"]);
+        typeWire.ToEventFilter().ShouldSatisfyAllConditions(
+            back => back.Target.ShouldBe(EventFilterTarget.EventType),
+            back => back.Exact.ShouldBe(["order_placed"]));
+    }
+
+    [Fact]
     public void GroupSettings_ToWireThenBack_ShouldCarryTheFilterAndNoneWhenThereIsNone()
     {
         // Arrange
@@ -64,8 +85,8 @@ public sealed class FilterConversionsTests
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => neitherKind.ToEventFilter()).Message.ShouldContain("what it looks at");
-        Should.Throw<ArgumentException>(() => neitherShape.ToEventFilter()).Message.ShouldContain("not both and not neither");
-        Should.Throw<ArgumentException>(() => bothShapes.ToEventFilter()).Message.ShouldContain("not both and not neither");
+        Should.Throw<ArgumentException>(() => neitherShape.ToEventFilter()).Message.ShouldContain("one of the three");
+        Should.Throw<ArgumentException>(() => bothShapes.ToEventFilter()).Message.ShouldContain("one of the three");
         Should.Throw<ArgumentException>(() => badRegex.ToEventFilter()).Message.ShouldContain("regular expression");
     }
 }

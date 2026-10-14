@@ -2,9 +2,9 @@ namespace Dracocephalum.Nightingale;
 
 /// <summary>
 /// The reserved stream names. A name that starts with <c>$</c> is never a plain stream: it is
-/// <c>$all</c>, every event in position order; a virtual stream over a category or an event type,
-/// or over the data events or the metadata events; or a stream's metadata stream, <c>$$</c> and
-/// the stream's name.
+/// <c>$all</c>, every event in position order; a virtual stream over a category, an event type or
+/// a correlation, over the data events or the metadata events, or over the first event of every
+/// stream or of a category's; or a stream's metadata stream, <c>$$</c> and the stream's name.
 /// </summary>
 public static class StreamNames
 {
@@ -29,11 +29,29 @@ public static class StreamNames
     /// </summary>
     public const string MetadataEvents = "$mde";
 
+    /// <summary>The prefix of a correlation stream: <c>$bc-checkout-1</c> holds every event whose <c>$correlationId</c> is <c>checkout-1</c>.</summary>
+    public const string CorrelationPrefix = "$bc-";
+
+    /// <summary>The first event of every stream, one event a stream, in the order the streams began.</summary>
+    public const string Streams = "$streams";
+
+    /// <summary>The prefix of a category's streams: <c>$category-orders</c> holds the first event of every stream in category <c>orders</c>.</summary>
+    public const string CategoryStreamsPrefix = "$category-";
+
     /// <summary>The prefix of a stream's metadata stream: <c>$$orders-1</c> holds the metadata of <c>orders-1</c>.</summary>
     public const string MetadataPrefix = "$$";
 
     /// <summary>The type of every event of a metadata stream.</summary>
     public const string MetadataEventType = "$metadata";
+
+    /// <summary>The virtual streams named by a prefix and a key; no prefix is the beginning of another.</summary>
+    private static readonly (string Prefix, VirtualStreamKind Kind)[] KeyedPrefixes =
+    [
+        (CategoryPrefix, VirtualStreamKind.Category),
+        (EventTypePrefix, VirtualStreamKind.EventType),
+        (CorrelationPrefix, VirtualStreamKind.Correlation),
+        (CategoryStreamsPrefix, VirtualStreamKind.CategoryStreams),
+    ];
 
     /// <summary>Whether a name is reserved rather than a plain stream's.</summary>
     /// <param name="stream">The stream name.</param>
@@ -54,9 +72,11 @@ public static class StreamNames
     }
 
     /// <summary>
-    /// The category of a plain stream: its name up to the first hyphen, or the whole name when it
-    /// has none. The rule the store's persisted category column computes, so what is matched in
-    /// process is what a read by category matches.
+    /// The category of a stream: its name up to the first hyphen, when a hyphen follows at least
+    /// one character, and otherwise the whole name, so a category is never empty and every stream
+    /// has one: <c>orders-1</c> is in <c>orders</c>, and <c>orders</c> and <c>-1</c> are each their
+    /// own. The rule the store's persisted category column computes, so what is matched in process
+    /// is what a read by category matches.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <returns>The category.</returns>
@@ -64,7 +84,7 @@ public static class StreamNames
     {
         ArgumentNullException.ThrowIfNull(stream);
         var hyphen = stream.IndexOf('-', StringComparison.Ordinal);
-        return hyphen < 0 ? stream : stream[..hyphen];
+        return hyphen > 0 ? stream[..hyphen] : stream;
     }
 
     /// <summary>The metadata stream of a plain stream: <c>$$</c> and its name.</summary>
@@ -100,9 +120,10 @@ public static class StreamNames
     }
 
     /// <summary>
-    /// Recognises a virtual stream name: <c>$ce-</c> or <c>$et-</c> followed by a key,
-    /// <see cref="DataEvents"/>, or <see cref="MetadataEvents"/>, which is read as the event-type
-    /// stream of <see cref="MetadataEventType"/>.
+    /// Recognises a virtual stream name: <c>$ce-</c>, <c>$et-</c>, <c>$bc-</c> or
+    /// <c>$category-</c> followed by a key, <see cref="DataEvents"/>, <see cref="Streams"/>, or
+    /// <see cref="MetadataEvents"/>, which is read as the event-type stream of
+    /// <see cref="MetadataEventType"/>.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="virtualStream">The virtual stream, when the name is one.</param>
@@ -110,21 +131,24 @@ public static class StreamNames
     public static bool TryParseVirtual(string stream, out VirtualStreamName virtualStream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        if (stream.Length > CategoryPrefix.Length && stream.StartsWith(CategoryPrefix, StringComparison.Ordinal))
+        foreach (var (prefix, kind) in KeyedPrefixes)
         {
-            virtualStream = new VirtualStreamName(VirtualStreamKind.Category, stream[CategoryPrefix.Length..]);
-            return true;
-        }
-
-        if (stream.Length > EventTypePrefix.Length && stream.StartsWith(EventTypePrefix, StringComparison.Ordinal))
-        {
-            virtualStream = new VirtualStreamName(VirtualStreamKind.EventType, stream[EventTypePrefix.Length..]);
-            return true;
+            if (stream.Length > prefix.Length && stream.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                virtualStream = new VirtualStreamName(kind, stream[prefix.Length..]);
+                return true;
+            }
         }
 
         if (stream == DataEvents)
         {
             virtualStream = new VirtualStreamName(VirtualStreamKind.DataEvents, string.Empty);
+            return true;
+        }
+
+        if (stream == Streams)
+        {
+            virtualStream = new VirtualStreamName(VirtualStreamKind.Streams, string.Empty);
             return true;
         }
 
