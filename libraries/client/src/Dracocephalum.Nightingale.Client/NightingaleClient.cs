@@ -11,7 +11,8 @@ namespace Dracocephalum.Nightingale.Client;
 /// <summary>
 /// The client of a Nightingale server, shaped after the reference event-store client: append to a
 /// stream under an expected state, read a stream, $all or a virtual stream in either direction,
-/// subscribe to any of them, and delete or tombstone a stream where the server allows it. A failed call surfaces as a
+/// subscribe to any of them, set and read a stream's metadata, and delete or tombstone a stream
+/// where the server allows it. A failed call surfaces as a
 /// domain exception when the server gave a reason, an argument exception when the request was at
 /// fault, and the raw call exception otherwise. A persistent-subscription group runs in one server
 /// instance at a time; when another instance answers that the group runs elsewhere and says
@@ -260,6 +261,58 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         return CallUnaryAsync(async () => await _streams.TombstoneAsync(new TombstoneRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Reads a stream's metadata as last set. A stream whose metadata was never set answers with
+    /// revision -1 and <see cref="StreamMetadata.Empty"/>, whether or not it has events.
+    /// </summary>
+    /// <param name="stream">The plain stream's name.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The metadata, and the revision of the metadata stream that the next set expects.</returns>
+    /// <exception cref="ArgumentException">The server rejected the name.</exception>
+    public async Task<StreamMetadataResult> GetStreamMetadataAsync(string stream, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        try
+        {
+            var response = await _streams.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = stream }, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return new StreamMetadataResult(stream, response.Revision, response.Metadata.ToStreamMetadata());
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
+    /// <summary>
+    /// Sets a stream's metadata, replacing what was set before as a whole. The expected state is
+    /// that of the stream's metadata stream, never of the stream: <see cref="StreamState.NoStream"/>
+    /// for the first set, then the revision the last get or set returned. The stream need not exist.
+    /// The server stores the metadata and gives it back; it does not yet apply it to reads.
+    /// </summary>
+    /// <param name="stream">The plain stream's name.</param>
+    /// <param name="expected">What the caller asserts about the metadata stream.</param>
+    /// <param name="metadata">The metadata.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The revision and position of the metadata event; the next set expects that revision.</returns>
+    /// <exception cref="RevisionConflictException">The metadata stream is not in the expected state.</exception>
+    /// <exception cref="ArgumentException">The server rejected the metadata or the name; the message says why.</exception>
+    public async Task<AppendResult> SetStreamMetadataAsync(string stream, StreamState expected, StreamMetadata metadata, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        ArgumentNullException.ThrowIfNull(metadata);
+        try
+        {
+            var response = await _streams.SetStreamMetadataAsync(
+                new SetStreamMetadataRequest { Stream = stream, ExpectedRevision = expected.ToInt64(), Metadata = metadata.ToWire() },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            return new AppendResult(response.Revision, response.Position);
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
     }
 
     /// <summary>Creates a persistent-subscription group over a stream, <c>$all</c> or a virtual stream.</summary>

@@ -68,9 +68,9 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
         // The numbering is the group's for life, so it is checked once, here, the way a read checks it.
         if (settings.Numbering == Numbering.Ordinal)
         {
-            if (!StreamNames.TryParseVirtual(stream, out _))
+            if (!StreamNames.TryParseVirtual(stream, out var numbered) || !numbered.HasOrdinals)
             {
-                throw NightingaleErrors.InvalidArgument("Ordinal numbering applies to $ce- and $et- streams only.");
+                throw NightingaleErrors.InvalidArgument("Ordinal numbering applies to $ce-, $et- and $mde streams only.");
             }
 
             if (!stores.GetStreams(TenantScope.Default).OrdinalsEnabled)
@@ -620,9 +620,12 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
             throw NightingaleErrors.InvalidStreamName(stream, $"longer than {StreamsService.MaxStreamNameLength} characters");
         }
 
+        // A metadata stream, $$<stream>, is refused here though it can be read and followed: a
+        // group over it would be numbered as the reserved names are, by position, and nobody has
+        // asked for one.
         if (StreamNames.IsReserved(stream) && stream != StreamNames.All && !StreamNames.TryParseVirtual(stream, out _))
         {
-            throw NightingaleErrors.InvalidStreamName(stream, "reserved and not $all, $ce-<category> or $et-<event type>");
+            throw NightingaleErrors.InvalidStreamName(stream, "reserved and not $all, $ce-<category>, $et-<event type>, $de or $mde");
         }
 
         return stream;

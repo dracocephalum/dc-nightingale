@@ -184,8 +184,31 @@ public interface IStreamStore
     Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Tombstones a stream: it and its events are removed for good, and the name afterwards reads
-    /// as one that never existed. A deleted stream can be tombstoned.
+    /// Reads a stream's metadata as last set: the last event of its metadata stream. The stream
+    /// itself is not read; its metadata may have been set before its first event.
+    /// </summary>
+    /// <param name="stream">The plain stream's name.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The metadata and the metadata stream's revision; revision -1 and no settings when it was never set.</returns>
+    Task<StreamMetadataResult> GetStreamMetadataAsync(string stream, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets a stream's metadata: appends one <c>$metadata</c> event to its metadata stream, checked
+    /// against the expected state of that metadata stream, never of the stream itself, which need
+    /// not exist. The new metadata replaces the old as a whole.
+    /// </summary>
+    /// <param name="stream">The plain stream's name.</param>
+    /// <param name="expected">What the caller asserts about the metadata stream.</param>
+    /// <param name="metadata">The metadata; checked with <see cref="StreamMetadata.Validate"/> before anything is written.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The revision and position of the metadata event.</returns>
+    /// <exception cref="ArgumentException">The metadata is not valid.</exception>
+    /// <exception cref="RevisionConflictException">The metadata stream is not in the expected state.</exception>
+    Task<AppendResult> SetStreamMetadataAsync(string stream, StreamState expected, StreamMetadata metadata, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Tombstones a stream: it and its events are removed for good, its metadata stream with them,
+    /// and the name afterwards reads as one that never existed. A deleted stream can be tombstoned.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="expected">What the caller asserts about the stream.</param>

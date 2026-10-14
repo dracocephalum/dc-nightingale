@@ -39,6 +39,7 @@ README that walks through it.
 | [`credentials-and-tenants`](src/Dracocephalum.Nightingale.Examples.Polecat/CredentialsAndTenants/README.md) | credentials and tenants: an ops credential and a user bound to the default tenant, what each may do, a password changed by its owner, a second tenant with a credential kept to it, and the tenant disabled |
 | [`delete-and-tombstone`](src/Dracocephalum.Nightingale.Examples.Polecat/DeleteAndTombstone/README.md) | delete hides a stream, tombstone removes it and frees the name, a stale revision is refused, and a server with the default settings refuses to delete at all |
 | [`persistent-subscription`](src/Dracocephalum.Nightingale.Examples.Polecat/PersistentSubscription/README.md) | a persistent-subscription group: create, consume with acknowledgements, retry and park, replay the parked message, resume from the checkpoint, delete |
+| [`stream-metadata`](src/Dracocephalum.Nightingale.Examples.Polecat/StreamMetadata/README.md) | a stream's metadata: set before the stream's first event and read back, a stale set refused on the metadata stream's revision, the history as `$$orders-1`, `$acl` refused, and the metadata events in `$all` and `$mde` but not `$de` |
 
 What the scenarios share is in the `Common` folder: the environment's `master`
 connection string, the throwaway database, the in-process server with a client

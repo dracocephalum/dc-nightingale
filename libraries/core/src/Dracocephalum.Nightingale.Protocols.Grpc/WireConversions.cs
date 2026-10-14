@@ -346,6 +346,58 @@ public static class WireConversions
         return new OutboxMessageInfo(message.Number, Guid.Parse(message.EventId), message.Reason, message.RetryCount, message.DueAt?.ToDateTimeOffset() ?? default, message.Position, message.Revision);
     }
 
+    /// <summary>Maps a stream's metadata to its wire form. Nothing is checked here; the server checks what it stores.</summary>
+    /// <param name="metadata">The metadata.</param>
+    /// <returns>The wire message.</returns>
+    public static Protocols.Grpc.V1.StreamMetadata ToWire(this StreamMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var wire = new Protocols.Grpc.V1.StreamMetadata { Custom = ToMetadataBytes(metadata.Custom) };
+        if (metadata.MaxAge is { } maxAge)
+        {
+            wire.MaxAge = Duration.FromTimeSpan(maxAge);
+        }
+
+        if (metadata.MaxCount is { } maxCount)
+        {
+            wire.MaxCount = maxCount;
+        }
+
+        if (metadata.TruncateBefore is { } truncateBefore)
+        {
+            wire.TruncateBefore = truncateBefore;
+        }
+
+        if (metadata.CacheControl is { } cacheControl)
+        {
+            wire.CacheControl = Duration.FromTimeSpan(cacheControl);
+        }
+
+        if (metadata.TempStream is { } tempStream)
+        {
+            wire.TempStream = tempStream;
+        }
+
+        return wire;
+    }
+
+    /// <summary>Maps a stream's metadata from its wire form; a missing message is metadata that sets nothing.</summary>
+    /// <param name="metadata">The wire message, or <see langword="null"/>.</param>
+    /// <returns>The metadata.</returns>
+    /// <exception cref="JsonException">The custom keys are not a JSON object.</exception>
+    public static StreamMetadata ToStreamMetadata(this Protocols.Grpc.V1.StreamMetadata? metadata) =>
+        metadata is null
+            ? StreamMetadata.Empty
+            : new StreamMetadata
+            {
+                MaxAge = metadata.MaxAge?.ToTimeSpan(),
+                MaxCount = metadata.HasMaxCount ? metadata.MaxCount : null,
+                TruncateBefore = metadata.HasTruncateBefore ? metadata.TruncateBefore : null,
+                CacheControl = metadata.CacheControl?.ToTimeSpan(),
+                TempStream = metadata.HasTempStream ? metadata.TempStream : null,
+                Custom = metadata.Custom.IsEmpty ? null : ParseMetadata(metadata.Custom),
+            };
+
     /// <summary>The wire form of a metadata object: its JSON text, or empty when there is nothing to say.</summary>
     /// <param name="metadata">The object, possibly null or empty.</param>
     /// <returns>The bytes.</returns>

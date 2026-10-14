@@ -11,9 +11,10 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// of the call's tenant. It validates requests, keeps the contract's message order on
 /// a read, and translates the store's domain exceptions into the contract's errors. It knows
 /// nothing about the backend: revisions and positions arrive from the store already in the
-/// contract's numbering. It serves plain streams, <c>$all</c> and the virtual streams, bounded
-/// and as subscriptions, the virtual streams under either numbering; filters on <c>$all</c>
-/// answer with an unimplemented status until their slice lands.
+/// contract's numbering. It serves plain streams, their metadata streams, <c>$all</c> and the
+/// virtual streams, bounded and as subscriptions, the virtual streams under either numbering but
+/// the data events by position only, and <c>$all</c> under a filter; and it sets and reads a
+/// stream's metadata.
 /// </summary>
 /// <param name="stores">The backend's stores and tails, one per tenant; a call resolves those of the tenant it was authorized for.</param>
 /// <param name="routers">The routers a subscription to a plain stream takes its live events through, one per tenant.</param>
@@ -82,9 +83,9 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         }
 
         var ordinal = request.Numbering.ToNumbering() == Numbering.Ordinal;
-        if (ordinal && !isVirtual)
+        if (ordinal && !(isVirtual && virtualStream.HasOrdinals))
         {
-            throw NightingaleErrors.InvalidArgument("Ordinal numbering applies to $ce- and $et- streams only.");
+            throw NightingaleErrors.InvalidArgument("Ordinal numbering applies to $ce-, $et- and $mde streams only.");
         }
 
         if (ordinal && !store.OrdinalsEnabled)
@@ -273,6 +274,53 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         return new TombstoneResponse();
     }
 
+    /// <inheritdoc/>
+    public override async Task<GetStreamMetadataResponse> GetStreamMetadata(GetStreamMetadataRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Read).ConfigureAwait(false));
+
+        var stream = RequireMetadataStreamName(request.Stream);
+        var result = await store.GetStreamMetadataAsync(stream, context.CancellationToken).ConfigureAwait(false);
+        return new GetStreamMetadataResponse { Revision = result.Revision, Metadata = result.Metadata.ToWire() };
+    }
+
+    /// <inheritdoc/>
+    public override async Task<SetStreamMetadataResponse> SetStreamMetadata(SetStreamMetadataRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false));
+
+        var stream = RequireMetadataStreamName(request.Stream);
+        var expected = ToStreamState(request.ExpectedRevision);
+        StreamMetadata metadata;
+        try
+        {
+            metadata = request.Metadata.ToStreamMetadata();
+            metadata.Validate();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw NightingaleErrors.InvalidArgument("Custom stream metadata is a JSON object.");
+        }
+        catch (ArgumentException invalid)
+        {
+            throw NightingaleErrors.InvalidArgument(invalid.Message);
+        }
+
+        try
+        {
+            var result = await store.SetStreamMetadataAsync(stream, expected, metadata, context.CancellationToken).ConfigureAwait(false);
+            return new SetStreamMetadataResponse { Revision = result.Revision, Position = result.Position };
+        }
+        catch (RevisionConflictException conflict)
+        {
+            throw NightingaleErrors.RevisionConflict(conflict);
+        }
+    }
+
     private static StreamState ToStreamState(long expectedRevision)
     {
         try
@@ -321,8 +369,9 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     }
 
     /// <summary>
-    /// Validates a name for a read: a plain stream, <c>$all</c>, or a virtual stream with a key. Any
-    /// other reserved name is invalid.
+    /// Validates a name for a read: a plain stream, <c>$all</c>, a virtual stream, or a plain
+    /// stream's metadata stream, which reads as the plain stream it is in the store. Any other
+    /// reserved name is invalid.
     /// </summary>
     private static string RequireValidStreamName(string stream)
     {
@@ -336,12 +385,27 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             throw NightingaleErrors.InvalidStreamName(stream, $"longer than {MaxStreamNameLength} characters");
         }
 
-        if (StreamNames.IsReserved(stream) && stream != StreamNames.All && !StreamNames.TryParseVirtual(stream, out _))
+        if (StreamNames.IsReserved(stream) && stream != StreamNames.All && !StreamNames.TryParseVirtual(stream, out _) && !StreamNames.TryParseMetadataStream(stream, out _))
         {
-            throw NightingaleErrors.InvalidStreamName(stream, "reserved and not $all, $ce-<category> or $et-<event type>");
+            throw NightingaleErrors.InvalidStreamName(stream, "reserved and not $all, $ce-<category>, $et-<event type>, $de, $mde or $$<stream>");
         }
 
         return stream;
+    }
+
+    /// <summary>
+    /// Validates the name of a stream whose metadata is read or set: a plain stream's, short enough
+    /// that its metadata stream's name, two characters longer, still fits the store's column.
+    /// </summary>
+    private static string RequireMetadataStreamName(string stream)
+    {
+        var name = RequirePlainStreamName(stream);
+        if (name.Length + StreamNames.MetadataPrefix.Length > MaxStreamNameLength)
+        {
+            throw NightingaleErrors.InvalidStreamName(name, $"longer than {MaxStreamNameLength - StreamNames.MetadataPrefix.Length} characters, so its metadata stream's name would not fit");
+        }
+
+        return name;
     }
 
     private static ReadResponse CaughtUpAt(long head, DateTimeOffset at) =>

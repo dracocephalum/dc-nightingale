@@ -10,6 +10,7 @@ syntax = "proto3";
 
 package dracocephalum.nightingale.v1;
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "shared.proto";
@@ -38,13 +39,33 @@ service Streams {
   // STREAM_NOT_FOUND, STREAM_DELETED.
   rpc Delete (DeleteRequest) returns (DeleteResponse);
 
-  // Removes a stream and its events permanently. Afterwards the name reads as
-  // a stream that never existed. Errors: REVISION_CONFLICT, STREAM_NOT_FOUND.
+  // Removes a stream and its events permanently, and its metadata stream with
+  // them. Afterwards the name reads as a stream that never existed. Errors:
+  // REVISION_CONFLICT, STREAM_NOT_FOUND.
   rpc Tombstone (TombstoneRequest) returns (TombstoneResponse);
+
+  // Reads a stream's metadata as last set: the last event of its metadata
+  // stream, $$<stream>. A stream whose metadata was never set answers with
+  // revision -1 and no settings, whether or not the stream has events.
+  // Errors: INVALID_STREAM_NAME.
+  rpc GetStreamMetadata (GetStreamMetadataRequest) returns (GetStreamMetadataResponse);
+
+  // Sets a stream's metadata: appends one $metadata event to $$<stream>,
+  // under an expected revision of that metadata stream, never of the stream
+  // itself; the new metadata replaces the old as a whole. The stream need not
+  // exist, so metadata can be set before its first event. Stored, and read
+  // back, but not yet applied to reads of the stream. Errors:
+  // REVISION_CONFLICT, INVALID_STREAM_NAME, INVALID_ARGUMENT (a setting out
+  // of range, a reserved key among the custom ones, or $acl, which this
+  // server does not support).
+  rpc SetStreamMetadata (SetStreamMetadataRequest) returns (SetStreamMetadataResponse);
 }
 
 message ReadRequest {
-  // A stream name, $all, $ce-<category> or $et-<event type>.
+  // A stream name, $all, $ce-<category>, $et-<event type>, $de (every event
+  // whose type does not begin with $), $mde (every $metadata event, the same
+  // as $et-$metadata), or $$<stream>, a stream's metadata stream. $de reads
+  // by position only.
   string stream = 1;
 
   ReadDirection direction = 2;
@@ -194,3 +215,53 @@ message TombstoneRequest {
 }
 
 message TombstoneResponse {}
+
+// A stream's metadata. Each setting is absent unless set; the event that
+// stores them writes the reference's keys ($maxAge, $maxCount, $tb,
+// $cacheControl, $tmp) beside the custom ones in one JSON object.
+message StreamMetadata {
+  // How old an event may be and still be read. Positive, whole seconds.
+  google.protobuf.Duration max_age = 1;
+  // How many of the stream's last events are read. Positive.
+  optional int64 max_count = 2;
+  // The first revision read; the events before it are hidden. Never
+  // negative. Its largest value is the reference's soft delete, refused
+  // until this server does that.
+  optional int64 truncate_before = 3;
+  // Carried over from the reference, without effect here: a caching hint of
+  // its HTTP interface. Positive, whole seconds.
+  google.protobuf.Duration cache_control = 4;
+  // Carried over from the reference, without effect here: there, it asks the
+  // scavenge of a deleted stream to remove its metadata too.
+  optional bool temp_stream = 5;
+  // The application's own keys: a UTF-8 JSON object, or empty. None of them
+  // is a reserved key, nor $acl.
+  bytes custom = 6;
+}
+
+message GetStreamMetadataRequest {
+  // A plain stream's name.
+  string stream = 1;
+}
+
+message GetStreamMetadataResponse {
+  // The metadata stream's last revision, which the next set expects; -1 when
+  // the metadata was never set.
+  sint64 revision = 1;
+  StreamMetadata metadata = 2;
+}
+
+message SetStreamMetadataRequest {
+  // A plain stream's name.
+  string stream = 1;
+  // A revision of the metadata stream, or one of the ExpectedRevision
+  // values.
+  sint64 expected_revision = 2;
+  StreamMetadata metadata = 3;
+}
+
+message SetStreamMetadataResponse {
+  // Revision of the metadata event in the metadata stream, and its position.
+  sint64 revision = 1;
+  sint64 position = 2;
+}

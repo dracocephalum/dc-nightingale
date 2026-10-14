@@ -366,8 +366,40 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         }
 
         CheckExpected(stream, expected, state.Version - 1);
+
+        // Its metadata goes with it, in the same transaction: the name is free again afterwards,
+        // and metadata left behind would be in force on whatever stream takes it next. The
+        // store's tombstone deletes by name, so a stream whose metadata was never set loses
+        // nothing more.
         session.Events.TombstoneStream(stream);
+        session.Events.TombstoneStream(StreamNames.ToMetadataStream(stream));
         await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task<StreamMetadataResult> GetStreamMetadataAsync(string stream, CancellationToken cancellationToken)
+    {
+        var metastream = StreamNames.ToMetadataStream(stream);
+        var page = await ReadAsync(metastream, Direction.Backwards, null, 1, cancellationToken).ConfigureAwait(false);
+        if (page is null || page.Events.Count == 0)
+        {
+            return new StreamMetadataResult(stream, -1, StreamMetadata.Empty);
+        }
+
+        var last = page.Events[0];
+        return new StreamMetadataResult(stream, last.Revision, StreamMetadata.FromJson(last.Data.Span));
+    }
+
+    /// <inheritdoc/>
+    public Task<AppendResult> SetStreamMetadataAsync(string stream, StreamState expected, StreamMetadata metadata, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var metastream = StreamNames.ToMetadataStream(stream);
+
+        // A new id every time, as the reference's client gives each set: two sets of the same
+        // metadata are two changes, and a retry after a lost answer reads the metadata back.
+        var change = new EventData(Guid.NewGuid(), StreamNames.MetadataEventType, metadata.ToJsonBytes());
+        return AppendAsync(metastream, expected, [change], cancellationToken);
     }
 
     /// <summary>A session's options for one tenant: the store scopes every read and write in the session to it.</summary>
