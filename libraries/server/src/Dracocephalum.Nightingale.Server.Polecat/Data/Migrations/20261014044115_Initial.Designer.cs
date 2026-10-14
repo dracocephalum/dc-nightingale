@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 {
     [DbContext(typeof(NightingaleDbContext))]
-    [Migration("20261013064715_Initial")]
+    [Migration("20261014044115_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -115,26 +115,26 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     b.ToTable("Lease", "nightingale");
                 });
 
-            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.SequencerProgress", b =>
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.OrdinalSequencingProgress", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
                     b.Property<long>("Position")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("TenantId")
+                        .HasMaxLength(250)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(250)");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("TenantId")
                         .IsUnique();
 
-                    b.ToTable("SequencerProgress", "nightingale");
+                    b.ToTable("OrdinalSequencingProgress", "nightingale");
                 });
 
             modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.StoreProperty", b =>

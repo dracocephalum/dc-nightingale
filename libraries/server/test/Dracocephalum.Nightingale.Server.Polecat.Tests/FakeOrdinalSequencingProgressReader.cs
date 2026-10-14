@@ -1,0 +1,39 @@
+using Dracocephalum.Nightingale.Server.Data;
+
+namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
+
+/// <summary>The ordinal sequencer's progress rows as a test keeps them: what each read answers, how many reads there were, and a failure to throw once.</summary>
+internal sealed class FakeOrdinalSequencingProgressReader : IOrdinalSequencingProgressReader
+{
+    private readonly List<OrdinalSequencingProgress> _rows = [];
+    private Exception? _failOnce;
+    private int _reads;
+
+    public int Reads => Volatile.Read(ref _reads);
+
+    public IReadOnlyCollection<string?>? LastAskedFor { get; private set; }
+
+    public FakeOrdinalSequencingProgressReader Holding(string? tenantId, long position)
+    {
+        _rows.Add(new OrdinalSequencingProgress { Id = Guid.NewGuid(), TenantId = tenantId, Position = position });
+        return this;
+    }
+
+    public FakeOrdinalSequencingProgressReader FailingOnce(Exception exception)
+    {
+        _failOnce = exception;
+        return this;
+    }
+
+    public Task<IReadOnlyList<OrdinalSequencingProgress>> ReadAsync(IReadOnlyCollection<string?> tenantIds, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _reads);
+        LastAskedFor = tenantIds;
+        if (Interlocked.Exchange(ref _failOnce, null) is { } failure)
+        {
+            throw failure;
+        }
+
+        return Task.FromResult<IReadOnlyList<OrdinalSequencingProgress>>(_rows.Where(row => tenantIds.Contains(row.TenantId)).ToList());
+    }
+}

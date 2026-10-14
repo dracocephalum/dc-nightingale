@@ -28,8 +28,8 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
     /// <summary>Gets the leases.</summary>
     public DbSet<Lease> Leases => Set<Lease>();
 
-    /// <summary>Gets the sequencer's progress.</summary>
-    public DbSet<SequencerProgress> SequencerProgress => Set<SequencerProgress>();
+    /// <summary>Gets the ordinal sequencer's progress.</summary>
+    public DbSet<OrdinalSequencingProgress> OrdinalSequencingProgress => Set<OrdinalSequencingProgress>();
 
     /// <summary>Gets the settings the store was initialized with.</summary>
     public DbSet<StoreProperty> StoreProperties => Set<StoreProperty>();
@@ -101,12 +101,15 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             lease.HasIndex(row => row.Name).IsUnique();
         });
 
-        modelBuilder.Entity<SequencerProgress>(progress =>
+        modelBuilder.Entity<OrdinalSequencingProgress>(progress =>
         {
-            progress.ToTable(nameof(SequencerProgress));
+            progress.ToTable(nameof(OrdinalSequencingProgress));
             progress.HasKey(row => row.Id);
-            progress.Property(row => row.Name).HasMaxLength(100);
-            progress.HasIndex(row => row.Name).IsUnique();
+            progress.Property(row => row.TenantId).HasMaxLength(250).IsUnicode(false);
+
+            // Unique with no filter: SQL Server's unique index admits one null, which is the shared
+            // sequence's row, where the provider's default filter would admit any number of them.
+            progress.HasIndex(row => row.TenantId).IsUnique().HasFilter(null);
         });
 
         modelBuilder.Entity<Tenant>(tenant =>

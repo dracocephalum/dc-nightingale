@@ -95,12 +95,12 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public TimeSpan TailPollingInterval { get; set; } = PolecatTenantTails.SlowInterval;
 
     /// <summary>
-    /// Gets or sets how long the sequencer's lease lasts without renewal, after which another
+    /// Gets or sets how long the ordinal sequencer's lease lasts without renewal, after which another
     /// instance takes over the numbering. The holder renews, and a bystander asks again, at a
     /// third of it. Not bound from configuration, like <see cref="TailQuietWait"/>: it is here
     /// so that a test of one instance taking over from another does not wait out half a minute.
     /// </summary>
-    internal TimeSpan SequencerLeaseDuration { get; set; } = OrdinalSequencer.LeaseDuration;
+    internal TimeSpan OrdinalSequencerLeaseDuration { get; set; } = OrdinalSequencer.LeaseDuration;
 
     /// <summary>
     /// Gets or sets a value indicating whether the server opens a second, read-only connection and

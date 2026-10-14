@@ -202,10 +202,8 @@ here is re-derived:
   ordinal numbering, the ordinal as the link's revision. On a store without
   ordinals it serves positions in its place: they only increase, so a
   checkpoint still resumes, but two of them subtracted are no count, a
-  variance to write when the adapter ships. A property of the core's own
-  client giving the number of the stream being read, whichever numbering,
-  is booked and not planned: it is the record and the numbering the caller
-  chose, so it goes on no wire.
+  variance to write when the adapter ships. The core's own client gets its
+  one number per record differently, as *A record's locus* below.
 - **Not carried, answered `Unimplemented` until the core has them:** stream
   metadata (the `$$` streams), multi-stream append, projections, operations
   such as scavenge, and user management beyond what the credentials table
@@ -572,6 +570,31 @@ growing lag: a range count over the category or type index from the
 subscriber's position to the head, reported on the fell-behind message or by a
 small extra call. Under ordinal numbering the count is already a subtraction,
 holes included; this entry is for global numbering.
+
+## A record's locus
+
+Booked, not planned. A record carries three numbers: its revision in its own
+stream, its position in the log, and its ordinal under ordinal numbering. A
+consumer has to know which of them its read speaks: the revision for a plain
+stream, the ordinal under ordinal numbering, the position for `$all` and for a
+virtual stream numbered globally. The locus would be that number, set on
+every record the client delivers, so a consumer reads, stores and resumes
+after one property whatever it reads, in reads and subscriptions alike:
+
+> **Locus**: a record's place in what you read. Its revision when you read a
+> plain stream; its ordinal under ordinal numbering; its position otherwise.
+> Compare it, store it, and resume after it, in the same read and the same
+> numbering.
+
+The client sets it from the request it made, the stream and the numbering;
+it is never on the wire, where it would repeat what the caller said, and a
+record the server's store returns leaves it unset. The name was chosen over
+`Checkpoint`, which in the reference names a point announced or saved now and
+then, never a property of every event; `Cursor`, which suggests an opaque
+token; and the reference's `OriginalEventNumber`, which on `$all` is a
+revision rather than the position a reader of `$all` resumes from. The
+KurrentDB adapter computes the reference's own numbers for its clients, and
+is not served by this property.
 
 ## Resubscription after a dropped connection
 

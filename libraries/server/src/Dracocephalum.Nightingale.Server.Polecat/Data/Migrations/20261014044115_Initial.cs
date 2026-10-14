@@ -31,17 +31,17 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "SequencerProgress",
+                name: "OrdinalSequencingProgress",
                 schema: "nightingale",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    TenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: true),
                     Position = table.Column<long>(type: "bigint", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SequencerProgress", x => x.Id);
+                    table.PrimaryKey("PK_OrdinalSequencingProgress", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -218,10 +218,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_SequencerProgress_Name",
+                name: "IX_OrdinalSequencingProgress_TenantId",
                 schema: "nightingale",
-                table: "SequencerProgress",
-                column: "Name",
+                table: "OrdinalSequencingProgress",
+                column: "TenantId",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -279,7 +279,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 schema: "nightingale");
 
             migrationBuilder.DropTable(
-                name: "SequencerProgress",
+                name: "OrdinalSequencingProgress",
                 schema: "nightingale");
 
             migrationBuilder.DropTable(
