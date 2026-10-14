@@ -173,8 +173,8 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     public void Leave(SubscriptionConsumer consumer)
     {
         ArgumentNullException.ThrowIfNull(consumer);
-        List<InFlight> orphaned;
         TaskCompletionSource changed;
+        TaskCompletionSource? arrived;
         lock (_gate)
         {
             if (!_consumers.Remove(consumer))
@@ -182,7 +182,9 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                 return;
             }
 
-            orphaned = _inFlight.Values.Where(flight => flight.ConsumerId == consumer.Id).ToList();
+            // Queued in stream order, under the same lock that takes the consumer away: the
+            // dispatcher, woken by either, finds all of them ahead of the next live event.
+            var orphaned = _inFlight.Values.Where(flight => flight.ConsumerId == consumer.Id).OrderBy(flight => GetKey(flight.Record)).ToList();
             foreach (var flight in orphaned)
             {
                 _inFlight.Remove(flight.Record.Id);
@@ -192,14 +194,12 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
             _membership++;
             changed = _consumersChanged;
             _consumersChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            arrived = QueueRetries(orphaned.Select(flight => flight with { ConsumerId = Guid.Empty, Deadline = default }));
         }
 
         consumer.Outgoing.Writer.TryComplete();
         changed.TrySetResult();
-        foreach (var flight in orphaned)
-        {
-            EnqueueRetry(flight with { ConsumerId = Guid.Empty, Deadline = default });
-        }
+        arrived?.TrySetResult();
     }
 
     /// <summary>How the group stands right now: its consumers and what it has outstanding.</summary>
@@ -301,6 +301,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         var toPark = new List<InFlight>();
         var toDequeue = new List<long>();
         var toRedeliver = new List<InFlight>();
+        TaskCompletionSource? arrived;
         lock (_gate)
         {
             foreach (var id in ids)
@@ -330,9 +331,14 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                         break;
                 }
             }
+
+            // Queued under the lock that gave the room back: the dispatcher, woken for the room,
+            // finds them ahead of the next live event.
+            arrived = QueueRetries(toRedeliver);
         }
 
-        await SettleAsync(toRedeliver, toPark, reason).ConfigureAwait(false);
+        arrived?.TrySetResult();
+        await ParkAllAsync(toPark, reason).ConfigureAwait(false);
         foreach (var position in toDequeue)
         {
             await DequeueAsync(position).ConfigureAwait(false);
@@ -347,18 +353,22 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     {
         var toPark = new List<InFlight>();
         var toRedeliver = new List<InFlight>();
+        TaskCompletionSource? arrived;
         lock (_gate)
         {
             var now = _time.GetUtcNow();
-            foreach (var flight in _inFlight.Values.Where(flight => flight.Deadline <= now).ToList())
+            foreach (var flight in _inFlight.Values.Where(flight => flight.Deadline <= now).OrderBy(flight => GetKey(flight.Record)).ToList())
             {
                 _inFlight.Remove(flight.Record.Id);
                 ReleaseRoom(flight);
                 Requeue(flight, toPark, toRedeliver);
             }
+
+            arrived = QueueRetries(toRedeliver);
         }
 
-        await SettleAsync(toRedeliver, toPark, "Retry limit reached after the message timeout.").ConfigureAwait(false);
+        arrived?.TrySetResult();
+        await ParkAllAsync(toPark, "Retry limit reached after the message timeout.").ConfigureAwait(false);
         await WriteCheckpointIfDueAsync(false, CancellationToken.None).ConfigureAwait(false);
     }
 
@@ -494,13 +504,8 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         toRedeliver.Add(flight with { Attempts = flight.Attempts + 1, ConsumerId = Guid.Empty, Deadline = default });
     }
 
-    private async Task SettleAsync(List<InFlight> toRedeliver, List<InFlight> toPark, string reason)
+    private async Task ParkAllAsync(List<InFlight> toPark, string reason)
     {
-        foreach (var flight in toRedeliver)
-        {
-            EnqueueRetry(flight);
-        }
-
         foreach (var flight in toPark)
         {
             // Parking moves a message off the outbox in the same write, so one that came from
@@ -797,19 +802,41 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         return null;
     }
 
-    /// <summary>Queues a retry and lets the dispatcher know.</summary>
-    private void EnqueueRetry(InFlight flight)
+    /// <summary>
+    /// Queues retries together and then lets the dispatcher know: queued one at a time, a live
+    /// event could go out between two of them, after the first and ahead of the rest.
+    /// </summary>
+    private void EnqueueRetries(IEnumerable<InFlight> flights)
     {
-        TaskCompletionSource arrived;
+        TaskCompletionSource? arrived;
         lock (_gate)
+        {
+            arrived = QueueRetries(flights);
+        }
+
+        arrived?.TrySetResult();
+    }
+
+    /// <summary>Queues retries in the order given. Under the lock; the caller completes what this returns once it has let the lock go.</summary>
+    /// <returns>The wake-up the dispatcher waits on, to be completed; none when nothing was queued.</returns>
+    private TaskCompletionSource? QueueRetries(IEnumerable<InFlight> flights)
+    {
+        var any = false;
+        foreach (var flight in flights)
         {
             _retries.Enqueue(flight);
             _queued.Add(flight.Record.Id);
-            arrived = _retryArrived;
-            _retryArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            any = true;
         }
 
-        arrived.TrySetResult();
+        if (!any)
+        {
+            return null;
+        }
+
+        var arrived = _retryArrived;
+        _retryArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        return arrived;
     }
 
     /// <summary>Looks at the outbox on every wake, so a replay reaches a connected consumer at once.</summary>
@@ -840,6 +867,7 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         try
         {
             var due = await _groups.DueAsync(_definition.Id, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
+            var replayed = new List<InFlight>();
             foreach (var message in due)
             {
                 lock (_gate)
@@ -857,8 +885,12 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
                     continue;
                 }
 
-                EnqueueRetry(new InFlight(record, message.Attempts, default, true, Guid.Empty));
+                replayed.Add(new InFlight(record, message.Attempts, default, true, Guid.Empty));
             }
+
+            // Read first and queued together, so the drain goes out as one run of retries, not
+            // with live events between the reads.
+            EnqueueRetries(replayed);
         }
         finally
         {

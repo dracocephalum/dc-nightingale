@@ -105,6 +105,28 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Refusing_SeveralWithRetry_ShouldRedeliverThemAllAheadOfTheEventWaitingForRoom()
+    {
+        // Arrange: room for two; the third event waits for it.
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 0, 10), Record("orders-1", 1, 11), Record("orders-1", 2, 12)]));
+        await using var sut = Group("orders-1", -1, 2, settings => settings with { Start = StreamPosition.Start });
+        var held = new[] { await Next(sut), await Next(sut) };
+
+        // Act: the refusal gives the room back and queues the two in one step, so the dispatcher,
+        // woken for the room, cannot take the third first.
+        await sut.RefuseAsync(held.Select(message => message.Record.Id), NackAction.Retry, "not yet");
+        var redelivered = new[] { await Next(sut), await Next(sut) };
+        await sut.AcknowledgeAsync([redelivered[0].Record.Id]);
+        var third = await Next(sut);
+
+        // Assert
+        redelivered.Select(message => message.Record.Revision).ShouldBe([0, 1], "a refused event goes straight back, ahead of anything new");
+        redelivered.Select(message => message.RetryCount).ShouldBe([1, 1]);
+        third.Record.Revision.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task Refusing_WithPark_ShouldParkNowAndCountAsDone()
     {
         // Arrange
@@ -257,42 +279,79 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Delivery_OfAFilteredAllGroup_ShouldDeliverWhatTheFilterKeepsAndAdvanceTheCheckpointOverTheRest()
+    public async Task Delivery_OfAFilteredAllGroup_ShouldAdvanceTheCheckpointOverAStretchScannedAfterTheEventBeforeItIsDone()
     {
-        // Arrange: a hundred positions of which one, at 40, is the group's; the scan keeps it and
-        // says it looked through 100. Then the tail brings three events of which the middle one is
-        // the group's, read by the router.
+        // Arrange: a hundred positions of which one, at 40, is the group's. The scan's first window
+        // ends at the event, and the window after it, which reports that it looked through 100 and
+        // kept nothing, comes back only when the test lets it: the acknowledgement of 40 is done
+        // before the group hears of the stretch, whatever the threads do. The held window ends with
+        // the group, so a test that fails before letting it go still stops.
         var filter = EventTypeFilter.Prefix("order_");
+        var rest = new TaskCompletionSource<ScannedSlice>(TaskCreationOptions.RunContinuationsAsynchronously);
         _tail.Advance(100);
         A.CallTo(() => _store.ScanAllAsync(A<EventFilter>.That.Matches(f => f.Target == EventFilterTarget.EventType), Direction.Forwards, 0, 100, EventSource.ScanWindow, 500, A<CancellationToken>._))
-            .Returns(new ScannedSlice([Record("orders-1", 0, 40)], 100));
-        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 101, 103, A<int>._, A<CancellationToken>._))
-            .Returns([Shipment("shipments-1", 0, 101), Record("orders-2", 0, 102), Shipment("shipments-1", 1, 103)]);
+            .Returns(new ScannedSlice([Record("orders-1", 0, 40)], 40));
+        A.CallTo(() => _store.ScanAllAsync(A<EventFilter>.That.Matches(f => f.Target == EventFilterTarget.EventType), Direction.Forwards, 41, 100, EventSource.ScanWindow, 500, A<CancellationToken>._))
+            .ReturnsLazily(call => rest.Task.WaitAsync(call.GetArgument<CancellationToken>(6)));
         await using var sut = Group("$all", -1, 2, settings => settings with { Start = StreamPosition.Start, Filter = filter, CheckpointUpperBound = 2, CheckpointLowerBound = 1 });
 
         // Act
         var first = await Next(sut);
         var beforeAcknowledging = sut.Checkpoint;
         await sut.AcknowledgeAsync([first.Record.Id]);
-        var afterTheStretch = sut.Checkpoint;
-        _tail.Advance(103);
-        var second = await Next(sut);
-        await WaitUntilAsync(() => sut.Checkpoint == 101, () => $"checkpoint {sut.Checkpoint} after the second event, before acknowledging it");
-        var beforeTheSecond = sut.Checkpoint;
-        await sut.AcknowledgeAsync([second.Record.Id]);
-        await WaitUntilAsync(() => sut.Checkpoint == 103, () => $"checkpoint {sut.Checkpoint} after acknowledging the second event");
+        var afterTheEvent = sut.Checkpoint;
+        rest.SetResult(new ScannedSlice([], 100));
+        await WaitUntilAsync(
+            () => Fake.GetCalls(_groups).Any(call => call.Method.Name == nameof(ISubscriptionGroupStore.SaveCheckpointAsync)),
+            () => $"no checkpoint written, checkpoint {sut.Checkpoint}");
 
-        // Assert: the stretch after 40 is done once 40 is; the shipment at 101 is done before the
-        // order at 102 is, and the one at 103 once it is. Two things done, the order at 40 and the
-        // stretch through 101, make a write due, and the stretch itself is what triggers it: the
-        // write carries 101, a position the filter kept nothing at, with no acknowledgement to
-        // prompt it.
+        // Assert: the acknowledgement moves the checkpoint to 40 and is one thing done; the
+        // stretch, with nothing undone below it, moves it to 100 and is the second, which makes a
+        // write due with no acknowledgement to prompt it, at a position the filter kept nothing at.
         first.Record.Position.ShouldBe(40);
         beforeAcknowledging.ShouldBe(-1);
-        afterTheStretch.ShouldBe(100);
+        afterTheEvent.ShouldBe(40);
+        sut.Checkpoint.ShouldBe(100);
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, A<long>._, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 100, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task Delivery_OfAFilteredAllGroup_ShouldHoldTheCheckpointBelowEveryEventInFlightWhateverWasScannedPastIt()
+    {
+        // Arrange: the scan keeps the event at 40 and reports it looked through 100; the tail then
+        // brings a shipment at 101, which the filter drops, and an order at 102, read by the
+        // router. The feed hands the group the stretches through 100 and through 101 before it
+        // hands it 102, so once the consumer has 102 the group has taken both stretches, while
+        // 40 is still in flight.
+        var filter = EventTypeFilter.Prefix("order_");
+        _tail.Advance(100);
+        A.CallTo(() => _store.ScanAllAsync(A<EventFilter>.That.Matches(f => f.Target == EventFilterTarget.EventType), Direction.Forwards, 0, 100, EventSource.ScanWindow, 500, A<CancellationToken>._))
+            .Returns(new ScannedSlice([Record("orders-1", 0, 40)], 100));
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 101, 102, A<int>._, A<CancellationToken>._))
+            .Returns([Shipment("shipments-1", 0, 101), Record("orders-2", 0, 102)]);
+        await using var sut = Group("$all", -1, 2, settings => settings with { Start = StreamPosition.Start, Filter = filter, CheckpointUpperBound = 2, CheckpointLowerBound = 1 });
+
+        // Act
+        var first = await Next(sut);
+        _tail.Advance(102);
+        var second = await Next(sut);
+        var whileBothAreInFlight = sut.Checkpoint;
+        await sut.AcknowledgeAsync([first.Record.Id]);
+        var afterTheFirst = sut.Checkpoint;
+        await sut.AcknowledgeAsync([second.Record.Id]);
+        var afterTheSecond = sut.Checkpoint;
+
+        // Assert: the stretches wait behind 40, then stop short of 102 while it is in flight, and
+        // count for nothing, having moved nothing when they came; the two acknowledgements make
+        // the one write due, at 102.
+        first.Record.Position.ShouldBe(40);
         second.Record.Position.ShouldBe(102);
-        beforeTheSecond.ShouldBe(101);
-        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 101, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        whileBothAreInFlight.ShouldBe(-1);
+        afterTheFirst.ShouldBe(101);
+        afterTheSecond.ShouldBe(102);
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, A<long>._, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 102, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -386,14 +445,18 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     [Fact]
     public async Task Pinned_ShouldKeepAStreamWithOneConsumer()
     {
-        // Arrange
+        // Arrange: the read waits until all three consumers have joined, since a stream is pinned
+        // while the consumers are the same, and one alone would have taken the first events.
         var records = Enumerable.Range(0, 12).Select(index => Record("orders-" + (index % 3), index, 10 + index)).ToList();
+        var joined = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _tail.Advance(21);
-        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 21, 500, A<CancellationToken>._)).Returns(records);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 21, 500, A<CancellationToken>._))
+            .ReturnsLazily(call => ReturnWhenAsync(joined.Task, records, call.GetArgument<CancellationToken>(4)));
         await using var sut = Group(StreamNames.All, -1, 12, settings => settings with { Start = StreamPosition.Start, ConsumerStrategy = ConsumerStrategy.Pinned });
         var second = sut.Join(12, "two");
         var third = sut.Join(12, "three");
         var consumers = new[] { _consumer!, second, third };
+        joined.SetResult();
         await WaitUntilAsync(() => sut.Describe().InFlightCount == 12);
 
         // Act
@@ -408,16 +471,20 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     public async Task PinnedByCorrelation_ShouldKeepAWorkflowWithOneConsumerAcrossStreamsAndFallBackToTheStream()
     {
         // Arrange: twelve events over three streams, four workflows crossing them, and three
-        // events with no correlation id at all, on a stream of their own.
+        // events with no correlation id at all, on a stream of their own. The read waits until all
+        // three consumers have joined, as above.
         var records = Enumerable.Range(0, 12).Select(index => Record("orders-" + (index % 3), index, 10 + index, "checkout-" + (index % 4)))
             .Concat(Enumerable.Range(12, 3).Select(index => Record("audit-1", index, 10 + index)))
             .ToList();
+        var joined = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _tail.Advance(24);
-        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 24, 500, A<CancellationToken>._)).Returns(records);
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 0, 24, 500, A<CancellationToken>._))
+            .ReturnsLazily(call => ReturnWhenAsync(joined.Task, records, call.GetArgument<CancellationToken>(4)));
         await using var sut = Group(StreamNames.All, -1, 15, settings => settings with { Start = StreamPosition.Start, ConsumerStrategy = ConsumerStrategy.PinnedByCorrelation });
         var second = sut.Join(15, "two");
         var third = sut.Join(15, "three");
         var consumers = new[] { _consumer!, second, third };
+        joined.SetResult();
         await WaitUntilAsync(() => sut.Describe().InFlightCount == 15);
 
         // Act
@@ -546,6 +613,13 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         }
 
         return messages;
+    }
+
+    /// <summary>A store read that answers once the test lets it, and ends with the group if the test never does.</summary>
+    private static async Task<IReadOnlyList<EventRecord>> ReturnWhenAsync(Task gate, IReadOnlyList<EventRecord> records, CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        return records;
     }
 
     private async Task<PersistentSubscriptionMessage.Recorded> Next(SubscriptionGroupRuntime group) => await Next(_consumer!);
