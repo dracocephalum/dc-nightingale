@@ -95,7 +95,7 @@ public sealed class ExampleProgramTests(SharedRun.Fixture fixture)
         var names = Scenarios.All.Select(scenario => scenario.Name).ToList();
 
         // Assert: the names the READMEs and the tests use.
-        names.ShouldBe(["append-and-read", "catch-up-subscription", "category-stream", "category-ordinals", "cluster-redirect", "competing-consumers", "credentials-and-tenants", "delete-and-tombstone", "persistent-subscription", "stream-metadata"]);
+        names.ShouldBe(["append-and-read", "catch-up-subscription", "category-stream", "category-ordinals", "cluster-redirect", "competing-consumers", "credentials-and-tenants", "persistent-subscription", "reset-archive-delete", "stream-metadata"]);
         names.ShouldAllBe(name => name.All(character => char.IsAsciiLetterLower(character) || character == '-') && name != ExampleProgram.All);
         Scenarios.All.ShouldAllBe(scenario => !string.IsNullOrWhiteSpace(scenario.Summary));
     }

@@ -277,15 +277,17 @@ link events to resolve.
 
 **Why:** virtual streams are predicates, so an event is only ever itself.
 
-## A tombstoned stream reads as one that never existed
+## A deleted stream reads as one that never existed
 
-**Reference:** a read of a tombstoned stream fails with a stream-deleted
-error, and the name can never be used again.
+**Reference:** a tombstone, its hard delete, leaves a marker: a read of the
+stream fails with a stream-deleted error, and the name can never be used
+again.
 
-**Nightingale:** tombstone removes the stream and its events permanently, its
+**Nightingale:** `Delete` removes the stream and its events permanently, its
 metadata stream with them, and afterwards the name reads as not found and may
 be appended to again; metadata set on it afterwards is a new stream's, where
-the reference refuses every write to the name.
+the reference refuses every write to the name. The KurrentDB adapter maps the
+reference's tombstone to it.
 
 **Why:** the store's hard delete leaves no marker behind.
 
@@ -396,30 +398,58 @@ its own; metadata stays an event because it changes what a stream reads, and
 a replay of `$all` needs a change of it in its place among the events around
 it. Hiding archived events is the store's convention on every read.
 
-## Deletion is off unless the host turns it on
+## Archive and delete are off unless the host allows them
 
-**Reference:** any caller with write access may delete or tombstone a stream.
+**Reference:** any caller with write access may delete (soft) or tombstone a
+stream.
 
-**Nightingale:** the server refuses both unless its host enables them, each
-under its own switch in `Nightingale:Deletion`, and a caller cannot change
-that; the refusal is the `DELETION_DISABLED` reason.
+**Nightingale:** `Reset`, the reference's soft delete, is allowed to any
+caller with write access, as a metadata set is: it removes nothing. `Archive`
+and `Delete`, the reference's tombstone, are refused unless the host raises
+`Nightingale:Deletion:Allowed` from `None` to `Archive`, or to `Delete`,
+which allows both, and they need the operations role; a caller cannot raise
+the level. The refusal is the `DELETION_DISABLED` reason, naming the
+operation and the level.
 
-**Why:** a store that never deletes keeps every event a consumer may still
+**Why:** a store that never removes keeps every event a consumer may still
 need and makes retention a decision of the operator rather than a habit of
-the code; the irreversible tombstone gets its own switch for the same reason.
+the code; the levels rise with what is lost, and a reset loses nothing.
 
-## Deleted streams
+## Reset, archive and delete
 
-**Reference:** a soft-deleted stream can be recreated by appending to it, its
-events remain in `$all` until scavenged, and a tombstoned stream is permanent.
+**Reference:** two calls. A delete, the soft delete, makes the stream read as
+not found until an append recreates it; the append continues its revisions
+from the last plus one, the older events stay hidden from its reads, and they
+remain in `$all` until a scavenge. It writes `$tb` at its largest value into
+the metadata, replacing every other key, and an un-delete with `$tb` at the
+last revision plus one after the recreating append or a set of the metadata.
+An append that expects the stream to exist is refused while it is
+soft-deleted; one that expects no stream is accepted. A tombstone is
+permanent.
 
-**Nightingale:** delete archives the stream: its events disappear from every
-read, and an append to it fails with a stream-deleted error rather than
-recreating it. Tombstone removes the stream and its events permanently. The
-gateway exposes no un-archive.
+**Nightingale:** three calls. `Reset` is the reference's delete, read the
+same way. Its metadata event stores `$tb` as the negative of the revision the
+stream continues from, `-6` for a stream reset at revision 5, which one number
+says both that it is reset and where it is truncated; no un-delete event is
+written when an append recreates the stream, since the same number is then a
+plain truncation, and the KurrentDB adapter translates the value for that
+client, `$tb` at its largest while the stream is reset and the revision
+after. A set of the metadata on a reset stream writes the reference's two
+events in one append. An append that expects the stream to exist is accepted
+on a reset stream, and one that expects no stream is accepted by a retry
+after the store refuses it, a change of metadata between the two letting it
+through. A reset of a stream with metadata but no events clears the metadata,
+where the reference marks it deleted until its first append; the stream
+reads as not found either way. `Archive` has no counterpart: the stream and
+its events leave every read, `$all` and the virtual streams included, appends
+fail with a stream-deleted error, and the rows stay; the gateway exposes no
+un-archive. `Delete` is the reference's tombstone, except for the name, above.
 
-**Why:** archive and tombstone are the store's two primitives; recreating a
-soft-deleted stream with continuing revision numbers has no counterpart.
+**Why:** an append never reads metadata, so no check of it lands on the
+first-tier path, and the store's unique index on a stream's versions is what
+orders an append and a reset on any number of instances. Archive is the
+store's own primitive, kept for a stream that must leave every consumer's
+view while its rows are kept.
 
 ## Stream metadata keeps its history and refuses what it cannot honour
 
@@ -444,8 +474,7 @@ database's clock, which stamped the events. The read reports the bound of
 `$maxCount` and `$tb` as the head's first revision. `$$<stream>` is read and
 followed as a stream with its whole history, written only by the metadata
 call, and refused for a persistent-subscription group. `$tb` at its largest
-value, the reference's soft delete, is refused until the gateway does soft
-delete. `$acl` is refused as an invalid argument until authentication carries
+value resets the stream (*Reset, archive and delete*). `$acl` is refused as an invalid argument until authentication carries
 stream ACLs. `$cacheControl` and `$tmp` are stored and returned without
 effect, keys carried over from the reference. A reserved key out of range or
 of the wrong type refuses the set rather than emptying the metadata.

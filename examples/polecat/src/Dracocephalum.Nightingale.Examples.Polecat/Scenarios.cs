@@ -47,15 +47,15 @@ public static class Scenarios
             CredentialsAndTenants.Scenario.RunAsync,
             report => $"Done: {report.Made.Count} credentials made; the user was refused as {report.ReaderRefusal}; tenant {report.Tenant.Name} disabled, its credential refused as {report.DisabledRefusal}."),
         ExampleScenario.Create(
-            "delete-and-tombstone",
-            "delete hides a stream, tombstone frees its name, and the default server refuses both",
-            DeleteAndTombstone.Scenario.RunAsync,
-            report => $"Done: deleted, tombstoned and revived {report.Stream}; the default server refused with {report.DefaultServerRefusal}."),
-        ExampleScenario.Create(
             "persistent-subscription",
             "a group: consume with acknowledgements, retry and park, replay, resume from the checkpoint",
             PersistentSubscription.Scenario.RunAsync,
             report => $"Done: {report.Delivered.Count} delivered, one parked and replayed as {report.ReplayedType}; the group ended at checkpoint {report.CheckpointOnReturn}."),
+        ExampleScenario.Create(
+            "reset-archive-delete",
+            "reset hides a stream until its next append, archive hides it everywhere, delete frees its name; the default server only resets",
+            ResetArchiveDelete.Scenario.RunAsync,
+            report => $"Done: reset, recreated at revision {report.RecreatedRevision}, archived, deleted and reused {report.Stream}; the default server refused to archive with {report.DefaultServerRefusal}."),
         ExampleScenario.Create(
             "stream-metadata",
             "a stream's metadata: set before the stream, read back, raced, its history, $acl refused, $all, $de and $mde",

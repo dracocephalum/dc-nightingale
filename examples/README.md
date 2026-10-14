@@ -8,7 +8,7 @@ from one program.
 
 | Component | Purpose | Status |
 |---|---|---|
-| [`polecat`](polecat/README.md) | the scenarios of the Polecat-backed server: append and read, catch-up subscriptions, the virtual streams by position and by ordinal, redirects between two instances, delete and tombstone, persistent subscriptions | active |
+| [`polecat`](polecat/README.md) | the scenarios of the Polecat-backed server: append and read, catch-up subscriptions, the virtual streams by position and by ordinal, redirects between two instances, reset, archive and delete, persistent subscriptions, stream metadata | active |
 
 Each component has its own solution and `README.md`. To add one, follow
 `agentics/rules/coding/csharp/csharp-new-project.md` (or `/new` in Claude Code)
