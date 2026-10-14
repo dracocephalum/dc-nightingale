@@ -21,6 +21,7 @@ public sealed class CategoryColumnTests(SqlServerTestDatabase database)
     [InlineData("orders-1-")]
     [InlineData("nohyphen")]
     [InlineData("-leading")]
+    [InlineData("o-")]
     public async Task Category_AsTheDatabaseComputesIt_ShouldBeWhatTheServerComputes(string prefix)
     {
         // Arrange: a name of the shape, made unique so the shared database can hold it.

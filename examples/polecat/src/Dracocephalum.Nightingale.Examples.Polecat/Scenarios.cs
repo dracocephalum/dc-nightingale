@@ -62,6 +62,11 @@ public static class Scenarios
             ResetArchiveDelete.Scenario.RunAsync,
             report => $"Done: reset, recreated at revision {report.RecreatedRevision}, archived, deleted and reused {report.Stream}; the default server refused to archive with {report.DefaultServerRefusal}."),
         ExampleScenario.Create(
+            "stream-listings",
+            "a workflow by correlation, the streams and a category's by their first events, and the exact filters on $all",
+            StreamListings.Scenario.RunAsync,
+            report => $"Done: the workflow touched {report.Workflow.Count} events; $streams listed {report.Streams.Count} streams and then {report.LiveListed} live."),
+        ExampleScenario.Create(
             "stream-metadata",
             "a stream's metadata: set before the stream, read back, raced, its history, $acl refused, $all, $de and $mde",
             StreamMetadata.Scenario.RunAsync,

@@ -108,7 +108,7 @@ public static class WireConversions
 
     /// <summary>
     /// Maps a filter from the wire, checking it as the server does: it looks at the stream name or
-    /// the event type, and has prefixes or a regular expression, not both and not neither.
+    /// the event type, and has prefixes, a regular expression or exact values, one of the three.
     /// </summary>
     /// <param name="filter">The wire message.</param>
     /// <returns>The filter.</returns>
@@ -124,18 +124,21 @@ public static class WireConversions
         };
         var hasPrefixes = expression.Prefix.Count > 0;
         var hasRegex = expression.Regex.Length > 0;
-        if (hasPrefixes == hasRegex)
+        var hasExact = expression.Exact.Count > 0;
+        if ((hasPrefixes ? 1 : 0) + (hasRegex ? 1 : 0) + (hasExact ? 1 : 0) != 1)
         {
-            throw new ArgumentException("A filter has prefixes or a regular expression, not both and not neither.", nameof(filter));
+            throw new ArgumentException("A filter has prefixes, a regular expression or exact values: one of the three.", nameof(filter));
         }
 
         var byStreamName = filter.KindCase == Filter.KindOneofCase.StreamName;
-        return (byStreamName, hasRegex) switch
+        return (byStreamName, hasRegex, hasExact) switch
         {
-            (true, false) => StreamFilter.Prefix([.. expression.Prefix]),
-            (true, true) => StreamFilter.RegularExpression(expression.Regex),
-            (false, false) => EventTypeFilter.Prefix([.. expression.Prefix]),
-            (false, true) => EventTypeFilter.RegularExpression(expression.Regex),
+            (true, true, _) => StreamFilter.RegularExpression(expression.Regex),
+            (true, _, true) => StreamFilter.Category([.. expression.Exact]),
+            (true, _, _) => StreamFilter.Prefix([.. expression.Prefix]),
+            (false, true, _) => EventTypeFilter.RegularExpression(expression.Regex),
+            (false, _, true) => EventTypeFilter.Type([.. expression.Exact]),
+            (false, _, _) => EventTypeFilter.Prefix([.. expression.Prefix]),
         };
     }
 
@@ -154,6 +157,7 @@ public static class WireConversions
         else
         {
             expression.Prefix.AddRange(filter.Prefixes);
+            expression.Exact.AddRange(filter.Exact);
         }
 
         var wire = new Filter { CheckpointInterval = checkpointInterval };

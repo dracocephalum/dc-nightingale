@@ -4,9 +4,10 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 
 /// <summary>
-/// A prefix filter as a predicate over the events table: a category and its hyphen is the
+/// A prefix or an exact filter as a predicate over the events table: a category and its hyphen is the
 /// category column's equality less the bare name, anything else begins-with on the name or the
-/// type, several prefixes are any of them, and a regular expression is not the database's.
+/// type, several prefixes are any of them, exact values are any of them on the category or the
+/// type with nothing taken away, and a regular expression is not the database's.
 /// </summary>
 public sealed class FilterPredicatesTests
 {
@@ -27,10 +28,10 @@ public sealed class FilterPredicatesTests
     }
 
     [Fact]
-    public void ByPrefixes_WithACategoryPrefix_ShouldKeepTheCategoryLessTheBareName()
+    public void ToPredicate_WithACategoryPrefix_ShouldKeepTheCategoryLessTheBareName()
     {
         // Arrange
-        var keep = FilterPredicates.ByPrefixes(StreamFilter.Prefix("orders-")).Compile();
+        var keep = FilterPredicates.ToPredicate(StreamFilter.Prefix("orders-")).Compile();
 
         // Assert
         keep(Row("orders-1", "orders", "x")).ShouldBeTrue();
@@ -40,11 +41,11 @@ public sealed class FilterPredicatesTests
     }
 
     [Fact]
-    public void ByPrefixes_WithOtherPrefixes_ShouldBeAnyOfThemOnTheNameOrTheType()
+    public void ToPredicate_WithOtherPrefixes_ShouldBeAnyOfThemOnTheNameOrTheType()
     {
         // Arrange
-        var byName = FilterPredicates.ByPrefixes(StreamFilter.Prefix("ord", "invoices-")).Compile();
-        var byType = FilterPredicates.ByPrefixes(EventTypeFilter.Prefix("Order")).Compile();
+        var byName = FilterPredicates.ToPredicate(StreamFilter.Prefix("ord", "invoices-")).Compile();
+        var byType = FilterPredicates.ToPredicate(EventTypeFilter.Prefix("Order")).Compile();
 
         // Assert
         byName(Row("orders-1", "orders", "x")).ShouldBeTrue();
@@ -55,10 +56,26 @@ public sealed class FilterPredicatesTests
     }
 
     [Fact]
-    public void ByPrefixes_WithARegularExpression_ShouldRefuse()
+    public void ToPredicate_WithCategoriesOrTypes_ShouldBeAnyOfThemExactlyAndKeepTheBareName()
+    {
+        // Arrange
+        var byCategory = FilterPredicates.ToPredicate(StreamFilter.Category("orders", "invoices")).Compile();
+        var byType = FilterPredicates.ToPredicate(EventTypeFilter.Type("order_placed")).Compile();
+
+        // Assert: the stream named just the category is in it, unlike under the prefix.
+        byCategory(Row("orders-1", "orders", "x")).ShouldBeTrue();
+        byCategory(Row("orders", "orders", "x")).ShouldBeTrue();
+        byCategory(Row("invoices-7", "invoices", "x")).ShouldBeTrue();
+        byCategory(Row("ordersx-1", "ordersx", "x")).ShouldBeFalse();
+        byType(Row("x-1", "x", "order_placed")).ShouldBeTrue();
+        byType(Row("x-1", "x", "order_placed_v2")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ToPredicate_WithARegularExpression_ShouldRefuse()
     {
         // Act & Assert
-        Should.Throw<ArgumentException>(() => FilterPredicates.ByPrefixes(StreamFilter.RegularExpression("^orders")));
+        Should.Throw<ArgumentException>(() => FilterPredicates.ToPredicate(StreamFilter.RegularExpression("^orders")));
     }
 
     private static EventRow Row(string stream, string category, string type) =>

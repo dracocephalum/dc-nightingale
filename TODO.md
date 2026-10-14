@@ -42,8 +42,10 @@ undecided adds it here rather than mentioning it once in a conversation.
   `Nightingale:Store:AssignOrdinals`, filters on `$all` with their
   checkpoints, for reads, catch-up subscriptions and persistent groups, and a
   stream's metadata, set and read back as events of `$$<stream>` and applied
-  to reads of the stream, with `$de` and `$mde` beside `$all`, and binary
-  data beside an event's JSON or instead of it; the samples
+  to reads of the stream, with `$de` and `$mde` beside `$all`, binary
+  data beside an event's JSON or instead of it, `$bc-` by correlation and
+  `$streams` and `$category-` by each stream's first event, by position,
+  and filters on `$all` by whole categories and exact types; the samples
   under `examples/` are the end-to-end
   runs. Not yet: the ordinal
   backfill, in `PENDING.md`. Close by: see `PENDING.md`.
@@ -63,6 +65,22 @@ undecided adds it here rather than mentioning it once in a conversation.
   tenant of the directory, merged in position order in process, each asked
   for the next page's worth only, with an integration test over several
   tenants. Stores partitioned by tenant refuse the wildcard already.
+- **A filtered group's checkpoint test is timing-dependent.**
+  `SubscriptionGroupRuntimeTests.Delivery_OfAFilteredAllGroup_ShouldDeliverWhatTheFilterKeepsAndAdvanceTheCheckpointOverTheRest`
+  fails in most runs of its class on its own, on `main` as on later
+  branches (10 of 12 measured), though it passes inside the whole suite. It
+  reads the checkpoint the moment the first event is acknowledged, while the
+  scan's marker of the stretch through 100 reaches the group in its own
+  time; waiting for that checkpoint instead moves the failure to the write
+  it expects at 101, which a marker landing at another moment makes due at
+  another position. The reference meets the same case without the race: its
+  subscription takes a filtered-out stretch and an acknowledgement under one
+  lock, counts each event filtered out toward the checkpoint bounds rather
+  than a stretch as one, and its tests call the two in a fixed order and
+  assert the checkpoint written, with no feed running. Close by: drive the
+  marker and the acknowledgement in a fixed order, waiting until the group
+  has taken the marker before acknowledging, and assert the writes the
+  policy then promises, with the class run in a loop to prove it.
 - **An event can be appended that no client can read back.** Neither side
   sets gRPC's message limits, so both keep the defaults: the server receives
   at most 4 MB in a message and sends any size, and the client the same the

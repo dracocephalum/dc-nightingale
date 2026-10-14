@@ -35,7 +35,7 @@ CREATE TABLE dbo.pc_events (
     causation_id        varchar(250)        NULL,
     headers             json                NULL,
     is_archived         bit                 NOT NULL DEFAULT 0,
-    category AS (LEFT(stream_id, CHARINDEX('-', stream_id + '-') - 1)) PERSISTED,
+    category AS (CASE WHEN CHARINDEX('-', stream_id) > 1 THEN LEFT(stream_id, CHARINDEX('-', stream_id) - 1) ELSE stream_id END) PERSISTED,
     category_ordinal    bigint              NULL,
     type_ordinal        bigint              NULL,
 CONSTRAINT pkey_pc_events_seq_id PRIMARY KEY (seq_id)
@@ -47,6 +47,12 @@ CREATE UNIQUE INDEX ix_pc_events_stream_and_version ON dbo.pc_events (tenant_id,
 CREATE INDEX ix_pc_events_category_seq ON dbo.pc_events (tenant_id, category, seq_id) WHERE (is_archived = 0);
 
 CREATE INDEX ix_pc_events_type_seq ON dbo.pc_events (tenant_id, type, seq_id) WHERE (is_archived = 0);
+
+CREATE INDEX ix_pc_events_correlation_seq ON dbo.pc_events (tenant_id, correlation_id, seq_id) WHERE (correlation_id IS NOT NULL AND is_archived = 0);
+
+CREATE INDEX ix_pc_events_stream_starts ON dbo.pc_events (tenant_id, seq_id) WHERE (version = 1 AND is_archived = 0);
+
+CREATE INDEX ix_pc_events_category_starts ON dbo.pc_events (tenant_id, category, seq_id) WHERE (version = 1 AND is_archived = 0);
 
 CREATE INDEX ix_pc_events_category_ordinal ON dbo.pc_events (tenant_id, category, category_ordinal) WHERE (category_ordinal IS NOT NULL);
 

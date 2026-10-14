@@ -16,6 +16,8 @@ public sealed class FilterColumnTests
             StreamFilter.RegularExpression("^orders-[0-9]+$"),
             EventTypeFilter.Prefix("Order"),
             EventTypeFilter.RegularExpression("Placed$"),
+            StreamFilter.Category("orders", "invoices"),
+            EventTypeFilter.Type("order_placed"),
         ];
 
         foreach (var filter in filters)
@@ -30,6 +32,7 @@ public sealed class FilterColumnTests
             back.Target.ShouldBe(filter.Target);
             back.Prefixes.ShouldBe(filter.Prefixes);
             back.Regex.ShouldBe(filter.Regex);
+            back.Exact.ShouldBe(filter.Exact);
         }
     }
 

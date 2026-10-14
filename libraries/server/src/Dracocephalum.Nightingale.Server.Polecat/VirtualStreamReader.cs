@@ -106,7 +106,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         IReadOnlyList<EventRecord> events;
         if (filter.Regex is null)
         {
-            var kept = stretch.Where(FilterPredicates.ByPrefixes(filter));
+            var kept = stretch.Where(FilterPredicates.ToPredicate(filter));
             events = await PageAsync(forwards ? kept.OrderBy(e => e.SeqId) : kept.OrderByDescending(e => e.SeqId), count, Plain, cancellationToken).ConfigureAwait(false);
         }
         else
@@ -140,7 +140,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         await using var context = OpenContext();
         return await FilterByPosition(QueryLive(context, null), Direction.Forwards, from, head)
             .Take(count)
-            .Select(e => new EventPointer(e.StreamId, e.Version - 1, e.SeqId, e.Type))
+            .Select(e => new EventPointer(e.StreamId, e.Version - 1, e.SeqId, e.Type, e.CorrelationId))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
     }
@@ -257,9 +257,11 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             : events.Where(e => e.SeqId <= from).OrderByDescending(e => e.SeqId);
 
     /// <summary>
-    /// The events of one virtual stream: a seek on the category or the type index, or, for the data
-    /// events, the type checked on the rows a read of <c>$all</c> reads anyway, at the cost of
-    /// <c>$all</c>. A prefix with no wildcard in it, so the database compares the first character.
+    /// The events of one virtual stream: a seek on the category, the type or the correlation
+    /// index; the first event of each stream, a seek on the stream-starts index or, by category,
+    /// on the category-starts one, which hold one row a stream; or, for the data events, the type
+    /// checked on the rows a read of <c>$all</c> reads anyway, at the cost of <c>$all</c>, a
+    /// prefix with no wildcard in it, so the database compares the first character.
     /// </summary>
     private static IQueryable<EventRow> FilterByKey(IQueryable<EventRow> events, VirtualStreamName stream)
     {
@@ -268,6 +270,9 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         {
             VirtualStreamKind.Category => events.Where(e => e.Category == key),
             VirtualStreamKind.EventType => events.Where(e => e.Type == key),
+            VirtualStreamKind.Correlation => events.Where(e => e.CorrelationId == key),
+            VirtualStreamKind.Streams => events.Where(e => e.Version == 1),
+            VirtualStreamKind.CategoryStreams => events.Where(e => e.Version == 1 && e.Category == key),
             _ => events.Where(e => !e.Type.StartsWith('$')),
         };
     }

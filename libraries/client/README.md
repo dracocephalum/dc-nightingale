@@ -14,8 +14,10 @@ What an application uses to talk to a Nightingale server.
 The client-side package: `NightingaleClient` over the generated stub, with
 append, bounded reads of a plain stream, of its metadata stream
 (`$$<stream>`), of `$all` and of the virtual streams (`$ce-<category>`,
-`$et-<event type>`, `$de`, `$mde`), and catch-up subscriptions to any of
-them, delivered through a one-slot channel so a slow
+`$et-<event type>`, `$bc-<correlation id>`, `$streams`, `$category-<category>`,
+`$de`, `$mde`), `$all` filtered by stream-name prefix, regular expression or
+whole category, or by event-type prefix, regular expression or exact type, and
+catch-up subscriptions to any of them, delivered through a one-slot channel so a slow
 consumer holds the server back; a stream's metadata, set and read back as
 typed settings beside the application's own keys, which the server applies to
 reads of the stream; reset, the reference client's delete, which every server

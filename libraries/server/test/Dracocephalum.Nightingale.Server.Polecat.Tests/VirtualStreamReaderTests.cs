@@ -60,6 +60,21 @@ public sealed class VirtualStreamReaderTests
     }
 
     [Fact]
+    public async Task ReadAsync_OfACorrelationOrAListingOfStreams_ShouldTakeTheTenantsLiveRowsItHolds()
+    {
+        // Act
+        var streams = await _sut.ReadAsync(new VirtualStreamName(VirtualStreamKind.Streams, string.Empty), Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+        var orders = await _sut.ReadAsync(new VirtualStreamName(VirtualStreamKind.CategoryStreams, "orders"), Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+        var correlation = await _sut.ReadAsync(new VirtualStreamName(VirtualStreamKind.Correlation, "c-3"), Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+
+        // Assert: a stream's first event only, the deleted stream's at 4 and the other tenant's
+        // at 5 left out; and one correlation's events.
+        streams.Select(record => record.Position).ShouldBe([1, 2, 6]);
+        orders.Select(record => record.Position).ShouldBe([1, 6]);
+        correlation.Select(record => record.Position).ShouldBe([3]);
+    }
+
+    [Fact]
     public async Task ReadAllAsync_WithNoTenant_ShouldSpanAllTenantsAndWithOneStayWithinIt()
     {
         // Arrange
@@ -144,8 +159,8 @@ public sealed class VirtualStreamReaderTests
         var bounded = await _sut.ReadPointersAsync(2, 6, 2, TestContext.Current.CancellationToken);
 
         // Assert: the deleted stream's event at 4 and the other tenant's at 5 are not pointed at.
-        all.ShouldBe([new EventPointer("orders-1", 0, 1, "order_placed"), new EventPointer("shipments-1", 0, 2, "shipment_sent"), new EventPointer("orders-1", 1, 3, "order_paid"), new EventPointer("orders-4", 0, 6, "order_placed"), new EventPointer("orders-4", 1, 7, "order_paid"), new EventPointer("orders-4", 2, 8, "order_shipped")]);
-        bounded.ShouldBe([new EventPointer("shipments-1", 0, 2, "shipment_sent"), new EventPointer("orders-1", 1, 3, "order_paid")]);
+        all.ShouldBe([new EventPointer("orders-1", 0, 1, "order_placed", "c-1"), new EventPointer("shipments-1", 0, 2, "shipment_sent", "c-2"), new EventPointer("orders-1", 1, 3, "order_paid", "c-3"), new EventPointer("orders-4", 0, 6, "order_placed", "c-6"), new EventPointer("orders-4", 1, 7, "order_paid", "c-7"), new EventPointer("orders-4", 2, 8, "order_shipped", "c-8")]);
+        bounded.ShouldBe([new EventPointer("shipments-1", 0, 2, "shipment_sent", "c-2"), new EventPointer("orders-1", 1, 3, "order_paid", "c-3")]);
     }
 
     [Fact]

@@ -6,8 +6,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
 /// The store's event-store feature with the gateway's additions declared on the events table: a
-/// persisted computed <c>category</c> column, everything before the first hyphen of the stream name,
-/// and two filtered indexes that make a category or event-type read a seek instead of a scan; and,
+/// persisted computed <c>category</c> column, the stream name's category by
+/// <see cref="StreamNames.CategoryOf"/>; filtered indexes that make a read of a category, an event
+/// type or a correlation a seek instead of a scan, the correlation's holding only the events that
+/// carry one; two more holding one row a stream, its first event, for <c>$streams</c> and
+/// <c>$category-</c>; and,
 /// on a store initialized with ordinals, two nullable columns holding each event's place within
 /// its category stream and its event-type stream, each with a filtered index over the numbered
 /// rows only, so a read by ordinal is one seek and never returns an unnumbered row, and a third
@@ -44,7 +47,7 @@ internal sealed class PatchedEventStoreFeature(IFeatureSchema inner, bool ordina
             foreach (var table in objects.OfType<Table>().Where(table => table.Identifier.Name == EventsTable))
             {
                 table.AddColumn("category", "varchar(250)")
-                    .ComputedAs("LEFT(stream_id, CHARINDEX('-', stream_id + '-') - 1)", persisted: true);
+                    .ComputedAs("CASE WHEN CHARINDEX('-', stream_id) > 1 THEN LEFT(stream_id, CHARINDEX('-', stream_id) - 1) ELSE stream_id END", persisted: true);
                 table.Indexes.Add(new IndexDefinition("ix_pc_events_category_seq")
                 {
                     Columns = [TenantColumn, "category", "seq_id"],
@@ -54,6 +57,28 @@ internal sealed class PatchedEventStoreFeature(IFeatureSchema inner, bool ordina
                 {
                     Columns = [TenantColumn, "type", "seq_id"],
                     Predicate = "is_archived = 0",
+                });
+
+                // A row only for an event that carries a correlation id: an append without one
+                // writes nothing here, and an equality on the column implies it is not null, so a
+                // read of one correlation seeks the filtered index.
+                table.Indexes.Add(new IndexDefinition("ix_pc_events_correlation_seq")
+                {
+                    Columns = [TenantColumn, "correlation_id", "seq_id"],
+                    Predicate = "correlation_id IS NOT NULL AND is_archived = 0",
+                });
+
+                // A row a stream, its first event: what $streams and $category- read, and what
+                // only an append that begins a stream writes.
+                table.Indexes.Add(new IndexDefinition("ix_pc_events_stream_starts")
+                {
+                    Columns = [TenantColumn, "seq_id"],
+                    Predicate = "version = 1 AND is_archived = 0",
+                });
+                table.Indexes.Add(new IndexDefinition("ix_pc_events_category_starts")
+                {
+                    Columns = [TenantColumn, "category", "seq_id"],
+                    Predicate = "version = 1 AND is_archived = 0",
                 });
 
                 if (!ordinals)

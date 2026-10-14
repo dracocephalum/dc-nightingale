@@ -349,7 +349,7 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
-        exception.Status.Detail.ShouldContain("not both and not neither");
+        exception.Status.Detail.ShouldContain("one of the three");
     }
 
     [Fact]

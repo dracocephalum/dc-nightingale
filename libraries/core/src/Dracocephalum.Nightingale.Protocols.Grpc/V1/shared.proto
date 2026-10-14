@@ -31,9 +31,13 @@
 //
 // Stream names
 //   Any string up to 250 characters. The category of a stream is everything
-//   before the first hyphen: orders-42 is in category orders. Names starting
-//   with $ are reserved: $all, $ce-<category>, $et-<event type>. Case
-//   sensitivity follows the database collation; use one spelling.
+//   before its first hyphen when one follows at least one character, and
+//   the whole name otherwise: orders-42 is in category orders, and orders
+//   and -42 are each their own; a category is never empty. Names starting
+//   with $ are reserved: $all, $ce-<category>, $et-<event type>,
+//   $bc-<correlation id>, $streams, $category-<category>, $de, $mde and
+//   $$<stream>. Case sensitivity follows the database collation; use one
+//   spelling.
 //
 // Event ids
 //   Client-supplied UUIDs. The server does not enforce uniqueness; the id is
@@ -213,10 +217,15 @@ message Filter {
   uint32 checkpoint_interval = 3;
 }
 
-// Exactly one of the two is populated. Prefixes are matched in the index;
-// a regular expression is applied to each page after it is read, which costs
-// more on a large store.
+// Exactly one of the three is populated. Prefixes and exact values are
+// matched in the index; a regular expression is applied to each page after
+// it is read, which costs more on a large store.
 message Expression {
   repeated string prefix = 1;
   string regex = 2;
+  // What the name must be, one of them: for stream_name, the stream's
+  // category (see "Stream names" above), so orders keeps orders-1 and the
+  // stream named orders, as $ce-orders does, where the prefix orders- keeps
+  // only the first; for event_type, the type itself.
+  repeated string exact = 3;
 }

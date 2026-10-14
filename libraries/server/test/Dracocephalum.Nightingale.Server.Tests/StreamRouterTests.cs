@@ -265,6 +265,39 @@ public sealed class StreamRouterTests : IAsyncDisposable
         later.ShouldBeSameAs(cause);
     }
 
+    [Fact]
+    public async Task Route_ShouldHandEachCorrelationAndEachListingOfStreamsWhatBelongsToIt()
+    {
+        // Arrange: two streams begin and a third moves on. checkout-1's events are its
+        // correlation's wherever they are; a stream's first event is the listings', the streams'
+        // and its category's, and no later one is.
+        A.CallTo(() => _store.ReadPointersAsync(1, 4, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([Pointer("orders-1", 0, 1) with { CorrelationId = "checkout-1" }, Pointer("payments-1", 0, 2) with { CorrelationId = "checkout-1" }, Pointer("orders-2", 3, 3), Pointer("audit-1", 4, 4) with { CorrelationId = "checkout-2" }]);
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-1", 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Correlated(Record("orders-1", 0, 1), "checkout-1")]));
+        A.CallTo(() => _store.ReadAsStoredAsync("payments-1", 0, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Correlated(Record("payments-1", 0, 2), "checkout-1")]));
+        using var checkout = _sut.Follow("$bc-checkout-1");
+        using var streams = _sut.Follow("$streams");
+        using var orders = _sut.Follow("$category-orders");
+
+        // Act
+        _tail.Advance(4);
+        var toCheckout = await NextAsync(checkout, 2);
+        var toStreams = await NextAsync(streams, 2);
+        var toOrders = await NextAsync(orders, 1);
+
+        // Assert: orders-2 moved on rather than began, and checkout-2 is nobody's, so neither stream is read.
+        toCheckout.Select(record => record.Stream).ShouldBe(["orders-1", "payments-1"]);
+        toStreams.Select(record => record.Stream).ShouldBe(["orders-1", "payments-1"]);
+        toOrders.Single().Stream.ShouldBe("orders-1");
+        A.CallTo(() => _store.ReadAsStoredAsync("orders-2", A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => _store.ReadAsStoredAsync("audit-1", A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    private static EventRecord Correlated(EventRecord record, string correlationId) =>
+        record with { Metadata = new JsonObject { [MetadataKeys.CorrelationId] = correlationId } };
+
     private static EventPointer Pointer(string stream, long revision, long position, string type = "order_placed") => new(stream, revision, position, type);
 
     private static EventRecord Record(string stream, long revision, long position, string type = "order_placed") =>
