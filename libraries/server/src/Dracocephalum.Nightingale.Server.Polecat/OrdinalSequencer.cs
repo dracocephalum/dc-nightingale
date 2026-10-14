@@ -10,8 +10,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <summary>
 /// The sequencer: one per cluster, on the same lease persistent-subscription groups use, walking
 /// the events table behind the high-water mark in batches and giving every event its place within
-/// its category stream and its event-type stream, each batch continuing from the last ordinal of
-/// each key. The append path is untouched, because numbering at append time would serialize every
+/// its category stream and its event-type stream, in two columns of the events table, and, as
+/// links in the gateway's own table, its place within its correlation when it has one and within
+/// the listings of streams when it begins its stream, each batch continuing from the last ordinal
+/// of each key. The append path is untouched, because numbering at append time would serialize every
 /// append to a category; the price is that ordinals lag the high-water mark by this loop's cadence,
 /// which is the tail's. A batch and the progress row are one transaction, and the progress row is
 /// read under an update lock, so a second sequencer whose lease overlapped a takeover continues
@@ -32,7 +34,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="registry">The instance id the lease is taken under.</param>
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="schemaName">The schema the event store's tables live in.</param>
-/// <param name="progressSchemaName">The schema the gateway's own tables live in, the progress rows among them.</param>
+/// <param name="progressSchemaName">The schema the gateway's own tables live in, the progress rows and the ordinal links among them.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 /// <param name="leaseDuration">How long the lease lasts without renewal; <see cref="LeaseDuration"/> when not given. The renewal follows from it.</param>
@@ -137,21 +139,34 @@ internal sealed partial class OrdinalSequencer(
             // The batch is every unnumbered row up to its end, found through the index over the
             // unsequenced rows: those between the progress and the end, and any below the
             // progress that committed late, after the tail had given their position up as a gap,
-            // which an earlier batch therefore never saw. Each key's next ordinal is the last one
-            // assigned to it plus one, found with one backward seek in the ordinal index; the
-            // rows of the batch are then numbered in position order per key, so a late row gets
-            // the next ordinal of its key when it is found and by ordinal follows what was
-            // appended after it: late, never missing. The previous ordinal is -1 when a key is
-            // new, so the first ordinal is 0. Under a sequence per tenant a position is only
-            // unique with its tenant, so the batch is the tenant's rows alone.
+            // which an earlier batch therefore never saw. It is read once, into a table variable,
+            // so the columns and the links are made from the same rows: a row committing between
+            // two reads of the events table would get its ordinals and miss its links. Under a
+            // sequence per tenant a position is only unique with its tenant, so the batch is the
+            // tenant's rows alone.
+            //
+            // Each key's next ordinal is the last one assigned to it plus one, found with one
+            // backward seek, in the ordinal index for a category and a type, in the links' key
+            // for a correlation and the listings; the rows of the batch are then numbered in
+            // position order per key, so a late row gets the next ordinal of its key when it is
+            // found and by ordinal follows what was appended after it: late, never missing. The
+            // previous ordinal is -1 when a key is new, so the first ordinal is 0. An event links
+            // into its correlation when it has one, and into the listing of every stream and of
+            // its category's streams when it begins its stream; most events do neither, and add
+            // nothing to the links.
             number.Transaction = transaction;
             number.CommandText = string.Format(
                 CultureInfo.InvariantCulture,
-                "WITH batch AS ("
+                "DECLARE @numbered int;"
+                + " DECLARE @batch TABLE (seq_id bigint NOT NULL, tenant_id varchar(250) NOT NULL, category varchar(250) NOT NULL, [type] varchar(500) NOT NULL, correlation_id varchar(250) NULL, starts bit NOT NULL, PRIMARY KEY (tenant_id, seq_id));"
+                + " INSERT INTO @batch (seq_id, tenant_id, category, [type], correlation_id, starts)"
+                + " SELECT seq_id, tenant_id, category, [type], correlation_id, CASE WHEN version = 1 THEN 1 ELSE 0 END"
+                + " FROM {0} WHERE category_ordinal IS NULL AND seq_id <= @to{2};"
+                + " WITH batch AS ("
                 + " SELECT seq_id, tenant_id, category, [type],"
                 + " ROW_NUMBER() OVER (PARTITION BY tenant_id, category ORDER BY seq_id) AS category_n,"
                 + " ROW_NUMBER() OVER (PARTITION BY tenant_id, [type] ORDER BY seq_id) AS type_n"
-                + " FROM {0} WHERE category_ordinal IS NULL AND seq_id <= @to{2}),"
+                + " FROM @batch),"
                 + " categories AS ("
                 + " SELECT k.tenant_id, k.category, ISNULL(last.category_ordinal, -1) AS last_ordinal"
                 + " FROM (SELECT DISTINCT tenant_id, category FROM batch) k"
@@ -165,16 +180,35 @@ internal sealed partial class OrdinalSequencer(
                 + " JOIN batch b ON b.seq_id = e.seq_id AND b.tenant_id = e.tenant_id"
                 + " JOIN categories c ON c.tenant_id = b.tenant_id AND c.category = b.category"
                 + " JOIN types t ON t.tenant_id = b.tenant_id AND t.[type] = b.[type];"
-                + "{1}",
+                + " SET @numbered = @@ROWCOUNT;"
+                + " WITH keyed AS ("
+                + " SELECT CAST({4} AS tinyint) AS link_type, tenant_id, correlation_id AS link_key, seq_id FROM @batch WHERE correlation_id IS NOT NULL"
+                + " UNION ALL SELECT CAST({5} AS tinyint), tenant_id, '', seq_id FROM @batch WHERE starts = 1"
+                + " UNION ALL SELECT CAST({6} AS tinyint), tenant_id, category, seq_id FROM @batch WHERE starts = 1),"
+                + " numbered AS ("
+                + " SELECT link_type, tenant_id, link_key, seq_id, ROW_NUMBER() OVER (PARTITION BY link_type, tenant_id, link_key ORDER BY seq_id) AS n FROM keyed),"
+                + " lasts AS ("
+                + " SELECT k.link_type, k.tenant_id, k.link_key, ISNULL(last.[Ordinal], -1) AS last_ordinal"
+                + " FROM (SELECT DISTINCT link_type, tenant_id, link_key FROM keyed) k"
+                + " OUTER APPLY (SELECT TOP (1) l.[Ordinal] FROM {3} l WHERE l.[Type] = k.link_type AND l.[TenantId] = k.tenant_id AND l.[Key] = k.link_key ORDER BY l.[Ordinal] DESC) last)"
+                + " INSERT INTO {3} ([Type], [TenantId], [Key], [Ordinal], [SeqId])"
+                + " SELECT n.link_type, n.tenant_id, n.link_key, a.last_ordinal + n.n, n.seq_id"
+                + " FROM numbered n JOIN lasts a ON a.link_type = n.link_type AND a.tenant_id = n.tenant_id AND a.link_key = n.link_key;"
+                + "{1}"
+                + " SELECT @numbered;",
                 EventsTable,
-                to > from ? string.Format(CultureInfo.InvariantCulture, " UPDATE {0} SET [Position] = @to WHERE {1}", ProgressTable, row) : string.Empty,
-                tenantId is null ? string.Empty : " AND tenant_id = @tenant");
+                to > from ? string.Format(CultureInfo.InvariantCulture, " UPDATE {0} SET [Position] = @to WHERE {1};", ProgressTable, row) : string.Empty,
+                tenantId is null ? string.Empty : " AND tenant_id = @tenant",
+                LinksTable,
+                (int)OrdinalLinkType.Correlation,
+                (int)OrdinalLinkType.Streams,
+                (int)OrdinalLinkType.CategoryStreams);
             number.Parameters.AddWithValue("@to", to);
             AddTenant(number, tenantId);
 
-            var rows = await number.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            var rows = (int)(await number.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            LogNumbered(tenantId ?? "the shared sequence", to, rows - 1);
+            LogNumbered(tenantId ?? "the shared sequence", to, rows);
         }
 
         return to;
@@ -186,7 +220,11 @@ internal sealed partial class OrdinalSequencer(
 
     private string EventsTable => Schema + ".[pc_events]";
 
-    private string ProgressTable => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + nameof(OrdinalSequencingProgress) + "]";
+    private string ProgressTable => GatewayTable(nameof(OrdinalSequencingProgress));
+
+    private string LinksTable => GatewayTable(nameof(OrdinalLink));
+
+    private string GatewayTable(string name) => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + name + "]";
 
     /// <summary>
     /// The tenant as a parameter, typed as both its columns are: a name sent as Unicode to a

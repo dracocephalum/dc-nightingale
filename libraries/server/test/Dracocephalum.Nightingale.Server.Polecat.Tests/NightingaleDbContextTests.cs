@@ -31,6 +31,20 @@ public sealed class NightingaleDbContextTests
     }
 
     [Fact]
+    public void OrdinalLinkType_ShouldKeepTheNumbersItStores()
+    {
+        // Act & Assert: the links store these numbers; a member renumbered, reused or added in
+        // their place reads every link already written as another stream's.
+        Enum.GetUnderlyingType(typeof(OrdinalLinkType)).ShouldBe(typeof(byte));
+        Enum.GetValues<OrdinalLinkType>().ToDictionary(type => type.ToString(), type => (byte)type).ShouldBe(new Dictionary<string, byte>
+        {
+            ["Correlation"] = 1,
+            ["Streams"] = 2,
+            ["CategoryStreams"] = 3,
+        });
+    }
+
+    [Fact]
     public void Model_ShouldHaveNoChangeTheMigrationsDoNotCarry()
     {
         // Arrange

@@ -12,8 +12,8 @@
 //   a virtual stream's head is its own last event, never the global head.
 //   ordinal   an event's place within its virtual stream, 0-based and dense:
 //             two ordinals subtracted are a count. Only under ordinal
-//             numbering (see Numbering), only for $ce- and $et-, and only
-//             on a store initialized with the feature. Ordinals are assigned
+//             numbering (see Numbering), for every virtual stream but
+//             $de, and only on a store initialized with the feature. Ordinals are assigned
 //             after commit by one sequencer per cluster, so they lag the
 //             global head by its cadence; a removed event leaves a hole the
 //             reader skips.
@@ -166,7 +166,8 @@ enum Numbering {
   NUMBERING_UNSPECIFIED = 0;
   // Global positions, sparse; the ordinal is absent from every event.
   NUMBERING_GLOBAL = 1;
-  // Ordinals, dense; $ce- and $et- only, on a store with the feature.
+  // Ordinals, dense; every virtual stream but $de, on a store with the
+  // feature.
   NUMBERING_ORDINAL = 2;
 }
 

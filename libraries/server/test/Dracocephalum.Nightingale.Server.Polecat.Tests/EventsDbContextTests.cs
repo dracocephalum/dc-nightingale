@@ -30,8 +30,8 @@ public sealed class EventsDbContextTests
         var partitioned = await DeclareTablesAsync(options => options.Store.Partitioning = PartitioningMode.Tenant);
         using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
 
-        // Act & Assert
-        var entities = context.Model.GetEntityTypes().ToList();
+        // Act & Assert: the gateway's links are the next test's.
+        var entities = context.Model.GetEntityTypes().Where(entity => entity.ClrType != typeof(OrdinalLink)).ToList();
         entities.Count.ShouldBe(4);
         foreach (var entity in entities)
         {
@@ -53,6 +53,70 @@ public sealed class EventsDbContextTests
                 }
             }
         }
+    }
+
+    [Fact]
+    public void Model_ShouldMapTheOrdinalLinksAsTheGatewaysOwnModelDeclaresThem()
+    {
+        // Arrange: the links are the gateway's table, created by its migrations in its schema; the
+        // mirror reads them beside the events, so it is held to that model, in whatever schema
+        // the host names.
+        using var mirror = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo", "gateway"));
+        var builder = new DbContextOptionsBuilder<NightingaleDbContext>();
+        NightingaleDbContextFactory.Configure(builder, DesignTime, "gateway");
+        using var gateway = new NightingaleDbContext(builder.Options, new NightingaleSchema("gateway"));
+        var mapped = mirror.Model.FindEntityType(typeof(OrdinalLink)).ShouldNotBeNull();
+        var declared = gateway.Model.FindEntityType(typeof(OrdinalLink)).ShouldNotBeNull();
+
+        // Act & Assert
+        mapped.GetTableName().ShouldBe(declared.GetTableName());
+        mapped.GetSchema().ShouldBe("gateway");
+        declared.GetSchema().ShouldBe("gateway");
+        mapped.FindPrimaryKey()!.Properties.Select(property => property.GetColumnName()).ShouldBe(declared.FindPrimaryKey()!.Properties.Select(property => property.GetColumnName()));
+        foreach (var property in mapped.GetProperties())
+        {
+            var other = declared.FindProperty(property.Name).ShouldNotBeNull($"OrdinalLink.{property.Name} is mapped but the gateway declares no such column");
+            property.GetColumnName().ShouldBe(other.GetColumnName());
+            property.GetColumnType().ShouldBe(other.GetColumnType(), $"OrdinalLink.{property.Name}: the type differs");
+            property.IsNullable.ShouldBe(other.IsNullable, $"OrdinalLink.{property.Name}: the nullability differs");
+        }
+    }
+
+    [Fact]
+    public void Model_OfMirrorsOverTwoGatewaySchemas_ShouldBeTwoModels()
+    {
+        // Arrange: one store schema, two gateway schemas, in one process, as tests have them; a
+        // model cached under the store's schema alone would read the first one's links for both.
+        using var first = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo", "first"));
+        using var second = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo", "second"));
+
+        // Act & Assert
+        first.Model.FindEntityType(typeof(OrdinalLink))!.GetSchema().ShouldBe("first");
+        second.Model.FindEntityType(typeof(OrdinalLink))!.GetSchema().ShouldBe("second");
+    }
+
+    [Fact]
+    public void Query_OfTheLinks_ShouldSendTheKeyAsTheColumnsOwnTypeAndNameThePartitionKeyWherePartitioned()
+    {
+        // Arrange
+        using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
+        var partitioned = new VirtualStreamReader(() => context, "tenant", partitionedByTenant: true);
+        var plain = new VirtualStreamReader(() => context, "tenant");
+
+        // Act
+        var onPartitions = partitioned.QueryLinked(context, OrdinalLinkType.Correlation, "checkout-1", Direction.Forwards, 0).ToQueryString();
+        var onOne = plain.QueryLinked(context, OrdinalLinkType.Correlation, "checkout-1", Direction.Forwards, 0).ToQueryString();
+
+        // Assert: the type a byte, the names as the columns type them, and on a store partitioned
+        // by tenant each event fetched in the tenant's partition.
+        onOne.ShouldContain("tinyint");
+        onOne.ShouldContain("varchar(250)");
+        onOne.ShouldContain("[OrdinalLink]");
+        onOne.ShouldNotContain("nvarchar");
+        onOne.ShouldNotContain("N'");
+        onOne.ShouldNotContain("tenant_ordinal");
+        onPartitions.ShouldContain("[tenant_ordinal] = (");
+        onPartitions.ShouldContain("[pc_tenant_partitions]");
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 
 using Dracocephalum.Nightingale.Server.Auth;
 using Microsoft.Extensions.DependencyInjection;
@@ -121,7 +122,37 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         (await acmes.OrdinalHeadAsync(Orders, TestContext.Current.CancellationToken)).ShouldBe(new StreamHead(0, 0));
     }
 
+    [Fact]
+    public async Task Sequencer_ShouldLinkEachTenantsCorrelationToItsOwnEventsAtPositionsTheTenantsShare()
+    {
+        // Arrange: the same workflow id in two tenants, each beginning its own stream at position
+        // 1 of its own sequence; a link names its event by tenant and position, and the read
+        // fetches it in the tenant's partition.
+        var stores = Stores;
+        var acme = await CreateTenantAsync("acme");
+        var defaults = stores.GetStreams(TenantScope.Default);
+        var acmes = stores.GetStreams(acme);
+        var workflow = new VirtualStreamName(VirtualStreamKind.Correlation, "checkout-1");
+        var mine = await defaults.AppendAsync("orders-1", StreamState.NoStream, [Correlated("checkout-1"), Correlated("checkout-1")], TestContext.Current.CancellationToken);
+        var theirs = await acmes.AppendAsync("payments-1", StreamState.NoStream, [Correlated("checkout-1")], TestContext.Current.CancellationToken);
+        await NumberedAsync(stores.GetTail(TenantScope.Default), mine.Position);
+        await NumberedAsync(stores.GetTail(acme), theirs.Position);
+
+        // Act
+        var mineByOrdinal = await defaults.ReadByOrdinalAsync(workflow, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+        var theirsByOrdinal = await acmes.ReadByOrdinalAsync(workflow, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+        var theirListing = await acmes.ReadByOrdinalAsync(new VirtualStreamName(VirtualStreamKind.Streams, string.Empty), Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+
+        // Assert: dense from zero in each tenant, each read its own tenant's events.
+        mineByOrdinal.Select(record => (record.Stream, record.Position, record.Ordinal)).ShouldBe([("orders-1", 1L, (long?)0), ("orders-1", 2L, 1)]);
+        theirsByOrdinal.Select(record => (record.Stream, record.Position, record.Ordinal)).ShouldBe([("payments-1", 1L, (long?)0)]);
+        theirListing.Select(record => record.Stream).ShouldBe(["payments-1"]);
+    }
+
     private ITenantStores Stores => _host!.Services.GetRequiredService<ITenantStores>();
+
+    private static EventData Correlated(string correlationId) =>
+        new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"), new JsonObject { [MetadataKeys.CorrelationId] = correlationId });
 
     private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 

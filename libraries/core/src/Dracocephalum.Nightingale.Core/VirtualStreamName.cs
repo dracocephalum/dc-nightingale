@@ -25,6 +25,6 @@ public readonly record struct VirtualStreamName(VirtualStreamKind Kind, string K
         _ => StreamNames.DataEvents,
     };
 
-    /// <summary>Gets a value indicating whether the stream can be read by ordinal: a category or an event type, as the sequencer numbers them.</summary>
-    public bool HasOrdinals => Kind is VirtualStreamKind.Category or VirtualStreamKind.EventType;
+    /// <summary>Gets a value indicating whether the stream can be read by ordinal: every virtual stream the sequencer numbers, which is all of them but the data events.</summary>
+    public bool HasOrdinals => Kind is not VirtualStreamKind.DataEvents;
 }

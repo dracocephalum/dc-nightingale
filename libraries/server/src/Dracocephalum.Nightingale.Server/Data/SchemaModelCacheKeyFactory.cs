@@ -16,7 +16,7 @@ public sealed class SchemaModelCacheKeyFactory : IModelCacheKeyFactory
     {
         ArgumentNullException.ThrowIfNull(context);
         return context is ISchemaScoped scoped
-            ? (context.GetType(), scoped.Schema, designTime)
+            ? (context.GetType(), scoped.ModelKey, designTime)
             : (context.GetType(), designTime);
     }
 }

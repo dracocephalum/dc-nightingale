@@ -65,8 +65,8 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     /// </summary>
     private const int MetadataWriteAttempts = 3;
 
-    private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, tenantId);
-    private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, tenantId);
+    private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, tenantId, partitionedByTenant);
+    private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, tenantId, partitionedByTenant);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
     private readonly PlainStreamReader? _streams = tenantId is null ? null : new(events.CreateDbContext, tenantId, partitionedByTenant, logger);
     private readonly PlainStreamReader? _replicaStreams = tenantId is null || readOnlyStreams is null ? null : new(readOnlyStreams.CreateDbContext, tenantId, partitionedByTenant, logger);

@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,7 +23,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
 /// <param name="tenantId">The tenant every read is scoped to, or <see langword="null"/> for all tenants, under the wildcard.</param>
-internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string? tenantId)
+/// <param name="partitionedByTenant">Whether the store is partitioned by tenant, so a read through the ordinal links names the tenant's partition key for each event it fetches.</param>
+internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string? tenantId, bool partitionedByTenant = false)
 {
     /// <summary>The columns of a read by position or revision, hydrated by <see cref="PageAsync"/>; a plain stream's read takes them too.</summary>
     internal static readonly Expression<Func<EventRow, Raw>> Plain =
@@ -199,7 +201,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
 
     /// <summary>
     /// The bounds of a virtual stream under ordinal numbering: the lowest and highest ordinal
-    /// assigned, archived rows included, because a hole is still a number in the sequence.
+    /// assigned, archived rows included, because a hole is still a number in the sequence. A
+    /// correlation's and a listing's are its links', a seek from each end of the links' key.
     /// </summary>
     /// <param name="stream">The virtual stream.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -208,10 +211,19 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     {
         RequireOrdinals(stream);
         await using var context = OpenContext();
-        var all = FilterByKey(context.EventRows.AsNoTracking().Where(e => (tenantId == null || e.TenantId == tenantId)), stream);
-        var ordinals = stream.Kind == VirtualStreamKind.Category
-            ? all.Where(e => e.CategoryOrdinal != null).Select(e => e.CategoryOrdinal)
-            : all.Where(e => e.TypeOrdinal != null).Select(e => e.TypeOrdinal);
+        IQueryable<long?> ordinals;
+        if (TryGetLinkType(stream, out var type))
+        {
+            ordinals = QueryLinks(context, type, stream.Key).Select(l => (long?)l.Ordinal);
+        }
+        else
+        {
+            var all = FilterByKey(context.EventRows.AsNoTracking().Where(e => (tenantId == null || e.TenantId == tenantId)), stream);
+            ordinals = stream.Kind == VirtualStreamKind.Category
+                ? all.Where(e => e.CategoryOrdinal != null).Select(e => e.CategoryOrdinal)
+                : all.Where(e => e.TypeOrdinal != null).Select(e => e.TypeOrdinal);
+        }
+
         var first = await ordinals.MinAsync(cancellationToken).ConfigureAwait(false);
         if (first is null)
         {
@@ -222,7 +234,13 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         return new StreamHead(first.Value, last ?? first.Value);
     }
 
-    /// <summary>One page of a virtual stream by ordinal, live rows only, each record carrying its ordinal.</summary>
+    /// <summary>
+    /// One page of a virtual stream by ordinal, live rows only, each record carrying its ordinal. A
+    /// correlation's and a listing's ordinals are links: the page is a seek along the stream's
+    /// links in order, each joined to its event by tenant and position, the same work as a read of
+    /// a category by ordinal, an index seek and a lookup a row; a link whose event was archived or
+    /// deleted finds none, and the page goes on past it.
+    /// </summary>
     /// <param name="stream">The virtual stream.</param>
     /// <param name="direction">The direction to read in.</param>
     /// <param name="from">The ordinal to begin at, inclusive, in the reading direction.</param>
@@ -233,8 +251,13 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     {
         RequireOrdinals(stream);
         await using var context = OpenContext();
-        var live = QueryLive(context, stream);
         var forwards = direction == Direction.Forwards;
+        if (TryGetLinkType(stream, out var type))
+        {
+            return await HydrateAsync(QueryLinked(context, type, stream.Key, direction, from), count, cancellationToken).ConfigureAwait(false);
+        }
+
+        var live = QueryLive(context, stream);
         if (stream.Kind == VirtualStreamKind.Category)
         {
             var ordered = forwards
@@ -277,7 +300,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         };
     }
 
-    /// <summary>A virtual stream read by ordinal: a category or an event type; the data events have none.</summary>
+    /// <summary>A virtual stream read by ordinal: every one but the data events, which have none.</summary>
     private static void RequireOrdinals(VirtualStreamName stream)
     {
         if (!stream.HasOrdinals)
@@ -286,10 +309,27 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         }
     }
 
-    /// <summary>The first rows of an ordered query, as event records.</summary>
-    internal static async Task<IReadOnlyList<EventRecord>> PageAsync(IQueryable<EventRow> ordered, int count, Expression<Func<EventRow, Raw>> columns, CancellationToken cancellationToken)
+    /// <summary>Which links hold a virtual stream's ordinals, when they are links rather than columns of the events table: a correlation's and the listings'.</summary>
+    private static bool TryGetLinkType(VirtualStreamName stream, out OrdinalLinkType type)
     {
-        var rows = await ordered.Take(count).Select(columns).ToListAsync(cancellationToken).ConfigureAwait(false);
+        type = stream.Kind switch
+        {
+            VirtualStreamKind.Correlation => OrdinalLinkType.Correlation,
+            VirtualStreamKind.Streams => OrdinalLinkType.Streams,
+            VirtualStreamKind.CategoryStreams => OrdinalLinkType.CategoryStreams,
+            _ => default,
+        };
+        return type != default;
+    }
+
+    /// <summary>The first rows of an ordered query, as event records.</summary>
+    internal static Task<IReadOnlyList<EventRecord>> PageAsync(IQueryable<EventRow> ordered, int count, Expression<Func<EventRow, Raw>> columns, CancellationToken cancellationToken) =>
+        HydrateAsync(ordered.Select(columns), count, cancellationToken);
+
+    /// <summary>The first rows of an ordered query of the columns, as event records.</summary>
+    private static async Task<IReadOnlyList<EventRecord>> HydrateAsync(IQueryable<Raw> ordered, int count, CancellationToken cancellationToken)
+    {
+        var rows = await ordered.Take(count).ToListAsync(cancellationToken).ConfigureAwait(false);
         var records = new EventRecord[rows.Count];
         for (var i = 0; i < rows.Count; i++)
         {
@@ -329,6 +369,34 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     }
 
     private EventsDbContext OpenContext() => contexts();
+
+    /// <summary>The links of one correlation or listing of the tenant: the leading columns of the links' key, so either end is a seek.</summary>
+    /// <summary>
+    /// The events of a correlation or a listing by ordinal, in the reading direction from an
+    /// ordinal: its links joined to their live events by tenant and position, naming the tenant's
+    /// partition key on a store partitioned by tenant, so each event is one seek in one partition.
+    /// </summary>
+    internal IQueryable<Raw> QueryLinked(EventsDbContext context, OrdinalLinkType type, string key, Direction direction, long from)
+    {
+        var forwards = direction == Direction.Forwards;
+        var links = QueryLinks(context, type, key);
+        links = forwards ? links.Where(l => l.Ordinal >= from) : links.Where(l => l.Ordinal <= from);
+        var events = QueryLive(context, null);
+        if (partitionedByTenant)
+        {
+            // Nullable, as the plain stream's read has it: the first of an int is wrapped in a
+            // COALESCE the database does not seek by.
+            var partitionKey = context.TenantPartitionRows.Where(p => p.TenantId == tenantId).Select(p => (int?)p.PartitionKey);
+            events = events.Where(e => e.PartitionKey == partitionKey.FirstOrDefault());
+        }
+
+        var joined = links.Join(events, l => new { l.TenantId, l.SeqId }, e => new { e.TenantId, e.SeqId }, (l, e) => new { l.Ordinal, Event = e });
+        var ordered = forwards ? joined.OrderBy(j => j.Ordinal) : joined.OrderByDescending(j => j.Ordinal);
+        return ordered.Select(j => new Raw(j.Event.SeqId, j.Event.Id, j.Event.StreamId, j.Event.Version, j.Event.Data, j.Event.Type, j.Event.Timestamp, j.Event.CorrelationId, j.Event.CausationId, j.Event.Headers, j.Ordinal, j.Event.Bdata));
+    }
+
+    private IQueryable<OrdinalLink> QueryLinks(EventsDbContext context, OrdinalLinkType type, string key) =>
+        context.OrdinalLinks.AsNoTracking().Where(l => l.Type == type && (tenantId == null || l.TenantId == tenantId) && l.Key == key);
 
     /// <summary>The live events of the tenant, of one virtual stream or of all.</summary>
     private IQueryable<EventRow> QueryLive(EventsDbContext context, VirtualStreamName? stream)
