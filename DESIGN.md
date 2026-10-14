@@ -115,12 +115,29 @@ append behind.
 
 ### 2. The schema is patched, not replaced
 
-Category and event-type streams (`$ce-orders`, `$et-OrderCreated`) are
-predicates over the events table, not link streams. For them to be seeks
-rather than scans the table needs a persisted computed `category` column and
-two filtered indexes. The store's migration drops any column or index it does
-not know about, so they cannot be applied by hand; they have to be part of
-the definition the store migrates from.
+Category, event-type and correlation streams (`$ce-orders`,
+`$et-OrderCreated`, `$bc-checkout-1`) and the listings of streams
+(`$streams`, `$category-orders`) are predicates over the events table, not
+link streams. For them to be seeks rather than scans the table needs a
+persisted computed `category` column and filtered indexes: by category and
+by type, over every live event; by correlation, over the events that carry a
+correlation id only, so an append without one writes nothing to it; and two
+over the first event of each stream only, one row a stream, for the
+listings, so only an append that begins a stream writes to them. The store's
+migration drops any column or index it does not know about, so they cannot be
+applied by hand; they have to be part of the definition the store migrates
+from.
+
+The category is one rule, the same in the column and in process, where the
+router matches live events by it (`StreamNames.CategoryOf`): the name up to
+its first hyphen, when one follows at least one character, and the whole name
+otherwise. A category is never empty, and a stream named just `orders` is in
+category `orders`, so `$ce-orders` and the category filter `orders` hold it.
+The prefix filter `orders-` does not: it is answered by the same index, the
+category's equality, and takes the stream named just the category away again,
+since that name does not begin with the prefix. The rule is not configurable:
+a different rule would rebuild the column and every category index and
+renumber every category ordinal.
 
 `AugmentedPolecatDatabase` is that seam. It is the store's database class with one
 override: when the store builds its feature schemas, the event-store feature
@@ -133,8 +150,11 @@ to the store, because the store's default tenancy always builds the plain one.
 The virtual streams are read straight from the table, `VirtualStreamReader`,
 because the store's query surface knows nothing of the added column and
 reaches the type column only through its own type registry; the reader's SQL
-is what the two indexes were declared for, and an integration test holds its
-rows to the same bytes the store's own path returns.
+is what the indexes were declared for, and an integration test holds its
+rows to the same bytes the store's own path returns. Another asks the
+database itself, through its count of seeks and scans on each index, that
+the bounds and counts of a correlation and of the listings seek their
+indexes and never scan them.
 
 The store's automatic schema management is off. Its table ensurer rebuilds
 the event-store definition from the options on first use, bypassing the

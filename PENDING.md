@@ -139,8 +139,10 @@ parity comes first, in the order the client exposes it:
 2. **Binary event bodies**: done, as a second body beside the JSON one
    (`VARIANCES.md`, *An event has two bodies*); the mapping to the
    reference's one body is the adapter's, under *Bodies* below.
-3. **The small ones together**: `$bc-` by correlation id, `$streams`, and
-   the `Stop` action of a group's nack.
+3. **The small ones together**: `$bc-` by correlation id, `$streams` and
+   `$category-`, by position: done; their ordinals are *Ordinals of the
+   sparse virtual streams* below. The `Stop` action of a group's nack is a
+   variance, mapped by the adapter under *Group nacks* below.
 4. **Multi-stream and conditional appends** (below), the client's newest.
 
 Parity is not bought with the core's speed. The gateway is not a clone, and
@@ -231,6 +233,18 @@ here is re-derived:
   an event whose JSON is real would need a marker, booked under the name
   `$primaryDataSlot`, a metadata key of `json` or `binary`, `json` when
   absent, and written only when someone needs it.
+- **Listings and correlations.** `$bc-`, `$streams` and `$category-` are
+  served as they are; a reference client reads links, so `$streams` serves
+  each stream's first event as the resolved link, and `$category-` builds a
+  `$@` event per stream from the first event, its body the stream's name.
+  The category rule is the gateway's, so a stream named just the category is
+  in it, which a reference client sees too (`VARIANCES.md`). Their numbers
+  are positions until *Ordinals of the sparse virtual streams* below gives
+  them dense ones, the same variance as `$ce-` on a store without ordinals.
+- **Group nacks.** The reference client's `Stop` is served as the consumer
+  leaving: its call ends, and its events in flight go back to the group,
+  not counted as a retry. The reference server skips them instead
+  (`VARIANCES.md`, *A group's nack has no Stop*).
 - **Not carried, answered `Unimplemented` until the core has them:**
   multi-stream append, projections, operations
   such as scavenge, and user management beyond what the credentials table
@@ -542,13 +556,86 @@ sizing demands it.
 
 Ordinal numbering of the virtual streams (`DESIGN.md`, seam 6) is a store
 setting fixed at initialization, and a store initialized without it refuses
-the setting. Adopting it later is a backfill: the migrate commadds the two
+the setting. Adopting it later is a backfill: the migrate command adds the two
 columns and their indexes, then the sequencer numbers from position 0, which
 on a large store takes as long as one pass over the table and is done while
 the store is served, because a batch is atomic and a read under ordinal
 numbering sees only what is numbered. The setting's row is written once the columns exist, before the backfill
 completes, so the server knows the store has the feature and readers see the
 ordinals arrive.
+
+## Ordinals of the sparse virtual streams
+
+`$bc-`, `$streams` and `$category-` are read by position; a reference client
+reading them through the adapter checkpoints with dense link revisions. Their
+ordinals go in a table of the gateway's own, not in columns of the events
+table: most events carry no correlation id and most events begin no stream,
+so a column would spend eight bytes on every row for numbers few rows have,
+while a table holds only the numbers that exist. `OrdinalLink (Type,
+TenantId, Key, Ordinal, SeqId)`, `Type` a `tinyint` naming correlation,
+streams or category streams, keyed `(Type, TenantId, Key, Ordinal)`, the
+read by ordinal and the seek for a key's last ordinal, with a unique
+`(Type, TenantId, SeqId)`, so a batch retried after a lost lease never links
+an event twice. Not partitioned: the store's partitions are the store's to
+manage, and every key leads with the tenant. Rows are never removed: an
+archived or deleted event is a hole the read skips, and the highest ordinal
+of a key stays, so none is reused. The sequencer fills it in the batch and
+transaction that number `$ce-` and `$et-`, the category ordinal's null still
+marking what is not numbered, so nothing ever compares the events table with
+the links; a batch of thousands of correlation ids is thousands of short
+seeks, background work that an append never waits on. A read by ordinal seeks
+the table and fetches each event by position, the same work as a read of
+`$ce-` by ordinal, an index seek and a lookup a row, naming the tenant's
+partition key on a store partitioned by tenant and the live partition on one
+partitioned by archiving. Under `Nightingale:Store:AssignOrdinals`, as the
+other ordinals. The second slice of S5.
+
+A sequencer of another kind of ordinal, for a virtual stream added after the
+store is numbered far along, would need a type on its progress rows and a
+lease of its own.
+
+## Virtual streams in `$streams`
+
+The reference lists its link streams in `$streams`, since each has an event
+0. The gateway's virtual streams have no first event of their own, but the
+sequencer knows when a key gets its ordinal 0: that event begins `$ce-x`,
+`$et-x` or `$bc-x`, and a link with the virtual stream's name could list it,
+the same event then appearing once as its stream's start and once as the
+virtual stream's, as the reference's resolved links show. Under ordinals
+only, since finding a key's first event without the sequencer is a lookup a
+row.
+
+## Separator characters, chosen at initialization
+
+The category rule is one, a hyphen. A store could choose its separator
+character, or the last separator rather than the first, as the reference's
+projection is configured, fixed at initialization like the other store
+settings, the column's expression and the rule in process changed together
+and held to each other by a test. Not until someone names streams another
+way and asks.
+
+## Recategorizing a store
+
+A store's category rule changed after the fact: rebuild the computed column
+and every category index, clear the category ordinals and let the sequencer
+number them again, as the ordinal backfill does; checkpoints by position
+survive, those by category ordinal do not. An offline host command, if a
+store ever needs it.
+
+## An append statement of our own
+
+The store writes an append in two round trips, a read of the stream's
+version and then its batch, and the binary data adds a third. One statement
+of the gateway's own, the stream's version checked and the events inserted
+from one table-valued parameter, would be one round trip, carry the binary
+data in the insert, fill the category from any rule in process rather than a
+computed column, and take more than the store's limit of events in one
+append. The price is owning what the store does best and what the gateway's
+rule leaves to it (`DESIGN.md`, *The seams*): the version check and the
+race for a new stream, every column the store expects with its meaning, the
+per-tenant sequences of a store partitioned by tenant, and a second statement
+for the second store. Taken only on evidence: an append's round trip
+measured to matter, or appends larger than the limit asked for.
 
 ## Server-computed lag counts
 

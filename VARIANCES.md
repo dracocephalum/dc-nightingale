@@ -11,11 +11,15 @@ Deferred features that will close a gap later are in [`PENDING.md`](PENDING.md).
 
 ## Positions of virtual streams are the global sequence
 
-**Reference:** `$ce-orders` and `$et-OrderCreated` are link streams built by
-system projections, with dense revisions of their own (0, 1, 2, ...).
+**Reference:** `$ce-orders`, `$et-OrderCreated`, `$bc-checkout-1`,
+`$streams` and `$category-orders` are link streams built by system
+projections, with dense revisions of their own (0, 1, 2, ...), and only
+while the operator runs those projections.
 
-**Nightingale:** `$ce-`, `$et-`, `$all`, and `$de` and `$mde` (the data and
-the metadata events) are predicates over the event table.
+**Nightingale:** `$ce-`, `$et-`, `$bc-`, `$streams`, `$category-`, `$all`,
+and `$de` and `$mde` (the data and the metadata events) are predicates over
+the event table, always there. `$bc-`, `$streams`, `$category-` and `$de`
+are read by position only.
 Their positions are the store's global sequence number: monotonic within the
 stream but sparse, because other streams' events occupy the numbers between.
 The head of each virtual stream is its own last event, never the global head,
@@ -35,6 +39,65 @@ its position.
 **Why:** no link events, no projection lag, no extra writes by default; and
 where a dense number is worth a numbering pass, it is two columns and one
 seek rather than a second copy of every event.
+
+## A name without a hyphen is its own category
+
+**Reference:** a stream's category is its name up to the first separator,
+a hyphen unless the operator configures another character or the last
+separator instead; a name with no separator after its first character, or
+one that begins with `$`, has no category and is in no `$ce-` or
+`$category-` stream.
+
+**Nightingale:** one rule, not configurable: the name up to its first
+hyphen, when one follows at least one character, and the whole name
+otherwise. A category is never empty, so the stream named just `orders` is
+in `$ce-orders` and `$category-orders`, and `-1` is its own category; a
+`$$` metadata stream has the category its name gives it, `$$orders` for
+`$$orders-1`. The category filter on `$all`, `StreamFilter.Category`, keeps
+the same streams; the prefix filter `orders-` keeps only the names that
+begin with it.
+
+**Why:** every stream has a category and every category is a name, so no
+event falls outside the category streams and nothing is left to check that a
+category exists. What a team names its streams is its own convention to
+keep. The rule is computed by the database in a persisted column that the
+category indexes are built over, and a different rule later would rebuild
+them all and renumber every category ordinal, so there is one rule from the
+start.
+
+## The listings of streams are each stream's first event
+
+**Reference:** `$streams` holds a link to event 0 of every stream, system
+streams and the link streams of the projections included, and
+`$category-orders` a `$@` event per stream of the category whose body is the
+stream's name. A stream deleted keeps its entry, pointing at nothing.
+
+**Nightingale:** both hold each stream's first event itself, at its
+position. A stream reset keeps its entry, and its recreation adds none, as
+in the reference, since its revisions continue. The virtual streams are not
+streams with a first event, so they are never listed. A stream archived or
+deleted drops out of the listings, and a deleted name appended to again is
+listed again, as the new stream it is.
+
+**Why:** the listings are predicates over each stream's first event, one row
+a stream in a filtered index, not link events written beside every new
+stream; what is listed is what can be read.
+
+## A group's nack has no Stop
+
+**Reference:** the client offers a nack action `Stop`, documented as
+stopping the subscription. The server's handler for it is empty, and the
+events nacked with it are taken out of flight as every nack's are, so in
+fact they are skipped: never retried, never parked, and the checkpoint moves
+past them, while the subscription goes on.
+
+**Nightingale:** no `Stop`. A consumer that wants to stop ends its call; the
+group hands every event in flight to it back to the consumers that remain,
+not counted as a retry, so nothing is lost and nothing counts against an
+event.
+
+**Why:** ending the call is the stop, and it loses nothing; an action that
+says stop and in fact skips would lose events in the name of stopping.
 
 ## A position is one number
 
