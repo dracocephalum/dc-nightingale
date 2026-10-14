@@ -267,10 +267,33 @@ re-derived:
   cache would learn of a change only through the tail, a polling interval
   late, serving meanwhile events a new `$maxCount` has cut. If a measurement
   ever asks for less than the probe, the way out is a store setting fixed at
-  initialization that refuses metadata and skips it, not a cache. A stream
-  long past its `$maxAge` reads its expired rows on every forwards read from
-  the start, where the reference searches by time; physical removal (below)
-  is what makes that cheap. What is left is soft delete.
+  initialization that refuses metadata and skips it, not a cache. What is left
+  is soft delete, and the next bullet with it.
+- **With soft delete: the partition number in a stream's read.** On a store
+  partitioned by tenant the store's unique index of a stream's versions leads
+  with the tenant's partition number, `tenant_ordinal` in the store's names
+  (not an ordinal of the gateway's, `DESIGN.md` seam 6), which the read and
+  its probe do not name, so they may not seek; the store's own fetch named it
+  no more. The store keeps the number per tenant in `pc_tenant_partitions`.
+  The read names it beside the tenant, so it seeks the existing index with
+  only the tenant's partition read, and no index is added: a second index
+  over the same columns would cost every append a second write. The tenant
+  stays in the predicate because tenants can share a partition. An
+  integration test on a partitioned store reads the plan of both statements.
+  Soft delete's own lock and its retry read the same rows, so the two ship
+  together.
+- **`$maxAge` reads its expired rows, booked.** A stream long past its
+  `$maxAge` reads its expired rows on every forwards read from the start,
+  each looked up in the table for its timestamp, which the unique index does
+  not hold. Physical removal (below) is the answer, as the reference's
+  scavenge is. Booked and not planned, since `$maxAge` is no first-tier path:
+  an index for it is one a host adds as it adds any optional index, never one
+  provisioned by default, because an index on the stream and the timestamp
+  costs every append to every stream a write, and the timestamp included in
+  the unique index is a change to the store's index; and a binary search by
+  version over the existing index, as the reference's read does, which
+  costs appends nothing and relies on a stream's timestamps rising with its
+  versions, which they do while the database's clock does not step back.
 - **Appends never read metadata.** The reference checks an append against
   the soft-delete value of `$tb` and writes an un-delete after it, which is
   safe there because one writer handles every write in turn. Here every

@@ -62,11 +62,3 @@ undecided adds it here rather than mentioning it once in a conversation.
   tenant of the directory, merged in position order in process, each asked
   for the next page's worth only, with an integration test over several
   tenants. Stores partitioned by tenant refuse the wildcard already.
-- **A plain stream's read may not seek on a store partitioned by tenant.** The
-  read and its metadata probe name the tenant and the stream, which the
-  store's unique index of a stream's versions leads with everywhere but there:
-  partitioned by tenant, it leads with the tenant's partition ordinal, which
-  the read does not name. The store's own fetch, which the read replaced,
-  named it no more. Not measured. Close by: an integration test on a
-  partitioned store that reads the plan of both statements, and, if they
-  scan, the ordinal in the predicate, which the store keeps per tenant.

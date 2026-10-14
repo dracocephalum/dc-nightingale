@@ -443,6 +443,14 @@ sequence per tenant the sequencer walks each tenant's sequence in turn, behind
 that tenant's own mark, with a progress row per tenant, and a batch is one
 tenant's rows, since a position is only unique with its tenant there.
 
+"Ordinal" here means these numbers and nothing else. The store partitioned by
+tenant has a number of its own by the same name, the `tenant_ordinal` column
+and the `ordinal` of its `pc_tenant_partitions` table, which is the number
+of the partition a tenant's rows live in. The gateway calls that the tenant's
+partition number: the store's column names appear only where the mirror maps
+them, under a property named for the partition number, never in a name,
+message or document of the gateway's own as an ordinal.
+
 ### 7. The gateway's own tables are one model, and its own schema
 
 A group's settings are columns of its row, a value each: its start, its
