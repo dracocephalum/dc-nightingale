@@ -202,10 +202,8 @@ here is re-derived:
   ordinal numbering, the ordinal as the link's revision. On a store without
   ordinals it serves positions in its place: they only increase, so a
   checkpoint still resumes, but two of them subtracted are no count, a
-  variance to write when the adapter ships. A property of the core's own
-  client giving the number of the stream being read, whichever numbering,
-  is booked and not planned: it is the record and the numbering the caller
-  chose, so it goes on no wire.
+  variance to write when the adapter ships. The core's own client gets its
+  one number per record differently, as *A record's locus* below.
 - **Not carried, answered `Unimplemented` until the core has them:** stream
   metadata (the `$$` streams), multi-stream append, projections, operations
   such as scavenge, and user management beyond what the credentials table
