@@ -170,6 +170,60 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Append_WithBinaryData_ShouldPassItThroughBesideTheJsonAndAloneWithEmptyJson()
+    {
+        // Arrange
+        byte[] binary = [0x00, 0xFF, 0x80];
+        IReadOnlyList<EventData>? captured = null;
+        A.CallTo(() => _store.AppendAsync("people-1", StreamState.NoStream, A<IReadOnlyList<EventData>>._, A<CancellationToken>._))
+            .Invokes(call => captured = call.GetArgument<IReadOnlyList<EventData>>(2))
+            .Returns(new AppendResult(1, 40));
+        var client = new Streams.StreamsClient(_channel);
+        var both = Proposed(Guid.NewGuid(), "person_registered", "{\"country\":\"NZ\"}", new JsonObject { [MetadataKeys.BinaryContentType] = "application/x-protobuf" });
+        both.BinaryData = ByteString.CopyFrom(binary);
+        var binaryOnly = new ProposedEvent { Id = Guid.NewGuid().ToString("D"), EventType = "person_scanned", BinaryData = ByteString.CopyFrom(binary) };
+
+        // Act
+        await AppendAsync(client, "people-1", -1, both, binaryOnly);
+
+        // Assert
+        var appended = captured.ShouldNotBeNull();
+        appended[0].BinaryData.ToArray().ShouldBe(binary);
+        Encoding.UTF8.GetString(appended[0].Data.Span).ShouldBe("{\"country\":\"NZ\"}");
+        appended[1].BinaryData.ToArray().ShouldBe(binary);
+        appended[1].Data.IsEmpty.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("", null, "JSON data, binary data, or both")]
+    [InlineData("{}", "\"application/x-protobuf\"", "the event carries none")]
+    [InlineData("", "42", "a non-empty string")]
+    [InlineData("", "\"\"", "a non-empty string")]
+    public async Task Append_WhenAnEventsBodiesDoNotAgree_ShouldRefuseItBeforeTheStore(string json, string? contentType, string reason)
+    {
+        // Arrange: the last two carry binary data, so only the content type is wrong.
+        var client = new Streams.StreamsClient(_channel);
+        var proposed = new ProposedEvent { Id = Guid.NewGuid().ToString("D"), EventType = "person_registered", Data = ByteString.CopyFromUtf8(json) };
+        if (contentType is not null)
+        {
+            proposed.Metadata = ByteString.CopyFromUtf8($"{{\"{MetadataKeys.BinaryContentType}\":{contentType}}}");
+        }
+
+        if (json.Length == 0 && contentType is not null)
+        {
+            proposed.BinaryData = ByteString.CopyFrom(0x01);
+        }
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => AppendAsync(client, "people-1", -1, proposed));
+
+        // Assert
+        exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        exception.Status.Detail.ShouldContain(reason);
+        A.CallTo(() => _store.AppendAsync(A<string>._, A<StreamState>._, A<IReadOnlyList<EventData>>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task Append_WhenFirstMessageIsAnEvent_ShouldRejectWithoutTouchingTheStore()
     {
         // Arrange
@@ -1235,6 +1289,32 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         catch (InvalidOperationException)
         {
             // The server ended the call at the first event too many; the answer says why.
+        }
+        catch (RpcException)
+        {
+            // The same, seen from the write.
+        }
+
+        return await call.ResponseAsync;
+    }
+
+    /// <summary>Appends these events under an expected revision; a refusal from the server is the answer's.</summary>
+    private static async Task<AppendResponse> AppendAsync(Streams.StreamsClient client, string stream, long expected, params ProposedEvent[] events)
+    {
+        using var call = client.Append(cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = stream, ExpectedRevision = expected } }, TestContext.Current.CancellationToken);
+        try
+        {
+            foreach (var proposed in events)
+            {
+                await call.RequestStream.WriteAsync(new AppendRequest { Event = proposed }, TestContext.Current.CancellationToken);
+            }
+
+            await call.RequestStream.CompleteAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The server ended the call at a refused event; the answer says why.
         }
         catch (RpcException)
         {

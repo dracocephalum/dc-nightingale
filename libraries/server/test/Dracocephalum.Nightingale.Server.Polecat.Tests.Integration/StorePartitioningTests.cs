@@ -21,6 +21,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 public sealed partial class StorePartitioningTests : IAsyncLifetime
 {
     private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
+    private static readonly byte[] Binary = [0x00, 0xFF, 0x80];
     private readonly string _name = TestDatabases.NewName();
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -35,12 +36,13 @@ public sealed partial class StorePartitioningTests : IAsyncLifetime
         var store = host.Store();
 
         // Act: the first append provisions the default tenant's partition and sequence.
-        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event() with { BinaryData = Binary }], TestContext.Current.CancellationToken);
         var slice = await store.ReadAsync("orders-1", Direction.Forwards, null, 10, TestContext.Current.CancellationToken);
 
         // Assert
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.Count.ShouldBe(2);
+        slice.Events[1].BinaryData.ToArray().ShouldBe(Binary);
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Partitioning'")).ShouldBe("Tenant");
         await host.StopAsync(TestContext.Current.CancellationToken);
     }
@@ -53,12 +55,13 @@ public sealed partial class StorePartitioningTests : IAsyncLifetime
         var store = host.Store();
 
         // Act
-        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event() with { BinaryData = Binary }], TestContext.Current.CancellationToken);
         var slice = await store.ReadAsync("orders-1", Direction.Backwards, null, 1, TestContext.Current.CancellationToken);
 
         // Assert
         appended.Revision.ShouldBe(1);
         slice.ShouldNotBeNull().Events.ShouldHaveSingleItem().Revision.ShouldBe(1);
+        slice.Events[0].BinaryData.ToArray().ShouldBe(Binary);
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'Partitioning'")).ShouldBe("ArchivedStream");
         await host.StopAsync(TestContext.Current.CancellationToken);
     }

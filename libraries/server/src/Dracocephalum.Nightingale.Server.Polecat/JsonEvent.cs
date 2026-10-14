@@ -37,12 +37,22 @@ internal sealed class JsonEvent : Event<JsonElement>, IEvent
         }
     }
 
-    /// <summary>Wraps a proposed event. The two reserved metadata keys move to their own columns.</summary>
+    /// <summary>
+    /// The JSON an event with binary data only stores: the store's own placeholder for a binary
+    /// event, since its JSON column takes no null.
+    /// </summary>
+    public static ReadOnlyMemory<byte> EmptyObject { get; } = "{}"u8.ToArray();
+
+    /// <summary>
+    /// Wraps a proposed event. The two reserved metadata keys move to their own columns. Binary
+    /// data is not the store's to write: the append writes it beside the JSON after the store has
+    /// written the row, so here an event with binary data only is the empty object.
+    /// </summary>
     /// <param name="eventData">The event as proposed.</param>
     /// <returns>The event to append.</returns>
     public static JsonEvent From(EventData eventData)
     {
-        using var document = JsonDocument.Parse(eventData.Data);
+        using var document = JsonDocument.Parse(eventData.Data.IsEmpty ? EmptyObject : eventData.Data);
         var wrapped = new JsonEvent(document.RootElement.Clone(), eventData.Type) { Id = eventData.Id };
         if (eventData.Metadata is null || eventData.Metadata.Count == 0)
         {

@@ -43,6 +43,7 @@ public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
 
     private static readonly byte[] PlacedBody = Encoding.UTF8.GetBytes("{\"orderId\":1,\"total\":42.5}");
     private static readonly byte[] PaidBody = Encoding.UTF8.GetBytes("{\"orderId\":1}");
+    private static readonly byte[] Binary = [0x00, 0xFF, 0xFE, 0x80, 0x0A];
 
     [Fact]
     public async Task Append_ShouldTakeAsManyEventsAsTheBackendSaysItDoesAndRefuseOneMoreAsTooMany()
@@ -314,6 +315,72 @@ public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
             JsonNode.Parse(PlacedBody)).ShouldBeTrue();
         (await TestDatabases.ScalarAsync<int>(database.Name, $"SELECT COUNT(*) FROM dbo.pc_events WHERE stream_id = '{refused}'")).ShouldBe(0);
         (await TestDatabases.ScalarAsync<int>(database.Name, $"SELECT COUNT(*) FROM dbo.pc_streams WHERE id = '{refused}'")).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Append_WithBinaryData_ShouldReadItBackBesideTheJsonByStreamCategoryAndAll()
+    {
+        // Arrange: both bodies, binary data alone, and JSON alone, in one append.
+        var sut = database.Store;
+        var category = "bin" + Guid.NewGuid().ToString("N")[..12];
+        var stream = category + "-1";
+        var both = Placed("person_registered", new JsonObject { [MetadataKeys.BinaryContentType] = "application/x-protobuf" }) with { BinaryData = Binary };
+        var binaryOnly = new EventData(Guid.NewGuid(), "person_scanned", default, null, Binary);
+        var jsonOnly = Paid("person_paid");
+
+        // Act
+        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [both, binaryOnly, jsonOnly], TestContext.Current.CancellationToken);
+        var byStream = (await sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldNotBeNull().Events;
+        var byCategory = await sut.ReadVirtualAsync(new VirtualStreamName(VirtualStreamKind.Category, category), Direction.Forwards, 1, appended.Position, 10, TestContext.Current.CancellationToken);
+        var byAll = (await sut.ReadAllAsync(Direction.Backwards, appended.Position, appended.Position, 100, TestContext.Current.CancellationToken)).Where(e => e.Stream == stream).Reverse().ToList();
+
+        // Assert: every read carries the same three; the content type is an ordinary key on the way back.
+        foreach (var events in new[] { byStream, byCategory, byAll })
+        {
+            events.Count.ShouldBe(3);
+            events[0].BinaryData.ToArray().ShouldBe(Binary);
+            JsonNode.DeepEquals(JsonNode.Parse(events[0].Data.Span), JsonNode.Parse(PlacedBody)).ShouldBeTrue();
+            events[0].Metadata[MetadataKeys.BinaryContentType].ShouldNotBeNull().GetValue<string>().ShouldBe("application/x-protobuf");
+            events[1].BinaryData.ToArray().ShouldBe(Binary);
+            Encoding.UTF8.GetString(events[1].Data.Span).ShouldBe("{}");
+            events[2].BinaryData.IsEmpty.ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task Append_WhenRetriedWithBinaryData_ShouldAnswerWithTheFirstAttemptAndWriteNothingMore()
+    {
+        // Arrange: the retry is recognised through the gateway's own read of the rows, since the
+        // store's fetch refuses a row that has binary data and no serializer for its type.
+        var sut = database.Store;
+        var stream = NewStream();
+        EventData[] events = [Placed("a") with { BinaryData = Binary }, new EventData(Guid.NewGuid(), "b", default, null, Binary)];
+        var first = await sut.AppendAsync(stream, StreamState.NoStream, events, TestContext.Current.CancellationToken);
+
+        // Act
+        var retried = await sut.AppendAsync(stream, StreamState.NoStream, events, TestContext.Current.CancellationToken);
+
+        // Assert
+        retried.ShouldBe(first);
+        (await sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldNotBeNull().Events.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Append_WithBinaryDataOnEveryEventOfTheLargestAppend_ShouldStoreThemAll()
+    {
+        // Arrange: the binary data is written by a statement of its own, after the store's, so it
+        // spends none of the parameters the store's limit on events is measured against.
+        var sut = database.Store;
+        var stream = NewStream();
+        var events = Many(PolecatStreamStore.MaxEventsPerAppend).Select((e, i) => e with { BinaryData = BitConverter.GetBytes(i) }).ToList();
+
+        // Act
+        var stored = await sut.AppendAsync(stream, StreamState.NoStream, events, TestContext.Current.CancellationToken);
+        var read = (await sut.ReadAsync(stream, Direction.Forwards, null, PolecatStreamStore.MaxEventsPerAppend, TestContext.Current.CancellationToken)).ShouldNotBeNull().Events;
+
+        // Assert: each event's own bytes on its own row.
+        stored.Revision.ShouldBe(PolecatStreamStore.MaxEventsPerAppend - 1);
+        read.Select(e => BitConverter.ToInt32(e.BinaryData.Span)).ShouldBe(Enumerable.Range(0, PolecatStreamStore.MaxEventsPerAppend));
     }
 
     /// <summary>Sets the binary data of a stream's first event, and refuses unless it finds that event.</summary>

@@ -140,6 +140,28 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
             last is null ? StreamMetadata.Empty : ParseMetadata(stream, last.Data));
     }
 
+    /// <summary>
+    /// The ids and positions of a run of the stream's events as stored, which is what a retried
+    /// append is recognised by; neither body is read.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="first">The first revision of the run.</param>
+    /// <param name="count">How many revisions the run spans.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The events found in the run, in revision order; fewer than asked for when the stream ends sooner.</returns>
+    public async Task<IReadOnlyList<StoredId>> ReadIdsAsync(string stream, long first, int count, CancellationToken cancellationToken)
+    {
+        var lowest = first + 1;
+        var highest = first + count;
+        await using var context = contexts();
+        return await QueryRows(context, stream)
+            .Where(e => e.Version >= lowest && e.Version <= highest)
+            .OrderBy(e => e.Version)
+            .Select(e => new StoredId(e.Id, e.Version - 1, e.SeqId))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>The stream's row and, in the same statement, the body of the last event of its metadata stream.</summary>
     internal IQueryable<Found> FindWithMetadata(EventsDbContext context, string stream, string metastream)
     {
@@ -233,6 +255,12 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "The metadata of {Stream} does not read as stream metadata; the stream is read as if it had none.")]
     private static partial void LogUnreadableMetadata(ILogger logger, Exception exception, string stream);
+
+    /// <summary>An event of a run as <see cref="ReadIdsAsync"/> found it.</summary>
+    /// <param name="Id">The event's id.</param>
+    /// <param name="Revision">Its revision.</param>
+    /// <param name="Position">Its global position.</param>
+    internal sealed record StoredId(Guid Id, long Revision, long Position);
 
     /// <summary>What the first statement finds: the stream's row, and the body of its metadata when that was asked for and set.</summary>
     internal sealed record Found(long Version, bool IsArchived, long CompactedVersion, string? Metadata);

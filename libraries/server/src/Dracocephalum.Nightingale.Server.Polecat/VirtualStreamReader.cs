@@ -26,13 +26,13 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
 {
     /// <summary>The columns of a read by position or revision, hydrated by <see cref="PageAsync"/>; a plain stream's read takes them too.</summary>
     internal static readonly Expression<Func<EventRow, Raw>> Plain =
-        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, null);
+        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, null, e.Bdata);
 
     private static readonly Expression<Func<EventRow, Raw>> WithCategoryOrdinal =
-        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, e.CategoryOrdinal);
+        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, e.CategoryOrdinal, e.Bdata);
 
     private static readonly Expression<Func<EventRow, Raw>> WithTypeOrdinal =
-        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, e.TypeOrdinal);
+        e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, e.TypeOrdinal, e.Bdata);
 
     /// <summary>The bounds of a virtual stream at or below a head.</summary>
     /// <param name="stream">The virtual stream.</param>
@@ -319,7 +319,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             row.Timestamp,
             JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Default),
             metadata,
-            row.Ordinal);
+            row.Ordinal,
+            row.Bdata);
     }
 
     private EventsDbContext OpenContext() => contexts();
@@ -332,5 +333,5 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     }
 
     /// <summary>The columns a read selects: never the whole row, since a store without ordinals has no ordinal columns.</summary>
-    internal sealed record Raw(long SeqId, Guid Id, string StreamId, long Version, string Data, string Type, DateTimeOffset Timestamp, string? CorrelationId, string? CausationId, string? Headers, long? Ordinal);
+    internal sealed record Raw(long SeqId, Guid Id, string StreamId, long Version, string Data, string Type, DateTimeOffset Timestamp, string? CorrelationId, string? CausationId, string? Headers, long? Ordinal, byte[]? Bdata);
 }

@@ -23,6 +23,14 @@ internal sealed class EventRow
     /// <summary>Gets or sets the body, a JSON document.</summary>
     public required string Data { get; set; }
 
+    /// <summary>
+    /// Gets or sets the binary data, when the event carries any. The store's binary column, which
+    /// the store itself reads as a binary event's only body; the gateway writes it beside the JSON.
+    /// </summary>
+#pragma warning disable CA1819 // A row's column, materialized by the provider; never shared or mutated.
+    public byte[]? Bdata { get; set; }
+#pragma warning restore CA1819
+
     /// <summary>Gets or sets the event type name.</summary>
     public required string Type { get; set; }
 

@@ -138,12 +138,25 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     private async Task<AppendResult> AppendOnceAsync(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken)
     {
         var wrapped = new object[events.Count];
+        List<(IEvent Event, ReadOnlyMemory<byte> BinaryData)>? binary = null;
         for (var i = 0; i < events.Count; i++)
         {
-            wrapped[i] = JsonEvent.From(events[i]);
+            var appended = JsonEvent.From(events[i]);
+            wrapped[i] = appended;
+            if (!events[i].BinaryData.IsEmpty)
+            {
+                (binary ??= []).Add((appended, events[i].BinaryData));
+            }
         }
 
-        await using var session = store.LightweightSession(ToSessionOptions(RequireTenant(stream)));
+        var tenant = RequireTenant(stream);
+        await using var session = store.LightweightSession(ToSessionOptions(tenant));
+        if (binary is not null)
+        {
+            // Only an append that carries binary data pays for the statement that writes it.
+            session.AddTransactionParticipant(new BinaryDataWriter(store.Options.DatabaseSchemaName, tenant, stream, partitionedByTenant, binary));
+        }
+
         if (expected == StreamState.NoStream)
         {
             session.Events.StartStream(stream, wrapped);
@@ -567,13 +580,11 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         }
 
         // The batch would have started at the revision after the expectation: revision 0 for a
-        // stream expected not to exist, expected + 1 otherwise. One-based for the store.
-        var firstVersion = expected == StreamState.NoStream ? 1 : expected.ToInt64() + 2;
-        var stored = await session.Events.FetchStreamAsync(
-            stream,
-            version: firstVersion + events.Count - 1,
-            fromVersion: firstVersion,
-            token: cancellationToken).ConfigureAwait(false);
+        // stream expected not to exist, expected + 1 otherwise. Read through the mirror, ids only:
+        // the store's own fetch refuses a row with binary data, which it takes for a binary event
+        // it has no serializer for.
+        var first = expected == StreamState.NoStream ? 0 : expected.ToInt64() + 1;
+        var stored = await RequireStreams(stream).ReadIdsAsync(stream, first, events.Count, cancellationToken).ConfigureAwait(false);
         if (stored.Count != events.Count)
         {
             throw new RevisionConflictException(stream, expected, actual);
@@ -588,6 +599,6 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         }
 
         var last = stored[^1];
-        return new AppendResult(last.Version - 1, last.Sequence);
+        return new AppendResult(last.Revision, last.Position);
     }
 }
