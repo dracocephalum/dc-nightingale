@@ -35,12 +35,13 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="tenantId">The tenant every session is opened for, or <see langword="null"/> for all tenants, under the wildcard: then <c>$all</c> and the virtual streams read across tenants and a stream name, which is per tenant, is refused.</param>
 /// <param name="events">Makes the mirror of the store's tables over the main connection.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
+/// <param name="partitionedByTenant">Whether the store is partitioned by tenant, which a read of a stream names the tenant's partition key for.</param>
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
 /// <param name="readOnlyStreams">Makes the same mirror over the read-only connection for bounded reads of plain streams, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="appended">Pulsed after each append commits, so the tail looks at once instead of at its next poll.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyStreams, AppendSignal appended, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
+internal sealed partial class PolecatStreamStore(IDocumentStore store, string? tenantId, IDbContextFactory<EventsDbContext> events, bool ordinals, bool partitionedByTenant, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents, IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyStreams, AppendSignal appended, TimeProvider timeProvider, ILogger<PolecatStreamStore> logger) : IStreamStore
 {
     /// <summary>SQL Server's error for a value longer than its column, naming the column.</summary>
     /// <summary>
@@ -67,8 +68,8 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, tenantId);
     private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, tenantId);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
-    private readonly PlainStreamReader? _streams = tenantId is null ? null : new(events.CreateDbContext, tenantId, logger);
-    private readonly PlainStreamReader? _replicaStreams = tenantId is null || readOnlyStreams is null ? null : new(readOnlyStreams.CreateDbContext, tenantId, logger);
+    private readonly PlainStreamReader? _streams = tenantId is null ? null : new(events.CreateDbContext, tenantId, partitionedByTenant, logger);
+    private readonly PlainStreamReader? _replicaStreams = tenantId is null || readOnlyStreams is null ? null : new(readOnlyStreams.CreateDbContext, tenantId, partitionedByTenant, logger);
 
     /// <inheritdoc/>
     public bool OrdinalsEnabled => ordinals;

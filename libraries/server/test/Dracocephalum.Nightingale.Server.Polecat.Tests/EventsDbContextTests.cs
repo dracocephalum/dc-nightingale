@@ -22,25 +22,28 @@ public sealed class EventsDbContextTests
     [Fact]
     public async Task Model_ShouldMapEveryColumnAsTheStoreDeclaresIt()
     {
-        // Arrange: the store as a host registers it, with ordinals, so every mapped column exists.
-        var services = new ServiceCollection();
-        services.AddNightingalePolecat(DesignTime, TestAuth.Off(options => options.Store.AssignOrdinals = true));
-        await using var provider = services.BuildServiceProvider();
-        var databases = await provider.GetRequiredService<IDocumentStore>().Options.Tenancy!.BuildDatabasesAsync(TestContext.Current.CancellationToken);
-        var declared = databases[0].BuildFeatureSchemas().SelectMany(feature => feature.Objects).OfType<Table>().ToList();
+        // Arrange: the store as a host registers it, with ordinals, so every mapped column exists;
+        // and the same partitioned by tenant, where the partition key and its registry exist. A
+        // table or column is held to the plain store's declaration where it is declared there,
+        // and to the partitioned one's otherwise; keys to the plain store's.
+        var declared = await DeclareTablesAsync(options => options.Store.AssignOrdinals = true);
+        var partitioned = await DeclareTablesAsync(options => options.Store.Partitioning = PartitioningMode.Tenant);
         using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
 
         // Act & Assert
         var entities = context.Model.GetEntityTypes().ToList();
-        entities.Count.ShouldBe(3);
+        entities.Count.ShouldBe(4);
         foreach (var entity in entities)
         {
-            var table = declared.SingleOrDefault(candidate => candidate.Identifier.Name == entity.GetTableName()).ShouldNotBeNull($"{entity.GetTableName()} is mapped but the store declares no such table");
+            var plain = declared.SingleOrDefault(candidate => candidate.Identifier.Name == entity.GetTableName());
+            var table = (plain ?? partitioned.SingleOrDefault(candidate => candidate.Identifier.Name == entity.GetTableName())).ShouldNotBeNull($"{entity.GetTableName()} is mapped but the store declares no such table");
+            var partitionedTable = partitioned.Single(candidate => candidate.Identifier.Name == entity.GetTableName());
             (entity.GetSchema() ?? context.Model.GetDefaultSchema()).ShouldBe(table.Identifier.Schema);
             entity.FindPrimaryKey()!.Properties.Select(property => property.GetColumnName()).ShouldBe(table.PrimaryKeyColumns.ToList(), $"{table.Identifier.Name}: the key differs");
             foreach (var property in entity.GetProperties())
             {
-                var column = table.Columns.SingleOrDefault(candidate => candidate.Name == property.GetColumnName()).ShouldNotBeNull($"{table.Identifier.Name}.{property.GetColumnName()} is mapped but the store declares no such column");
+                var column = (table.Columns.SingleOrDefault(candidate => candidate.Name == property.GetColumnName())
+                    ?? partitionedTable.Columns.SingleOrDefault(candidate => candidate.Name == property.GetColumnName())).ShouldNotBeNull($"{table.Identifier.Name}.{property.GetColumnName()} is mapped but the store declares no such column");
                 property.GetColumnType().ShouldBe(column.Type, $"{table.Identifier.Name}.{column.Name}: the type differs");
                 if (column.Name != "category")
                 {
@@ -50,6 +53,28 @@ public sealed class EventsDbContextTests
                 }
             }
         }
+    }
+
+    [Fact]
+    public void Query_OnAStorePartitionedByTenant_ShouldNameThePartitionKeyInEveryStatementOfAStreamsRead()
+    {
+        // Arrange: the store's unique index of a stream's versions, and its streams' key, lead with
+        // the partition key there; a statement that does not name it cannot seek them.
+        using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
+        var partitioned = new PlainStreamReader(() => context, "tenant", partitionedByTenant: true, NullLogger.Instance);
+        var plain = new PlainStreamReader(() => context, "tenant", partitionedByTenant: false, NullLogger.Instance);
+
+        // Act
+        var first = partitioned.FindWithMetadata(context, "orders-1", "$$orders-1").ToQueryString();
+        var page = partitioned.QueryRows(context, "orders-1").Select(row => row.SeqId).ToQueryString();
+        var plainFirst = plain.FindWithMetadata(context, "orders-1", "$$orders-1").ToQueryString();
+
+        // Assert: both tables of the first statement, the streams and the probe, and the page.
+        CountOf(first, "[tenant_ordinal] = (").ShouldBe(2, first + Environment.NewLine + page);
+        first.ShouldContain("[pc_tenant_partitions]");
+        page.ShouldContain("[tenant_ordinal] = (");
+        plainFirst.ShouldNotContain("tenant_ordinal");
+        plainFirst.ShouldNotContain("pc_tenant_partitions");
     }
 
     [Fact]
@@ -101,7 +126,7 @@ public sealed class EventsDbContextTests
         var byCategory = context.EventRows.Where(row => row.TenantId == tenant && row.Category == key).Select(row => row.SeqId).ToQueryString();
         var byType = context.EventRows.Where(row => row.TenantId == tenant && row.Type == key).Select(row => row.SeqId).ToQueryString();
         var mark = context.ProgressionRows.Where(row => row.Name == EventsDbContext.HighWaterMark).Select(row => row.LastSeqId).ToQueryString();
-        var reader = new PlainStreamReader(() => context, tenant, NullLogger.Instance);
+        var reader = new PlainStreamReader(() => context, tenant, partitionedByTenant: false, NullLogger.Instance);
         var stream = reader.FindWithMetadata(context, "orders-1", "$$orders-1").ToQueryString();
         var page = reader.QueryRows(context, "orders-1").Select(row => row.SeqId).ToQueryString();
 
@@ -115,5 +140,25 @@ public sealed class EventsDbContextTests
             sql.ShouldNotContain("nvarchar");
             sql.ShouldNotContain("N'");
         }
+    }
+
+    private static async Task<List<Table>> DeclareTablesAsync(Action<NightingaleOptions> configure)
+    {
+        var services = new ServiceCollection();
+        services.AddNightingalePolecat(DesignTime, TestAuth.Off(configure));
+        await using var provider = services.BuildServiceProvider();
+        var databases = await provider.GetRequiredService<IDocumentStore>().Options.Tenancy!.BuildDatabasesAsync(TestContext.Current.CancellationToken);
+        return databases[0].BuildFeatureSchemas().SelectMany(feature => feature.Objects).OfType<Table>().ToList();
+    }
+
+    private static int CountOf(string text, string part)
+    {
+        var count = 0;
+        for (var at = text.IndexOf(part, StringComparison.Ordinal); at >= 0; at = text.IndexOf(part, at + part.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 }

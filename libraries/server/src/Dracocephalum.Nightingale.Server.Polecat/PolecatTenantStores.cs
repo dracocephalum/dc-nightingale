@@ -22,6 +22,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="store">The document store.</param>
 /// <param name="events">Makes the mirror of the store's events table over the main connection.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
+/// <param name="partitionedByTenant">Whether the store is partitioned by tenant.</param>
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
 /// <param name="readOnlyStreams">Makes the same mirror over the read-only connection for bounded reads of plain streams, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="contexts">Makes the gateway's own context.</param>
@@ -35,6 +36,7 @@ internal sealed class PolecatTenantStores(
     IDocumentStore store,
     IDbContextFactory<EventsDbContext> events,
     bool ordinals,
+    bool partitionedByTenant,
     IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents,
     IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyStreams,
     IDbContextFactory<NightingaleDbContext> contexts,
@@ -47,7 +49,7 @@ internal sealed class PolecatTenantStores(
 {
     private readonly ConcurrentDictionary<string, PolecatStreamStore> _streams = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SubscriptionGroupStore> _groups = new(StringComparer.Ordinal);
-    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStreams, appended, timeProvider, logger));
+    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, partitionedByTenant, readOnlyEvents, readOnlyStreams, appended, timeProvider, logger));
 
     /// <inheritdoc/>
     public bool SupportsAllTenants => supportsAllTenants;
@@ -69,7 +71,7 @@ internal sealed class PolecatTenantStores(
             return _allTenants.Value;
         }
 
-        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStreams, appended, timeProvider, logger));
+        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, partitionedByTenant, readOnlyEvents, readOnlyStreams, appended, timeProvider, logger));
     }
 
     /// <inheritdoc/>

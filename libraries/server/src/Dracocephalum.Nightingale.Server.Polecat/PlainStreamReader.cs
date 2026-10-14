@@ -24,8 +24,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
 /// <param name="tenantId">The tenant every read is scoped to; a stream name is per tenant.</param>
+/// <param name="partitionedByTenant">Whether the store is partitioned by tenant, so every statement names the tenant's partition key, which the store's indexes lead with there.</param>
 /// <param name="logger">The logger.</param>
-internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, string tenantId, ILogger logger)
+internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, string tenantId, bool partitionedByTenant, ILogger logger)
 {
     /// <summary>
     /// The most seconds a <c>$maxAge</c> is checked for: the database adds a whole number of
@@ -140,18 +141,12 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
     }
 
     /// <summary>The stream's row and, in the same statement, the body of the last event of its metadata stream.</summary>
-    internal IQueryable<Found> FindWithMetadata(EventsDbContext context, string stream, string metastream) =>
-        context.StreamRows
-            .Where(s => s.TenantId == tenantId && s.Id == stream)
-            .Select(s => new Found(
-                s.Version,
-                s.IsArchived,
-                s.CompactedVersion,
-                context.EventRows
-                    .Where(e => e.TenantId == tenantId && e.StreamId == metastream && !e.IsArchived)
-                    .OrderByDescending(e => e.Version)
-                    .Select(e => e.Data)
-                    .FirstOrDefault()));
+    internal IQueryable<Found> FindWithMetadata(EventsDbContext context, string stream, string metastream)
+    {
+        // Composed from the two queries, which the provider inlines into one statement.
+        var probe = QueryRows(context, metastream).OrderByDescending(e => e.Version).Select(e => e.Data);
+        return QueryStreams(context, stream).Select(s => new Found(s.Version, s.IsArchived, s.CompactedVersion, probe.FirstOrDefault()));
+    }
 
     /// <summary>The page's rows: those of the stream, the database's clock deciding which are too old for a <c>$maxAge</c>.</summary>
     internal static IQueryable<EventRow> FilterByAge(IQueryable<EventRow> rows, TimeSpan? maxAge)
@@ -170,14 +165,48 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
 #pragma warning restore RS0030
     }
 
-    /// <summary>The rows of one stream of the tenant.</summary>
-    internal IQueryable<EventRow> QueryRows(EventsDbContext context, string stream) =>
-        context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId && e.StreamId == stream && !e.IsArchived);
+    /// <summary>The rows of one stream of the tenant, in the tenant's partition on a store partitioned by tenant.</summary>
+    internal IQueryable<EventRow> QueryRows(EventsDbContext context, string stream)
+    {
+        var rows = context.EventRows.AsNoTracking().Where(e => e.TenantId == tenantId && e.StreamId == stream && !e.IsArchived);
+        if (!partitionedByTenant)
+        {
+            return rows;
+        }
+
+        var key = QueryPartitionKey(context);
+        return rows.Where(e => e.PartitionKey == key.FirstOrDefault());
+    }
+
+    /// <summary>The stream's row, in the tenant's partition on a store partitioned by tenant.</summary>
+    private IQueryable<StreamRow> QueryStreams(EventsDbContext context, string stream)
+    {
+        var rows = context.StreamRows.Where(s => s.TenantId == tenantId && s.Id == stream);
+        if (!partitionedByTenant)
+        {
+            return rows;
+        }
+
+        var key = QueryPartitionKey(context);
+        return rows.Where(s => s.PartitionKey == key.FirstOrDefault());
+    }
+
+    /// <summary>
+    /// The tenant's partition key, from the store's registry: the leading column of the store's
+    /// unique index of a stream's versions and of its streams' key there, and what lets the
+    /// database read the tenant's partition alone. A subquery of the statement, so nothing about
+    /// a tenant is cached; a tenant the registry does not know matches no row.
+    /// </summary>
+    /// <remarks>
+    /// Nullable on purpose: the first of a nullable value is the subquery as it is, while the first
+    /// of an <c>int</c> is wrapped in <c>COALESCE(…, 0)</c>, which the database does not seek by.
+    /// A null matches no row, as the 0 would have.
+    /// </remarks>
+    private IQueryable<int?> QueryPartitionKey(EventsDbContext context) =>
+        context.TenantPartitionRows.Where(p => p.TenantId == tenantId).Select(p => (int?)p.PartitionKey);
 
     private IQueryable<Found> Find(EventsDbContext context, string stream) =>
-        context.StreamRows
-            .Where(s => s.TenantId == tenantId && s.Id == stream)
-            .Select(s => new Found(s.Version, s.IsArchived, s.CompactedVersion, null));
+        QueryStreams(context, stream).Select(s => new Found(s.Version, s.IsArchived, s.CompactedVersion, null));
 
     /// <summary>
     /// The metadata in force: none when nothing was set, and none, as in the reference, when what

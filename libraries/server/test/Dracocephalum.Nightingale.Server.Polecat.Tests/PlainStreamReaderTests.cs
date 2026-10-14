@@ -30,7 +30,7 @@ public sealed class PlainStreamReaderTests
     public PlainStreamReaderTests()
     {
         var options = new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("events", _root).Options;
-        _sut = new PlainStreamReader(() => new EventsDbContext(options, Schema), Tenant, NullLogger.Instance);
+        _sut = new PlainStreamReader(() => new EventsDbContext(options, Schema), Tenant, partitionedByTenant: false, NullLogger.Instance);
         using var context = new Seeding(_root);
         for (var revision = 0; revision < 6; revision++)
         {
