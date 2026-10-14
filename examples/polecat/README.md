@@ -31,6 +31,7 @@ README that walks through it.
 | Scenario | Shows |
 |---|---|
 | [`append-and-read`](src/Dracocephalum.Nightingale.Examples.Polecat/AppendAndRead/README.md) | the client round trip: append, read both ways, conflict, idempotent retry |
+| [`binary-data`](src/Dracocephalum.Nightingale.Examples.Polecat/BinaryData/README.md) | an event's second body: personal data encrypted under its subject's own key, carried as binary data beside JSON that stays readable, decrypted, then forgotten by destroying the key while the JSON still says what happened; an event of binary data alone reading back with `{}`; the same bytes through `$ce-`; a content type without binary data refused |
 | [`catch-up-subscription`](src/Dracocephalum.Nightingale.Examples.Polecat/CatchUpSubscription/README.md) | two catch-up subscriptions, to a stream from its start and to `$all` from its end: catch up, caught-up note, live delivery in order |
 | [`category-stream`](src/Dracocephalum.Nightingale.Examples.Polecat/CategoryStream/README.md) | the virtual streams: read `$ce-orders` and `$et-order_placed` across plain streams, subscribe to the category and see only its events |
 | [`category-ordinals`](src/Dracocephalum.Nightingale.Examples.Polecat/CategoryOrdinals/README.md) | the virtual streams by ordinal, on a store initialized with ordinals: dense numbers whose bounds are a count, a subscription confirmed at an ordinal, and the holes a delete leaves |

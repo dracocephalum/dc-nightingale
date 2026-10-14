@@ -511,14 +511,26 @@ what a few hundred small events then break. The limit is also wanted for its
 own sake: an append is held in memory whole and written in one transaction,
 and live delivery waits behind that transaction until it commits.
 
-## Event bodies are JSON
+## An event has two bodies
 
-**Reference:** `application/json` or `application/octet-stream`.
+**Reference:** one body, with a content type of `application/json` or
+`application/octet-stream`.
 
-**Nightingale:** JSON only. A binary content type is rejected on append.
+**Nightingale:** JSON data, binary data, or both, in two fields of the event.
+The JSON is always there when the event is read: an event appended with
+binary data only reads back with `{}`. The binary data's media type is the
+reserved metadata key `$binaryContentType`, `application/octet-stream` when
+absent, and any type may be named, not only the reference's two.
 
-**Why:** the store keeps the body in a JSON column; its binary path needs a
-serializer per type on the server, which defeats a type-free gateway.
+**Why:** the case that makes binary data worth having is personal data
+encrypted under a key that can be destroyed, and there the event is better
+as both: the JSON says what happened and stays readable after the key is
+gone, and the binary data is the part that is forgotten. A Protobuf or other
+binary event is the binary data alone. The `{}` is the store's own
+placeholder for a binary event, whose JSON column takes no null. A client in
+the reference's shape, through the compatibility adapter, sees one body: the
+binary data when the JSON is that placeholder, the JSON otherwise, as the
+store itself tells a binary event from a JSON one.
 
 ## Event type names are stored verbatim
 

@@ -53,6 +53,15 @@
 //   are reserved. Two are understood and stored in their own columns:
 //   $correlationId and $causationId, both strings; they come back last in
 //   the object. Every other key is stored as-is and returned as-is.
+//   binary_data is an event's second body, any bytes, stored as they are
+//   sent and never parsed: a Protobuf message, or personal data encrypted
+//   under a key that can be destroyed while the JSON beside it still says
+//   what happened. An event carries data, binary_data, or both; an event
+//   with binary data only has empty data, stored and returned as {}. The
+//   reserved key $binaryContentType, a string, says what the binary data
+//   is, application/octet-stream when absent; it is refused on an event
+//   without binary data, and stored among the other keys. Filters, the
+//   virtual streams and the ordinals never look at either body.
 //
 // Call metadata (gRPC headers)
 //   authorization       the standard header, as the reference client sends
@@ -109,7 +118,7 @@ message RecordedEvent {
   string event_type = 5;
   // Server clock at commit.
   google.protobuf.Timestamp created = 6;
-  // JSON.
+  // JSON; {} for an event appended with binary data only.
   bytes data = 7;
   // A JSON object of user-supplied properties, or empty; see "Event bodies
   // and metadata" above.
@@ -117,6 +126,9 @@ message RecordedEvent {
   // The event's place within the virtual stream being read, under ordinal
   // numbering only; absent otherwise. See "Numbering" above.
   optional sint64 ordinal = 9;
+  // The binary data, as appended; empty for none. See "Event bodies and
+  // metadata" above.
+  bytes binary_data = 10;
 }
 
 // How a persistent-subscription group shares its events among the consumers
@@ -160,11 +172,14 @@ message ProposedEvent {
   // because the id is what makes a retry safe.
   string id = 1;
   string event_type = 2;
-  // JSON.
+  // JSON; empty when the event carries binary data only.
   bytes data = 3;
   // A JSON object of user-supplied properties, or empty; see "Event bodies
   // and metadata" above.
   bytes metadata = 4;
+  // Any bytes, stored as they are; empty for none. See "Event bodies and
+  // metadata" above.
+  bytes binary_data = 5;
 }
 
 // What a caller asserts about a stream before writing to it. Any non-negative

@@ -38,6 +38,31 @@ mapping, lives in the service above it, once, for every backend.
 
 ## The seams
 
+Every seam below follows one rule about who does what. The store does the
+heavy lifting, and the write side above all: an append's version check, the
+global sequence, the high-water mark below which nothing is still
+committing, partitions, tenants, archiving and deleting. Those are the parts
+that are hard to get right under concurrency, and the store has already got
+them right; the gateway calls them and does not rebuild them. Where the store
+cannot serve something on par with the reference, which so far has always
+been a read, the gateway serves it itself, straight from the store's tables
+through its own context, as the mirror does for every read of a stream.
+
+What the gateway adds must stay invisible to the store's own processes. An
+added column is computed or nullable and the store's statements never name
+it; an added index is one the store's migration is told about rather than one
+it would drop; a value the gateway writes into a column the store owns is one
+the store's own writes and the parts of the store the gateway runs read the
+way the store means it, and where the store's own readers would read it
+differently, the gateway does not call those readers, and says so where it
+writes the value. The gateway reaches into the store only through public
+seams: options, registrations, overridable classes, participants in its
+transaction. It uses
+no reflection into the store's internals unless the store's maintainers have
+said the member is meant to be relied on, and what it would rather have as a
+public seam is filed in [`UPSTREAM.md`](UPSTREAM.md). The same rule holds for
+the second store when its backend is written.
+
 ### 1. Events carry no CLR type
 
 The store, like every framework of its kind, wants an event to be a .NET class
@@ -58,6 +83,35 @@ come last. Everything else stays in the headers column as the client sent it.
 
 An integration test guards this seam: if a store release stops honouring the
 caller's type name, or changes what a body comes back as, it fails.
+
+An event may carry a second body, binary data: any bytes, stored as they are
+sent, beside the JSON or instead of it, with `$binaryContentType` among the
+metadata keys saying what they are. The store has a binary column already,
+`bdata`, and a binary path of its own, which is not used: it takes one body
+or the other, never both, and wants a serializer per event type, which a
+gateway without event classes does not have. So the store writes every event
+as JSON, an event with binary data only as its own placeholder for one, `{}`,
+since its JSON column takes no null, and leaves the binary column null.
+`BinaryDataWriter` then sets the binary column of the rows the store just
+inserted. It is a participant in the append's transaction, the store's public
+seam for statements of a caller's own, which the store runs after all of its
+own statements and before its commit: one statement for the whole append,
+each row found by the position the store has read back and checked by its
+id, tenant and stream, refusing, and so rolling the append back, when it finds
+fewer rows than events. The store's queued commands would have been the
+simpler seam, but they bind every value as text and refuse bytes. Only an
+append that carries binary data has the participant, and its statement has
+parameters of its own, so the limit on events in one append is unchanged.
+
+The value the participant writes is one the store's own readers read
+differently: to them a row with binary data is a binary event, and without
+a serializer for its type they refuse it. The gateway does not call them.
+Every read of events goes through the mirror, which reads both columns, and
+the check that recognises a retried append reads the ids through it too,
+rather than through the store's fetch of a stream. An integration test holds
+the store to the order the participant relies on: the participant finds the
+row the append inserted, and a participant that refuses leaves nothing of the
+append behind.
 
 ### 2. The schema is patched, not replaced
 

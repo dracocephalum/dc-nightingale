@@ -27,6 +27,7 @@ public static class WireConversions
             EventType = eventData.Type,
             Data = ByteString.CopyFrom(eventData.Data.Span),
             Metadata = ToMetadataBytes(eventData.Metadata),
+            BinaryData = ToBytes(eventData.BinaryData),
         };
     }
 
@@ -42,7 +43,8 @@ public static class WireConversions
             Guid.ParseExact(proposed.Id, "D"),
             proposed.EventType,
             proposed.Data.Memory,
-            proposed.Metadata.IsEmpty ? null : ParseMetadata(proposed.Metadata));
+            proposed.Metadata.IsEmpty ? null : ParseMetadata(proposed.Metadata),
+            proposed.BinaryData.Memory);
     }
 
     /// <summary>Maps a stored event to its wire form.</summary>
@@ -61,6 +63,7 @@ public static class WireConversions
             Created = Timestamp.FromDateTimeOffset(record.Created),
             Data = ByteString.CopyFrom(record.Data.Span),
             Metadata = ToMetadataBytes(record.Metadata),
+            BinaryData = ToBytes(record.BinaryData),
         };
         if (record.Ordinal is { } ordinal)
         {
@@ -87,7 +90,8 @@ public static class WireConversions
             recorded.Created.ToDateTimeOffset(),
             recorded.Data.Memory,
             recorded.Metadata.IsEmpty ? [] : ParseMetadata(recorded.Metadata),
-            recorded.HasOrdinal ? recorded.Ordinal : null);
+            recorded.HasOrdinal ? recorded.Ordinal : null,
+            recorded.BinaryData.Memory);
     }
 
     /// <summary>Maps a numbering to its wire form.</summary>
@@ -405,6 +409,10 @@ public static class WireConversions
         metadata is null || metadata.Count == 0
             ? ByteString.Empty
             : ByteString.CopyFromUtf8(metadata.ToJsonString(NightingaleJson.Default));
+
+    /// <summary>The wire form of a body: the same bytes, or the shared empty value when there are none.</summary>
+    private static ByteString ToBytes(ReadOnlyMemory<byte> body) =>
+        body.IsEmpty ? ByteString.Empty : ByteString.CopyFrom(body.Span);
 
     /// <summary>Parses wire metadata back into an object.</summary>
     /// <param name="metadata">The bytes; must hold a JSON object.</param>

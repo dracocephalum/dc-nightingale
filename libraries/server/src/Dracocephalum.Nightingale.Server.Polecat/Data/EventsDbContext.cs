@@ -89,6 +89,7 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             row.Property(e => e.StreamId).HasColumnName("stream_id").HasColumnType("varchar(250)");
             row.Property(e => e.Version).HasColumnName("version").HasColumnType("bigint");
             row.Property(e => e.Data).HasColumnName("data").HasColumnType("json");
+            row.Property(e => e.Bdata).HasColumnName("bdata").HasColumnType("varbinary(max)");
             row.Property(e => e.Type).HasColumnName("type").HasColumnType("varchar(500)");
             row.Property(e => e.Timestamp).HasColumnName("timestamp").HasColumnType("datetimeoffset");
             row.Property(e => e.TenantId).HasColumnName("tenant_id").HasColumnType("varchar(250)");

@@ -14,10 +14,11 @@ namespace Dracocephalum.Nightingale;
 /// <param name="Position">Global position.</param>
 /// <param name="Type">The event type, as the client sent it.</param>
 /// <param name="Created">Server clock at commit.</param>
-/// <param name="Data">The body, UTF-8 JSON.</param>
+/// <param name="Data">The JSON data, UTF-8; <c>{}</c> when the event was appended with binary data only.</param>
 /// <param name="Metadata">User-supplied properties; empty when none were supplied.</param>
 /// <param name="Ordinal">The event's zero-based, dense place within the virtual stream it was read from, or
 /// <see langword="null"/> when the read was numbered globally.</param>
+/// <param name="BinaryData">The binary data as it was appended; empty for none. <see cref="MetadataKeys.BinaryContentType"/> in the metadata says what it is.</param>
 public sealed record EventRecord(
     Guid Id,
     string Stream,
@@ -27,4 +28,5 @@ public sealed record EventRecord(
     DateTimeOffset Created,
     ReadOnlyMemory<byte> Data,
     JsonObject Metadata,
-    long? Ordinal = null);
+    long? Ordinal = null,
+    ReadOnlyMemory<byte> BinaryData = default);

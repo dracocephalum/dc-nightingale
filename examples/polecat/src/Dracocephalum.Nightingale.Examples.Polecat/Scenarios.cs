@@ -17,6 +17,11 @@ public static class Scenarios
             AppendAndRead.Scenario.RunAsync,
             report => $"Done: {report.ReadForwards.Count} events round-tripped on {report.Stream}."),
         ExampleScenario.Create(
+            "binary-data",
+            "an event's second body: encrypted personal data beside readable JSON, forgotten by destroying its key",
+            BinaryData.Scenario.RunAsync,
+            report => $"Done: {report.Stream} read back with binary data beside its JSON; the key destroyed, its JSON still says {report.CountryAfterShredding}."),
+        ExampleScenario.Create(
             "catch-up-subscription",
             "subscribe to a stream from its start and to $all from its end: catch up, then live",
             CatchUpSubscription.Scenario.RunAsync,

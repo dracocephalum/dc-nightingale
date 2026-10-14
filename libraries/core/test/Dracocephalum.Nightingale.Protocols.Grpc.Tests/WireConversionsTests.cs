@@ -161,4 +161,43 @@ public sealed class WireConversionsTests
         record.Metadata["Attempt"].ShouldNotBeNull().GetValue<int>().ShouldBe(2);
         back.ShouldBe(recorded);
     }
+
+    [Fact]
+    public void Events_ShouldCarryTheBinaryDataBesideTheJsonBothWays()
+    {
+        // Arrange: bytes that are no UTF-8 at all, so nothing on the way may treat them as text.
+        byte[] binary = [0x00, 0xFF, 0xFE, 0x80, 0x0A];
+        var proposed = new EventData(Guid.NewGuid(), "PersonRegistered", Encoding.UTF8.GetBytes("{\"Country\":\"NZ\"}"), new JsonObject { [MetadataKeys.BinaryContentType] = "application/x-protobuf" }, binary);
+        var record = new EventRecord(Guid.NewGuid(), "people-1", 0, 7, "PersonRegistered", Created, Encoding.UTF8.GetBytes("{}"), [], BinaryData: binary);
+
+        // Act
+        var proposedBack = proposed.ToProposedEvent().ToEventData();
+        var recordedWire = record.ToRecordedEvent();
+        var recordBack = recordedWire.ToEventRecord();
+
+        // Assert
+        proposedBack.BinaryData.ToArray().ShouldBe(binary);
+        proposedBack.Data.ToArray().ShouldBe(proposed.Data.ToArray());
+        proposedBack.Metadata.ShouldNotBeNull()[MetadataKeys.BinaryContentType].ShouldNotBeNull().GetValue<string>().ShouldBe("application/x-protobuf");
+        recordedWire.BinaryData.ToByteArray().ShouldBe(binary);
+        recordBack.BinaryData.ToArray().ShouldBe(binary);
+    }
+
+    [Fact]
+    public void Events_WithoutBinaryData_ShouldLeaveTheWireFieldEmpty()
+    {
+        // Arrange
+        var proposed = new EventData(Guid.NewGuid(), "OrderPlaced", Encoding.UTF8.GetBytes("{}"));
+        var record = new EventRecord(Guid.NewGuid(), "orders-1", 0, 5, "OrderPlaced", Created, Encoding.UTF8.GetBytes("{}"), []);
+
+        // Act
+        var proposedWire = proposed.ToProposedEvent();
+        var recordedWire = record.ToRecordedEvent();
+
+        // Assert: proto3 sends an empty bytes field as nothing at all, so a JSON event costs no byte more.
+        proposedWire.BinaryData.IsEmpty.ShouldBeTrue();
+        recordedWire.BinaryData.IsEmpty.ShouldBeTrue();
+        proposedWire.ToEventData().BinaryData.IsEmpty.ShouldBeTrue();
+        recordedWire.ToEventRecord().BinaryData.IsEmpty.ShouldBeTrue();
+    }
 }

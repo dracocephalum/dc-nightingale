@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 using Dracocephalum.Nightingale.Protocols.Grpc;
 using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Dracocephalum.Nightingale.Server.Auth;
@@ -192,9 +194,10 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                 throw NightingaleErrors.InvalidArgument("Every event needs a type.");
             }
 
+            EventData eventData;
             try
             {
-                events.Add(proposed.ToEventData());
+                eventData = proposed.ToEventData();
             }
             catch (FormatException)
             {
@@ -204,6 +207,9 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             {
                 throw NightingaleErrors.InvalidArgument("Event metadata is a JSON object.");
             }
+
+            CheckBodies(eventData);
+            events.Add(eventData);
         }
 
         if (events.Count == 0)
@@ -372,6 +378,34 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         catch (RevisionConflictException conflict)
         {
             throw NightingaleErrors.RevisionConflict(conflict);
+        }
+    }
+
+    /// <summary>
+    /// Checks what an event carries: JSON data, binary data or both, never neither, and a content
+    /// type for the binary data only beside binary data, as a string. Neither body is parsed here;
+    /// the JSON is the store's to read, and the binary data is nobody's.
+    /// </summary>
+    private static void CheckBodies(EventData eventData)
+    {
+        if (eventData.Data.IsEmpty && eventData.BinaryData.IsEmpty)
+        {
+            throw NightingaleErrors.InvalidArgument("An event carries JSON data, binary data, or both.");
+        }
+
+        if (eventData.Metadata is null || !eventData.Metadata.TryGetPropertyValue(MetadataKeys.BinaryContentType, out var contentType))
+        {
+            return;
+        }
+
+        if (eventData.BinaryData.IsEmpty)
+        {
+            throw NightingaleErrors.InvalidArgument($"{MetadataKeys.BinaryContentType} describes binary data, and the event carries none.");
+        }
+
+        if (contentType is not JsonValue value || !value.TryGetValue<string>(out var text) || text.Length == 0)
+        {
+            throw NightingaleErrors.InvalidArgument($"{MetadataKeys.BinaryContentType} is a media type, a non-empty string.");
         }
     }
 
