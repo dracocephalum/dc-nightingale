@@ -72,6 +72,17 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
 
         var metadata = ParseMetadata(stream, found.Metadata);
         var last = found.Version - 1;
+        if (ResetMark.Find(metadata) is { } continuesFrom)
+        {
+            // Reset: not found until an append reaches the mark; from then on, a truncation.
+            if (continuesFrom > last)
+            {
+                return null;
+            }
+
+            metadata = metadata with { TruncateBefore = continuesFrom };
+        }
+
         var head = new StreamHead(Math.Max(found.CompactedVersion, metadata.GetFirstRevision(last)), last);
         var rows = FilterByAge(QueryRows(context, stream), metadata.MaxAge);
         IOrderedQueryable<EventRow> ordered;
@@ -99,6 +110,33 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
 
         var events = await VirtualStreamReader.PageAsync(ordered, count, VirtualStreamReader.Plain, cancellationToken).ConfigureAwait(false);
         return new StreamSlice(head, events);
+    }
+
+    /// <summary>
+    /// What a reset, a metadata set and a failed "no stream" append decide on: the stream's last
+    /// revision and whether it is archived, and its metadata stream's last revision and metadata.
+    /// Two statements on the main connection, since none of the three is a first-tier path; each
+    /// decision is written under an expected revision of the metadata stream, so a change of
+    /// metadata between the two is caught when written, and an append between them is ordered
+    /// after the decision, as the reference's single writer could have ordered it.
+    /// </summary>
+    /// <param name="stream">The plain stream's name.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The state.</returns>
+    public async Task<MetadataState> ReadMetadataStateAsync(string stream, CancellationToken cancellationToken)
+    {
+        await using var context = contexts();
+        var row = await Find(context, stream).FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        var last = await QueryRows(context, StreamNames.ToMetadataStream(stream))
+            .OrderByDescending(e => e.Version)
+            .Select(e => new { e.Version, e.Data })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return new MetadataState(
+            row is null ? -1 : row.Version - 1,
+            row?.IsArchived ?? false,
+            last is null ? -1 : last.Version - 1,
+            last is null ? StreamMetadata.Empty : ParseMetadata(stream, last.Data));
     }
 
     /// <summary>The stream's row and, in the same statement, the body of the last event of its metadata stream.</summary>
@@ -169,4 +207,18 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
 
     /// <summary>What the first statement finds: the stream's row, and the body of its metadata when that was asked for and set.</summary>
     internal sealed record Found(long Version, bool IsArchived, long CompactedVersion, string? Metadata);
+
+    /// <summary>A stream and its metadata as <see cref="ReadMetadataStateAsync"/> found them.</summary>
+    /// <param name="StreamLast">The stream's last revision; -1 when it has no events.</param>
+    /// <param name="IsArchived">Whether the stream is archived.</param>
+    /// <param name="MetadataRevision">The metadata stream's last revision; -1 when nothing was set.</param>
+    /// <param name="Metadata">The metadata in force, as stored: a reset's truncation negative.</param>
+    internal sealed record MetadataState(long StreamLast, bool IsArchived, long MetadataRevision, StreamMetadata Metadata)
+    {
+        /// <summary>Gets the revision a reset stream continues from, or <see langword="null"/> when the metadata holds no reset.</summary>
+        public long? ContinuesFrom => ResetMark.Find(Metadata);
+
+        /// <summary>Gets a value indicating whether the stream is reset and not yet back: no append has reached the mark.</summary>
+        public bool IsReset => ContinuesFrom > StreamLast;
+    }
 }

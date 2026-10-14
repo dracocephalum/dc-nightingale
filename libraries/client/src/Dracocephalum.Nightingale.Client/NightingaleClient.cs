@@ -229,6 +229,34 @@ public sealed class NightingaleClient : IAsyncDisposable
         Subscribe(StreamNames.All, from, Numbering.Global, filter?.ToWire(checkpointInterval), cancellationToken);
 
     /// <summary>
+    /// Resets a stream, the reference client's delete: it reads as not found until its next
+    /// append, which continues its revisions with every older event hidden from its reads.
+    /// Nothing is removed, <c>$all</c> keeps the events, and the server allows it whatever its
+    /// deletion level. Undone by setting the metadata twice: the first set brings the stream
+    /// back, the second lowers its truncation.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="expected">What the caller asserts about the stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The revision and position of the metadata event the reset wrote.</returns>
+    /// <exception cref="StreamNotFoundException">The stream has neither events nor metadata.</exception>
+    /// <exception cref="StreamDeletedException">The stream is archived.</exception>
+    /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
+    public async Task<AppendResult> ResetStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        try
+        {
+            var response = await _streams.ResetAsync(new ResetRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return new AppendResult(response.Revision, response.Position);
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
+    /// <summary>
     /// Archives a stream: its events leave every read, <c>$all</c> included, and it cannot be
     /// appended to again; the rows stay in the store. Only when the server's deletion level is
     /// archive or delete; it is neither by default.
@@ -279,7 +307,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         try
         {
             var response = await _streams.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = stream }, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return new StreamMetadataResult(stream, response.Revision, response.Metadata.ToStreamMetadata());
+            return new StreamMetadataResult(stream, response.Revision, response.Metadata.ToStreamMetadata(), response.Reset);
         }
         catch (RpcException exception)
         {

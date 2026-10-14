@@ -20,7 +20,11 @@ public sealed record StreamMetadata
     /// <summary>Gets how many of the stream's last events are read; positive.</summary>
     public long? MaxCount { get; init; }
 
-    /// <summary>Gets the first revision read, the events before it hidden; never negative.</summary>
+    /// <summary>
+    /// Gets the first revision read, the events before it hidden; never negative. Set to its
+    /// largest value, the reference's soft delete, a set resets the stream: it reads as not found
+    /// until its next append, which continues the revisions with every older event hidden.
+    /// </summary>
     public long? TruncateBefore { get; init; }
 
     /// <summary>Gets a caching hint carried over from the reference; positive, in whole seconds, and without effect here (<see cref="StreamMetadataKeys.CacheControl"/>).</summary>
@@ -54,12 +58,6 @@ public sealed record StreamMetadata
         if (TruncateBefore < 0)
         {
             throw new ArgumentException($"{StreamMetadataKeys.TruncateBefore} is a revision, never negative.", nameof(TruncateBefore));
-        }
-
-        if (TruncateBefore == long.MaxValue)
-        {
-            // The reference's soft delete; served here once soft delete is.
-            throw new ArgumentException($"{StreamMetadataKeys.TruncateBefore} at its largest value is the reference's soft delete, which this server does not do yet.", nameof(TruncateBefore));
         }
 
         if (CacheControl is { } cacheControl)

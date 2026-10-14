@@ -63,6 +63,44 @@ public sealed class StreamMetadataCallsTests
         result.Metadata.MaxCount.ShouldBe(10);
         result.Metadata.MaxAge.ShouldBeNull();
         result.Metadata.Custom.ShouldNotBeNull()["owner"].ShouldNotBeNull().GetValue<string>().ShouldBe("billing");
+        result.Reset.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetStreamMetadataAsync_WhenTheStreamIsReset_ShouldSaySoBesideTheTruncation()
+    {
+        // Arrange
+        var invoker = A.Fake<CallInvoker>();
+        A.CallTo(() => invoker.AsyncUnaryCall(A<Method<GetStreamMetadataRequest, GetStreamMetadataResponse>>._, A<string?>._, A<CallOptions>._, A<GetStreamMetadataRequest>._))
+            .Returns(Unary(Task.FromResult(new GetStreamMetadataResponse { Revision = 1, Metadata = new Protocols.Grpc.V1.StreamMetadata { TruncateBefore = 6 }, Reset = true })));
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        var result = await sut.GetStreamMetadataAsync("orders-1", TestContext.Current.CancellationToken);
+
+        // Assert
+        result.Reset.ShouldBeTrue();
+        result.Metadata.TruncateBefore.ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task ResetStreamAsync_ShouldSendTheStreamsExpectationAndGiveTheMetadataEvent()
+    {
+        // Arrange
+        var invoker = A.Fake<CallInvoker>();
+        ResetRequest? sent = null;
+        A.CallTo(() => invoker.AsyncUnaryCall(A<Method<ResetRequest, ResetResponse>>._, A<string?>._, A<CallOptions>._, A<ResetRequest>._))
+            .Invokes((Method<ResetRequest, ResetResponse> _, string? _, CallOptions _, ResetRequest request) => sent = request)
+            .Returns(Unary(Task.FromResult(new ResetResponse { Revision = 2, Position = 40 })));
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        var result = await sut.ResetStreamAsync("orders-1", StreamState.StreamRevision(5), TestContext.Current.CancellationToken);
+
+        // Assert
+        sent.ShouldNotBeNull().Stream.ShouldBe("orders-1");
+        sent.ExpectedRevision.ShouldBe(5);
+        result.ShouldBe(new AppendResult(2, 40));
     }
 
     [Fact]

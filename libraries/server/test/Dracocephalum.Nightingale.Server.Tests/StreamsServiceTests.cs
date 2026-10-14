@@ -973,7 +973,6 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     [Theory]
     [InlineData(0L, null)]
     [InlineData(null, -1L)]
-    [InlineData(null, long.MaxValue)]
     public async Task SetStreamMetadata_WhenASettingIsOutOfRange_ShouldAnswerInvalidArgument(long? maxCount, long? truncateBefore)
     {
         // Arrange
@@ -1066,6 +1065,72 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         never.Revision.ShouldBe(-1);
         never.Metadata.HasMaxCount.ShouldBeFalse();
         never.Metadata.Custom.IsEmpty.ShouldBeTrue();
+        set.Reset.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetStreamMetadata_WhenTheStreamIsReset_ShouldSaySoBesideTheTruncation()
+    {
+        // Arrange
+        A.CallTo(() => _store.GetStreamMetadataAsync("orders-1", A<CancellationToken>._))
+            .Returns(new StreamMetadataResult("orders-1", 3, new StreamMetadata { TruncateBefore = 6 }, Reset: true));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var response = await client.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        response.Reset.ShouldBeTrue();
+        response.Metadata.TruncateBefore.ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task Reset_AtTheDefaultDeletionLevel_ShouldBeAllowedAndAnswerTheMetadataEvent()
+    {
+        // Arrange: a reset hides and removes nothing, so no level stands in its way.
+        A.CallTo(() => _store.ResetAsync("orders-1", StreamState.StreamRevision(5), A<CancellationToken>._)).Returns(new AppendResult(2, 40));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var response = await client.ResetAsync(new ResetRequest { Stream = "orders-1", ExpectedRevision = 5 }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        _serverOptions.Deletion.Allowed.ShouldBe(DeletionLevel.None);
+        response.Revision.ShouldBe(2);
+        response.Position.ShouldBe(40);
+    }
+
+    [Theory]
+    [InlineData("missing", StatusCode.NotFound, "STREAM_NOT_FOUND")]
+    [InlineData("archived", StatusCode.FailedPrecondition, "STREAM_DELETED")]
+    public async Task Reset_WhenTheStoreRefuses_ShouldAnswerTheContractsError(string why, StatusCode status, string reason)
+    {
+        // Arrange
+        Exception refusal = why == "missing" ? new StreamNotFoundException("orders-1") : new StreamDeletedException("orders-1");
+        A.CallTo(() => _store.ResetAsync("orders-1", StreamState.Any, A<CancellationToken>._)).ThrowsAsync(refusal);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.ResetAsync(new ResetRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.StatusCode.ShouldBe(status);
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe(reason);
+    }
+
+    [Theory]
+    [InlineData("$all")]
+    [InlineData("$$orders-1")]
+    public async Task Reset_WhenTheStreamIsNotPlain_ShouldRejectTheName(string stream)
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.ResetAsync(new ResetRequest { Stream = stream, ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert: the strict store would have thrown on any call.
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
     }
 
     [Fact]

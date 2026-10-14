@@ -58,6 +58,12 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     /// <summary>SQL Server's error for a command with more parameters than it takes, 2100.</summary>
     private const int TooManyParameters = 8003;
 
+    /// <summary>
+    /// How many times a reset, or a set that expects any revision, is decided again when a change
+    /// of metadata lands between its read and its write, before the conflict is reported.
+    /// </summary>
+    private const int MetadataWriteAttempts = 3;
+
     private readonly VirtualStreamReader _virtual = new(events.CreateDbContext, tenantId);
     private readonly VirtualStreamReader? _replica = readOnlyEvents is null ? null : new(readOnlyEvents.CreateDbContext, tenantId);
     private readonly ReplicaRouter _router = new(timeProvider, logger);
@@ -74,6 +80,62 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         ArgumentNullException.ThrowIfNull(events);
         ArgumentOutOfRangeException.ThrowIfZero(events.Count);
 
+        try
+        {
+            return await AppendOnceAsync(stream, expected, events, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RevisionConflictException conflict) when (expected == StreamState.NoStream && conflict.ActualRevision >= 0 && _streams is not null && !StreamNames.TryParseMetadataStream(stream, out _))
+        {
+            return await RecreateAsync(stream, events, conflict, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// An append that expected no stream and found one: the reference accepts it on a reset stream
+    /// and numbers it from the revision the stream continues from, as an append expecting the last
+    /// revision. Metadata is read here, on the failure path, and never when an append succeeds.
+    /// A stream reset with nothing appended since gets the append once more, expecting its last
+    /// revision, which the store checks as atomically as any; a stream recreated since may hold
+    /// these very events, from an attempt whose answer was lost, and then the retry succeeds with
+    /// what that attempt wrote. Anything else is the conflict the store reported.
+    /// </summary>
+    private async Task<AppendResult> RecreateAsync(string stream, IReadOnlyList<EventData> events, RevisionConflictException conflict, CancellationToken cancellationToken)
+    {
+        var state = await RequireStreams(stream).ReadMetadataStateAsync(stream, cancellationToken).ConfigureAwait(false);
+        if (state.ContinuesFrom is not { } continuesFrom)
+        {
+            throw conflict;
+        }
+
+        if (continuesFrom == conflict.ActualRevision + 1)
+        {
+            try
+            {
+                return await AppendOnceAsync(stream, StreamState.StreamRevision(conflict.ActualRevision), events, cancellationToken).ConfigureAwait(false);
+            }
+            catch (RevisionConflictException retried)
+            {
+                throw new RevisionConflictException(stream, StreamState.NoStream, retried.ActualRevision);
+            }
+        }
+
+        if (continuesFrom <= conflict.ActualRevision)
+        {
+            try
+            {
+                return await ResolveConflict(stream, StreamState.StreamRevision(continuesFrom - 1), events, cancellationToken).ConfigureAwait(false);
+            }
+            catch (RevisionConflictException)
+            {
+                // Not these events: the caller's conflict, as the store reported it.
+            }
+        }
+
+        throw conflict;
+    }
+
+    private async Task<AppendResult> AppendOnceAsync(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken)
+    {
         var wrapped = new object[events.Count];
         for (var i = 0; i < events.Count; i++)
         {
@@ -347,29 +409,122 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     }
 
     /// <inheritdoc/>
+    public async Task<AppendResult> ResetAsync(string stream, StreamState expected, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        var streams = RequireStreams(stream);
+        for (var attempt = 1; ; attempt++)
+        {
+            var state = await streams.ReadMetadataStateAsync(stream, cancellationToken).ConfigureAwait(false);
+            if (state.IsArchived)
+            {
+                throw new StreamDeletedException(stream);
+            }
+
+            if (state.StreamLast < 0 && state.MetadataRevision < 0)
+            {
+                throw new StreamNotFoundException(stream);
+            }
+
+            CheckExpectedOfAny(stream, expected, state.StreamLast);
+
+            // The reference's reset replaces the metadata as a whole with its mark. A stream with no
+            // events has nothing to hide, and its first append starts at 0 whatever the mark, so
+            // what is left of the reset is the metadata cleared.
+            var body = state.StreamLast < 0
+                ? StreamMetadata.Empty.ToJsonBytes()
+                : ResetMark.ToBody(StreamMetadata.Empty, -(state.StreamLast + 1));
+            try
+            {
+                return await AppendMetadataAsync(stream, ToExpected(state.MetadataRevision), [body], cancellationToken).ConfigureAwait(false);
+            }
+            catch (RevisionConflictException) when (attempt < MetadataWriteAttempts)
+            {
+                // A change of metadata landed since the read; the reset is decided again on it.
+            }
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<StreamMetadataResult> GetStreamMetadataAsync(string stream, CancellationToken cancellationToken)
     {
-        var metastream = StreamNames.ToMetadataStream(stream);
-        var page = await ReadAsync(metastream, Direction.Backwards, null, 1, cancellationToken).ConfigureAwait(false);
-        if (page is null || page.Events.Count == 0)
+        var state = await RequireStreams(stream).ReadMetadataStateAsync(stream, cancellationToken).ConfigureAwait(false);
+        if (state.MetadataRevision < 0)
         {
             return new StreamMetadataResult(stream, -1, StreamMetadata.Empty);
         }
 
-        var last = page.Events[0];
-        return new StreamMetadataResult(stream, last.Revision, StreamMetadata.FromJson(last.Data.Span));
+        // The stored mark never leaves as stored: the truncation and the reset are reported apart.
+        var metadata = state.ContinuesFrom is { } continuesFrom ? state.Metadata with { TruncateBefore = continuesFrom } : state.Metadata;
+        return new StreamMetadataResult(stream, state.MetadataRevision, metadata, state.IsReset);
     }
 
     /// <inheritdoc/>
-    public Task<AppendResult> SetStreamMetadataAsync(string stream, StreamState expected, StreamMetadata metadata, CancellationToken cancellationToken)
+    public async Task<AppendResult> SetStreamMetadataAsync(string stream, StreamState expected, StreamMetadata metadata, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(metadata);
-        var metastream = StreamNames.ToMetadataStream(stream);
+        metadata.Validate();
+        var streams = RequireStreams(stream);
+        var resets = metadata.TruncateBefore == long.MaxValue;
+        for (var attempt = 1; ; attempt++)
+        {
+            var state = await streams.ReadMetadataStateAsync(stream, cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<byte[]> bodies;
+            if (state.IsReset && state.ContinuesFrom is { } continuesFrom)
+            {
+                // Brought back, as the reference does it, in two events: the metadata as given, a
+                // reset in it written as the mark, then the same with the truncation the reset left.
+                bodies = [ResetMark.ToBody(metadata, resets ? -continuesFrom : metadata.TruncateBefore), ResetMark.ToBody(metadata, continuesFrom)];
+            }
+            else if (resets)
+            {
+                // A reset through a set keeps the other settings, as the reference's does.
+                bodies = [ResetMark.ToBody(metadata, state.StreamLast < 0 ? null : -(state.StreamLast + 1))];
+            }
+            else
+            {
+                bodies = [ResetMark.ToBody(metadata, metadata.TruncateBefore)];
+            }
 
-        // A new id every time, as the reference's client gives each set: two sets of the same
-        // metadata are two changes, and a retry after a lost answer reads the metadata back.
-        var change = new EventData(Guid.NewGuid(), StreamNames.MetadataEventType, metadata.ToJsonBytes());
-        return AppendAsync(metastream, expected, [change], cancellationToken);
+            // A caller that expects any revision gets the one the decision was made on, so a change
+            // landing in between is decided again rather than written over.
+            try
+            {
+                return await AppendMetadataAsync(stream, expected == StreamState.Any ? ToExpected(state.MetadataRevision) : expected, bodies, cancellationToken).ConfigureAwait(false);
+            }
+            catch (RevisionConflictException) when (expected == StreamState.Any && attempt < MetadataWriteAttempts)
+            {
+                // Decided again on what landed.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Appends metadata events to the stream's metadata stream. A new id every time, as the
+    /// reference's client gives each set: two sets of the same metadata are two changes, and a
+    /// retry after a lost answer reads the metadata back.
+    /// </summary>
+    private Task<AppendResult> AppendMetadataAsync(string stream, StreamState expected, IReadOnlyList<byte[]> bodies, CancellationToken cancellationToken) =>
+        AppendAsync(
+            StreamNames.ToMetadataStream(stream),
+            expected,
+            bodies.Select(body => new EventData(Guid.NewGuid(), StreamNames.MetadataEventType, body)).ToList(),
+            cancellationToken);
+
+    /// <summary>The expected state of a stream found at a revision: that revision, or no stream when none was found.</summary>
+    private static StreamState ToExpected(long revision) => revision < 0 ? StreamState.NoStream : StreamState.StreamRevision(revision);
+
+    /// <summary>The expected state against a stream's last revision, -1 when it has no events.</summary>
+    private static void CheckExpectedOfAny(string stream, StreamState expected, long actual)
+    {
+        var holds = expected == StreamState.Any
+            || (expected == StreamState.NoStream && actual < 0)
+            || (expected == StreamState.StreamExists && actual >= 0)
+            || (expected.HasRevision && expected.ToInt64() == actual);
+        if (!holds)
+        {
+            throw new RevisionConflictException(stream, expected, actual);
+        }
     }
 
     /// <summary>A session's options for one tenant: the store scopes every read and write in the session to it.</summary>
