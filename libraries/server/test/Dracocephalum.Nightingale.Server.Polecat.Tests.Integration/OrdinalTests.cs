@@ -29,7 +29,7 @@ public sealed class OrdinalTests : IAsyncLifetime
             options.Deletion.AllowTombstone = true;
 
             // A short lease, so the sequencer's quiet-store pass, on renewal, comes within a second.
-            options.SequencerLeaseDuration = TimeSpan.FromSeconds(3);
+            options.OrdinalSequencerLeaseDuration = TimeSpan.FromSeconds(3);
         });
     }
 
@@ -133,7 +133,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         static void Ordinals(NightingaleOptions options)
         {
             options.Store.AssignOrdinals = true;
-            options.SequencerLeaseDuration = TimeSpan.FromMilliseconds(900);
+            options.OrdinalSequencerLeaseDuration = TimeSpan.FromMilliseconds(900);
         }
 
         var name = TestDatabases.NewName();
@@ -173,7 +173,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         static void Ordinals(NightingaleOptions options)
         {
             options.Store.AssignOrdinals = true;
-            options.SequencerLeaseDuration = TimeSpan.FromMilliseconds(900);
+            options.OrdinalSequencerLeaseDuration = TimeSpan.FromMilliseconds(900);
         }
 
         var name = TestDatabases.NewName();

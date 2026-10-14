@@ -13,11 +13,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// does not run this. A read that fails is logged and taken again at the next interval.
 /// </summary>
 /// <param name="sequences">The sequences, of which those followed here are kept current.</param>
-/// <param name="progress">Where the sequencer's progress rows are read.</param>
+/// <param name="progress">Where the ordinal sequencer's progress rows are read.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 /// <param name="interval">How long the follower waits between reads while a sequence is behind; <see cref="Interval"/> when not given.</param>
-internal sealed partial class NumberingFollower(INumberedSequences sequences, ISequencerProgressReader progress, TimeProvider timeProvider, ILogger<NumberingFollower> logger, TimeSpan? interval = null)
+internal sealed partial class NumberingFollower(INumberedSequences sequences, IOrdinalSequencingProgressReader progress, TimeProvider timeProvider, ILogger<NumberingFollower> logger, TimeSpan? interval = null)
 {
     /// <summary>How long the follower waits between reads while a sequence is behind: the tails' fast interval, the sequencer's own cadence.</summary>
     public static readonly TimeSpan Interval = PolecatTenantTails.FastInterval;
@@ -67,10 +67,10 @@ internal sealed partial class NumberingFollower(INumberedSequences sequences, IS
     /// <returns>A task that completes when what the rows say is published.</returns>
     internal async Task LookAsync(IReadOnlyList<NumberedSequence> behind, CancellationToken cancellationToken)
     {
-        IReadOnlyDictionary<string, long> positions;
+        IReadOnlyList<OrdinalSequencingProgress> rows;
         try
         {
-            positions = await progress.ReadAsync(behind.Select(sequence => SequencerProgress.OrdinalsOf(sequence.TenantId)).ToList(), cancellationToken).ConfigureAwait(false);
+            rows = await progress.ReadAsync(behind.Select(sequence => sequence.TenantId).ToList(), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -80,9 +80,9 @@ internal sealed partial class NumberingFollower(INumberedSequences sequences, IS
 
         foreach (var sequence in behind)
         {
-            if (positions.TryGetValue(SequencerProgress.OrdinalsOf(sequence.TenantId), out var position))
+            if (rows.FirstOrDefault(row => string.Equals(row.TenantId, sequence.TenantId, StringComparison.Ordinal)) is { } row)
             {
-                sequence.Numbering.Publish(position);
+                sequence.Numbering.Publish(row.Position);
             }
         }
     }

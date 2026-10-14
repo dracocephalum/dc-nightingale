@@ -69,10 +69,26 @@ public sealed class NightingaleDbContextTests
             text => text.ShouldContain("CREATE TABLE [elsewhere].[SubscriptionParkedEvent]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[SubscriptionOutboxEntry]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[Lease]"),
-            text => text.ShouldContain("CREATE TABLE [elsewhere].[SequencerProgress]"),
+            text => text.ShouldContain("CREATE TABLE [elsewhere].[OrdinalSequencingProgress]"),
             text => text.ShouldContain("CREATE TABLE [elsewhere].[StoreProperty]"),
             text => text.ShouldContain("[elsewhere].[__EFMigrationsHistory]"),
             text => text.ShouldNotContain("[" + NightingaleSchema.Default + "]"));
+    }
+
+    [Fact]
+    public void Migrations_ShouldKeepOneOrdinalSequencingRowPerTenantAndOneForTheSharedSequence()
+    {
+        // Arrange: the shared sequence's row is the one whose tenant is null, and the provider's
+        // default filter on a unique index over a nullable column would admit any number of them.
+        using var context = Context(NightingaleSchema.Default);
+
+        // Act
+        var script = context.GetService<IMigrator>().GenerateScript();
+        var index = script.Split('\n').Single(line => line.Contains("IX_OrdinalSequencingProgress_TenantId", StringComparison.Ordinal));
+
+        // Assert
+        index.ShouldContain("CREATE UNIQUE INDEX");
+        index.ShouldNotContain("WHERE");
     }
 
     [Fact]

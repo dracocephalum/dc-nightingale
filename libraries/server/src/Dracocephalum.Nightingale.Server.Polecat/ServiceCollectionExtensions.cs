@@ -218,7 +218,7 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<INumberedSequences>(),
                 new NumberingFollower(
                     provider.GetRequiredService<INumberedSequences>(),
-                    new SequencerProgressReader(provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>()),
+                    new OrdinalSequencingProgressReader(provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>()),
                     provider.GetService<TimeProvider>() ?? TimeProvider.System,
                     provider.GetService<ILogger<NumberingFollower>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NumberingFollower>.Instance,
                     fastInterval),
@@ -228,7 +228,7 @@ public static class ServiceCollectionExtensions
                 options.Schema,
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
                 provider.GetRequiredService<ILogger<OrdinalSequencer>>(),
-                options.SequencerLeaseDuration));
+                options.OrdinalSequencerLeaseDuration));
         }
 
         return services;

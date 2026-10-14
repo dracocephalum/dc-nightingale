@@ -103,14 +103,15 @@ internal sealed partial class OrdinalSequencer(
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        var name = SequencerProgress.OrdinalsOf(tenantId);
 
+        // The shared sequence's row is the one whose tenant is null.
+        var row = tenantId is null ? "[TenantId] IS NULL" : "[TenantId] = @tenant";
         long from;
         await using (var progress = connection.CreateCommand())
         {
             progress.Transaction = transaction;
-            progress.CommandText = string.Format(CultureInfo.InvariantCulture, "SELECT [Position] FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE [Name] = @name", OrdinalsTable);
-            progress.Parameters.AddWithValue("@name", name);
+            progress.CommandText = string.Format(CultureInfo.InvariantCulture, "SELECT [Position] FROM {0} WITH (UPDLOCK, HOLDLOCK) WHERE {1}", ProgressTable, row);
+            AddTenant(progress, tenantId);
             var value = await progress.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (value is long known)
             {
@@ -121,8 +122,8 @@ internal sealed partial class OrdinalSequencer(
                 from = 0;
                 await using var insert = connection.CreateCommand();
                 insert.Transaction = transaction;
-                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} ([Id], [Name], [Position]) VALUES (NEWID(), @name, 0)", OrdinalsTable);
-                insert.Parameters.AddWithValue("@name", name);
+                insert.CommandText = string.Format(CultureInfo.InvariantCulture, "INSERT INTO {0} ([Id], [TenantId], [Position]) VALUES (NEWID(), {1}, 0)", ProgressTable, tenantId is null ? "NULL" : "@tenant");
+                AddTenant(insert, tenantId);
                 await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
         }
@@ -166,18 +167,14 @@ internal sealed partial class OrdinalSequencer(
                 + " JOIN types t ON t.tenant_id = b.tenant_id AND t.[type] = b.[type];"
                 + "{1}",
                 EventsTable,
-                to > from ? string.Format(CultureInfo.InvariantCulture, " UPDATE {0} SET [Position] = @to WHERE [Name] = @name", OrdinalsTable) : string.Empty,
+                to > from ? string.Format(CultureInfo.InvariantCulture, " UPDATE {0} SET [Position] = @to WHERE {1}", ProgressTable, row) : string.Empty,
                 tenantId is null ? string.Empty : " AND tenant_id = @tenant");
             number.Parameters.AddWithValue("@to", to);
-            number.Parameters.AddWithValue("@name", name);
-            if (tenantId is not null)
-            {
-                number.Parameters.AddWithValue("@tenant", tenantId);
-            }
+            AddTenant(number, tenantId);
 
             var rows = await number.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            LogNumbered(name, to, rows - 1);
+            LogNumbered(tenantId ?? "the shared sequence", to, rows - 1);
         }
 
         return to;
@@ -189,7 +186,19 @@ internal sealed partial class OrdinalSequencer(
 
     private string EventsTable => Schema + ".[pc_events]";
 
-    private string OrdinalsTable => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + nameof(SequencerProgress) + "]";
+    private string ProgressTable => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + nameof(OrdinalSequencingProgress) + "]";
+
+    /// <summary>
+    /// The tenant as a parameter, typed as both its columns are: a name sent as Unicode to a
+    /// column that is not makes the database convert the column and scan the index it should seek.
+    /// </summary>
+    private static void AddTenant(SqlCommand command, string? tenantId)
+    {
+        if (tenantId is not null)
+        {
+            command.Parameters.Add("@tenant", System.Data.SqlDbType.VarChar, 250).Value = tenantId;
+        }
+    }
 
     private async Task RunAsync(CancellationToken stopping)
     {

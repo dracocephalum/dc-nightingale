@@ -1,4 +1,3 @@
-using Dracocephalum.Nightingale.Server.Data;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
@@ -14,7 +13,7 @@ public sealed class NumberingFollowerTests
     private static readonly DateTimeOffset Started = new(2026, 10, 12, 8, 0, 0, TimeSpan.Zero);
     private readonly FakeTimeProvider _time = new(Started);
     private readonly FollowedTail _tail = new();
-    private readonly FakeProgressReader _progress = new();
+    private readonly FakeOrdinalSequencingProgressReader _progress = new();
 
     [Fact]
     public async Task Follow_WhileTheHeadIsPastTheNumbering_ShouldReadTheProgressAndPublishIt()
@@ -22,7 +21,7 @@ public sealed class NumberingFollowerTests
         // Arrange: the head is at 20 and nothing is numbered as far as this process knows; the
         // row says the sequencer has reached 20.
         _tail.Followed.Publish(20);
-        _progress.Holding(SequencerProgress.Ordinals, 20);
+        _progress.Holding(null, 20);
         var sut = Follower();
 
         // Act: one interval's worth of following; the read is the first thing it does.
@@ -34,7 +33,7 @@ public sealed class NumberingFollowerTests
         reached.ShouldBe(20);
         _tail.Numbered.ShouldBe(20);
         _progress.Reads.ShouldBe(1);
-        _progress.LastAskedFor.ShouldBe([SequencerProgress.Ordinals]);
+        _progress.LastAskedFor.ShouldBe([null]);
     }
 
     [Fact]
@@ -57,7 +56,7 @@ public sealed class NumberingFollowerTests
     {
         // Arrange: the first read fails; the second finds the row.
         _tail.Followed.Publish(20);
-        _progress.Holding(SequencerProgress.Ordinals, 20).FailingOnce(new InvalidOperationException("the database went away"));
+        _progress.Holding(null, 20).FailingOnce(new InvalidOperationException("the database went away"));
         var sut = Follower();
 
         // Act: the following runs past one interval, so the second read happens.

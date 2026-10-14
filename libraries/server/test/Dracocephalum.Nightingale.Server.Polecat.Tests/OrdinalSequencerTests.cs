@@ -37,7 +37,7 @@ public sealed class OrdinalSequencerTests
             });
         var tail = new FollowedTail();
         var sequences = new SharedSequence(tail, tail.Numbering);
-        var follower = new NumberingFollower(sequences, new FakeProgressReader(), time, NullLogger<NumberingFollower>.Instance);
+        var follower = new NumberingFollower(sequences, new FakeOrdinalSequencingProgressReader(), time, NullLogger<NumberingFollower>.Instance);
         using var sut = new OrdinalSequencer(leases, sequences, follower, new SubscriptionGroupRegistry(), "Server=example;Database=nightingale", "dbo", "nightingale", time, NullLogger<OrdinalSequencer>.Instance);
 
         // Act: the loop waits out the interval after the failure, then asks again.
