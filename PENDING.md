@@ -22,7 +22,8 @@ in order:
   credential that is there.
 - **A pepper that never leaves a key vault**, an implementation of the pepper
   step that asks the vault to HMAC, behind the same seam.
-- **Stream ACLs**, with stream metadata below.
+- **Stream ACLs**, the `$acl` key of stream metadata, which is refused until
+  then (*Stream metadata* below).
 
 ## Protocols beyond gRPC
 
@@ -123,8 +124,39 @@ their license header and copyright, `NOTICE` names them, and the adapter
 says "compatible with", never more: the name is Kurrent, Inc.'s trademark,
 and the server is theirs; only the client and its protocol are Apache-2.0,
 and nothing of the server's source, which is under its own license, is read
-into this repository. What it takes, read from the client's source at its
-1.3.0 tag, so nothing here is re-derived:
+into this repository.
+
+When: once the gateway has most of what the reference's client calls, so
+the adapter is a mapping rather than a list of `Unimplemented` answers. The
+client discovers optional features through `ServerFeatures` and adapts, but
+a core call it makes unconditionally fails in front of the application, so
+parity comes first, in the order the client exposes it:
+
+1. **Stream metadata**, `$maxAge`, `$maxCount` and `$tb`, read and set as the
+   client's own calls do (*Stream metadata* below); `$acl` waits for the
+   authentication that is left.
+2. **Binary event bodies** (below): every append from the client carries a
+   content type, and one that is not JSON is refused today.
+3. **The small ones together**: `$bc-` by correlation id, `$streams`, and
+   the `Stop` action of a group's nack.
+4. **Multi-stream and conditional appends** (below), the client's newest.
+
+Parity is not bought with the core's speed. The gateway is not a clone, and
+some of the reference's behaviour is there for its history or its single
+writer rather than for an application. Features come in three tiers. The
+first tier is appends, reads and subscriptions, which stay as efficient as
+they are. A behaviour that would add a read, a write or a lock to all of
+them goes to the second tier, served on a path of its own at best effort and
+paid for only by the callers who use it, or to the third tier, written down
+as a variance with the client-side way around it. *Stream metadata* below is
+the worked example.
+
+What the gateway has that the reference does not, deferred delivery, a
+client that resubscribes on its own, server-computed lag counts, waits for a
+consumer that asks and is not in the way.
+
+What it takes, read from the client's source at its 1.3.0 tag, so nothing
+here is re-derived:
 
 - **Services.** `event_store.client.streams.Streams`,
   `...persistent_subscriptions.PersistentSubscriptions`, `...gossip.Gossip`,
@@ -148,13 +180,29 @@ into this repository. What it takes, read from the client's source at its
   `content-type` and `created` in ticks; Basic credentials in
   `authorization`, as ours; `connection-name` and `requires-leader` headers
   read and ignored.
-- **Not carried, answered `Unimplemented` until the core has them:** filters
-  on `$all`, stream metadata (the `$$` streams), multi-stream append,
-  projections, operations such as scavenge, and user management beyond what
-  the credentials table covers. The client refuses what the feature table
-  does not advertise rather than degrading.
+- **Index reads.** The reference's secondary indexes, `$idx-all`,
+  `$idx-ce-<category>` and `$idx-et-<type>`, are not streams a client reads
+  by name: a read or a catch-up subscription of `$all` whose filter is a
+  stream prefix naming exactly one index is served from the index instead of
+  the log, in `$all` positions, and the reference's groups have no such path,
+  so a group filtered that way matches nothing there. `$idx-all` holds the
+  events of non-system streams whose type is not a system one. The adapter
+  maps the filter to a stream: `$idx-all` to `$de`, `$idx-ce-<category>` to
+  `$ce-<category>` and `$idx-et-<type>` to `$et-<type>`, read by position, a
+  group's filter included, so the reference's gap is not reproduced. The
+  `$idx-` filter stays the adapter's: the gateway's own contract names the
+  streams.
+- **Not carried, answered `Unimplemented` until the core has them:** stream
+  metadata (the `$$` streams), multi-stream append, projections, operations
+  such as scavenge, and user management beyond what the credentials table
+  covers. The client refuses what the feature table does not advertise rather
+  than degrading.
 - **Tenancy.** The KurrentDB client knows no tenant: a host binds the adapter
-  to one tenant, or a credential carries its tenant.
+  to one tenant, or the credential carries it, which the gateway already
+  does: a credential bound to a tenant that names none works in its own.
+  `$all` is then the tenant's, which on a store keeping many tenants on the
+  shared sequence wants *One tenant's `$all` by index* below, or partitioning
+  by tenant.
 - **Testing.** The official client package against this server, the client's
   checkout as the reference for behaviour; its own test suite is the
   conformance suite where it can run against another server.
@@ -165,11 +213,175 @@ into this repository. What it takes, read from the client's source at its
 
 ## Stream metadata
 
-`$maxAge`, `$maxCount` and `$tb` (truncate before) stored as one document per
-stream and enforced at read time: a read filters versions below the truncate
-point, outside the age window, or beyond the last N. Physical removal of the
-filtered events is a separate maintenance job, the analogue of a scavenge.
-`$acl` arrives with authentication.
+The reference keeps a stream's metadata as events of type `$metadata` in a
+stream of its own, `$$<stream>`, the last one in force: the reserved keys
+`$maxAge`, `$maxCount`, `$tb` (truncate before), `$cacheControl`, `$tmp` and
+`$acl`, and whatever else the application puts there. It changes what a read of the
+stream returns and, for a soft delete alone, how an append to it is checked;
+a read of `$all` ignores it. Parity here is weighed against cost, as
+everywhere (*KurrentDB's own protocol* above): reads and appends stay as
+cheap as they are, and what of the reference's behaviour would add a read, a
+write or a lock to every append is served on a path of its own at best
+effort, or written down as a variance. The shape, decided so nothing here is
+re-derived:
+
+- **Stored as events, in the events table.** `SetStreamMetadata` appends a
+  `$metadata` event to `$$<stream>` and `GetStreamMetadata` reads the last
+  one; a read of `$$<stream>` returns the history as real events. The gateway
+  keeps no table of its own for it, because a table would take the changes
+  out of the one sequence: a replication or a migration that reads `$all`
+  from the start needs a change of metadata in its place among the events
+  around it, or it applies a soft delete and the stream's recreation in the
+  wrong order, and the history is the audit of who changed a stream's
+  retention, and when. Every metadata event is kept; they are small and rare.
+- **Concurrency is the store's.** A set carries an expected revision of the
+  metadata stream, and two sets from two instances race on the store's unique
+  index of tenant, stream and version, as any two appends do. An append to the
+  stream and a change of its metadata touch different streams and neither
+  depends on the other, since metadata acts only when the stream is read.
+  Tombstone removes the stream and its metadata stream in one transaction;
+  delete, the archive, leaves the metadata stream as it is. A set does not
+  ask whether the stream exists, as in the reference, where setting
+  `$maxAge` before the first append is a common pattern: the metadata is in
+  force from the stream's first event. Since the gateway's tombstone frees
+  the name, a set after it is metadata for a new stream, where the reference,
+  whose tombstone keeps the name for good, refuses it.
+- **Written by the metadata call alone.** `Append` goes on refusing every `$`
+  name, so a `$$` stream is written only by `SetStreamMetadata`, which keeps
+  the application's keys as JSON. `$acl` is refused, with a reason of its
+  own, until authentication carries stream ACLs (*Authentication: what is
+  left*).
+- **Reserved keys are checked, and two are carried over without effect.** A
+  reserved key of the wrong type refuses the set, where the reference stores
+  it and then reads the stream's metadata as empty, every key dropped,
+  without a word. `$cacheControl`, a caching hint of the reference's HTTP
+  interface, and `$tmp`, which asks its scavenge to remove a deleted
+  stream's metadata too, are stored and returned so a client gets back what
+  it set, and have no effect in the gateway. The code keeps them in one
+  named list of keys carried over from the reference, each with what it
+  means there, so that supporting one is moving it out of that list and a
+  search shows which are still carried; `$tmp` gets its meaning with
+  physical removal (below).
+- **Enforced inside the read's own statement.** A read of a plain stream finds
+  the last metadata event with a `TOP 1` seek on the same unique index, joined
+  to the page by an `OUTER APPLY`, so it costs no round trip: the lower bound
+  `max(last − $maxCount + 1, |$tb|)` becomes a seek bound on that index, and
+  `$maxAge` a check of each row's timestamp. A stream without metadata finds
+  nothing in that one probe and reads as it does today, so a store that never
+  sets metadata pays a probe of a few index pages per read and nothing else.
+  Reads of plain streams move from the store's fetch to the gateway's mirror
+  of the events table for it, as the pages of `$all` did. A subscription or a
+  group on the stream starts from the same bound. Neither `$all` nor a virtual
+  stream applies metadata, as in the reference. Nothing is cached: every
+  instance appends, and a cache would learn of a change only through the tail,
+  a polling interval late, serving meanwhile events a new `$maxCount` has cut.
+  If a measurement ever asks for less than the probe, the way out is a store
+  setting fixed at initialization that refuses metadata and skips it, not a
+  cache.
+- **`$all` becomes the whole log, and two streams select from it.** With
+  metadata stored as events, `$all` carries them as the reference's does, and
+  the variance *`$all` holds only application events* goes. `$de`, the data
+  events, is `$all` without the events whose type begins with `$`, the
+  reference's `ExcludeSystemEvents`, at the cost of `$all`: the same range of
+  the clustered position, with the type checked on rows that are read anyway.
+  It is read by position and has no ordinals, since numbering it would write
+  every row a second time. `$mde`, the metadata events, is `$et-$metadata`
+  under another name, one seek on `ix_pc_events_type_seq`, since `$metadata`
+  is the only system type the table holds. Both are streams, so reads,
+  catch-up subscriptions and groups all take them. Category ordinals are
+  unaffected: `$$orders-1` is in the category `$$orders`, never `orders`.
+- **Appends never read metadata.** The reference checks an append against
+  the soft-delete value of `$tb` and writes an un-delete after it, which is
+  safe there because one writer handles every write in turn. Here every
+  instance appends, and a check of metadata before an append would go stale
+  between the two, or cost a lock on every append for a feature most stores
+  never use. So an append is checked against the stream's revisions alone,
+  by the store and atomically, and whatever metadata decides is decided when
+  the stream is read. The one sequence already places a change of metadata
+  among the events around it for a reader of `$all`, which is all the
+  reference's single writer gives a reader.
+- **Delete and soft delete are different features.** Delete, the store's
+  archive, flags the stream and every one of its events, hides them from
+  `$all` too and refuses appends; undoing it, which the gateway does not
+  offer, would bring every event back. The reference's soft delete hides the
+  events from reads of the stream alone, leaves them in `$all`, and is undone
+  by the next append, which recreates the stream: its revisions go on from
+  the last one, since the old events keep theirs until a scavenge, and the old
+  events stay hidden. Delete cannot stand in for it, so soft delete is a call
+  of its own, named when the slice starts, and a `$tb` set to its largest
+  value through `SetStreamMetadata` on a stream that is not soft-deleted is
+  the same request.
+- **Soft delete is a read rule, stored as a negative `$tb`.** The reference
+  writes `$tb` at its largest value, replacing the other keys, and that value
+  is its only mark of a soft delete; its un-delete then rewrites `$tb` as the
+  last revision plus one. The gateway writes, in one metadata event, the
+  negative of the last revision plus one, `-6` for a stream whose last
+  revision is 5, and nothing else, so one number says both that the stream
+  was soft-deleted and where it is truncated. A read finds the stream deleted
+  while `$tb` is negative and its absolute value is beyond the last revision:
+  not found. Otherwise the absolute value is the truncation, so recreation
+  needs nothing of its own: the next append lands at 6, the stream reads
+  again from there, and the same `-6` now means what the reference's
+  un-delete writes. The value never leaves the gateway as it is stored: the
+  core's metadata call reports a soft delete as a field of its own, and the
+  KurrentDB adapter serves a read of `$$<stream>`, which is how that client
+  reads metadata, with `$tb` at its largest value while the stream is deleted
+  and at 6 after, the two values the reference's history holds; that
+  client's parser throws on a negative `$tb`. A negative `$tb` from a caller
+  is refused, where the reference ignores it; its client cannot send one. A
+  stream with no events cannot be soft-deleted, as in the reference, so the
+  value is never 0. Since no write has to follow the append, no interleaving
+  of an append and a soft delete on two instances strands an event: an
+  append committed before the soft delete reads the last revision is hidden
+  by it, one committed after is the recreation, the two orders the
+  reference's writer allows. The soft delete reads the last revision and then
+  writes, and so does a metadata set on a soft-deleted stream (next), so both
+  take the update lock on the stream's row in the store's streams table
+  first; every append takes that lock anyway to move the version, so the
+  lock is paid on those two paths and never by an append.
+- **A metadata set on a soft-deleted stream un-deletes it.** In the
+  reference, any write to `$$<stream>` while the stream is soft-deleted is
+  followed by its un-delete, which rewrites `$tb` in what was just written:
+  a set of `$tb` at 3 ends at 6, the old events stay hidden, and so does a
+  set of `$tb` at its largest value, which un-deletes rather than deletes
+  again; the other keys of the set are kept. The gateway writes that end
+  state in one event: the caller's keys with `$tb` at the absolute value of
+  the stored one, under the lock above. Once the stream is recreated, a set
+  of `$tb` at 3 is a plain set and the events from 3 read again, in both,
+  until physical removal (below) takes them.
+- **"No stream" after a soft delete, by a retry on its failure.** The
+  reference accepts an append that expects no stream on a soft-deleted stream
+  and numbers its events from the last revision plus one, exactly as an
+  append that expects the last revision; a recreated stream never starts
+  again at 0. Here such an append fails on the store's check, and only then,
+  on the failure path, the gateway reads the metadata: when the stream is
+  soft-deleted with `$tb` at the negative of the revision the failure
+  reports plus one, the
+  append is retried once expecting that revision, which the store checks as
+  atomically as any. An append that succeeds never reads metadata.
+- **What stays a variance**, written into `VARIANCES.md` when the slice
+  ships. An append that expects the stream to exist is accepted on a
+  soft-deleted stream, where the reference refuses it: refusing it means
+  reading metadata when the append would succeed, which is acceptable only
+  if that expected state alone pays for it, as a probe before such appends,
+  and even then a soft delete landing between the probe and the append gets
+  through; it waits for a consumer that asks, and is then built that way,
+  never as a check on every append. The metadata stream's history has no
+  un-delete event, stores the negative `$tb` the adapter translates, and
+  has one event where a set on a soft-deleted stream gives the reference
+  two, so the reference's moment between them, with the caller's `$tb` in
+  force, does not exist here. A wrongly typed reserved key is refused rather
+  than emptying the metadata; `$cacheControl` and `$tmp` are stored without
+  effect; and a set after a tombstone is accepted, a line for the existing
+  variance *A tombstoned stream reads as one that never existed*. And a
+  change of metadata that un-deletes the stream
+  between a failed "no stream" append and its retry lets the retry through
+  where the reference would refuse it; that window is a variance, not a
+  lock.
+- **Physical removal** of the events metadata hides is a separate maintenance
+  job, the analogue of a scavenge, and a slice of its own; whether the store
+  can delete a stream's events below a version, or that is a request in
+  `UPSTREAM.md`, is the first thing it finds out.
 
 ## Multi-stream and conditional appends
 
@@ -265,6 +477,62 @@ multi-store one points the control plane elsewhere without a change of shape;
 the tenant and store refresh is the cadence `TenantRefresher` already runs. A
 tenant moving between stores is an export and an import with positions
 renumbered, never a transparent feature.
+
+## One tenant's `$all` by index
+
+On a store that keeps its tenants on the shared sequence, a tenant's `$all`
+is a range of the clustered position with the tenant checked on every row
+read, since the store has no index of tenant and position: a catch-up reads
+every tenant's rows to return one tenant's, a hundred for one on a store of a
+hundred tenants of a size. The live tail is short and does not notice;
+replaying history does. Partitioning by tenant avoids it, a sequence per
+tenant clustered on its own, at the price of the wildcard read across
+tenants. The other way, decided so nothing here is re-derived:
+
+- **The index.** `ix_pc_events_tenant_seq` on tenant and position, filtered
+  on the archived flag like the gateway's other indexes, with `is_system`
+  included: a computed column, whether the type begins with `$`, which `$de`
+  brings (*Stream metadata*). The column is not persisted, so no row is
+  rewritten to add it, only the index built; that a column computed and not
+  persisted can be included in a filtered index is checked on a real server
+  first, the category column of `ix_pc_events_category_seq` being persisted.
+- **One lookup per event, as in the reference.** A tenant's `$all` is a seek
+  on tenant and position, in position order so a page stops early, with a
+  lookup of each row's body in the clustered index. The reference's own index
+  reads cost the same, positions from the index and then a read of each
+  record. A tenant's `$de` checks the included flag on the index entry before
+  the lookup, so a system event costs a skipped entry, never a row.
+- **The reader chooses the path, not the optimizer.** For a tenant that is
+  the whole store the clustered range is the cheaper, and a plan cached for a
+  small tenant and reused for a large one, or the reverse, picks wrong. So
+  the index serves a tenant's scope, and the clustered range the default
+  scope and the read across all tenants.
+- **Only where it pays.** A store that keeps tenants on the shared sequence;
+  partitioned by tenant, the clustered key already leads with the tenant, and
+  a store of one tenant needs neither. Added to an existing store, it is an
+  index build over the whole table, which *Online and resumable index builds*
+  takes care of.
+- **Later, if a store asks.** Where system events are many, the flag can be a
+  key column instead, tenant, flag and position, so `$de` seeks past them. It
+  would be an index of its own beside this one, since `$all` needs one range
+  in position order and the flag in the key splits it in two, and so a store
+  setting the reader reads, since the reader chooses its path itself. Until a
+  store asks, the included flag serves both streams.
+
+## Range partitioning of the events table
+
+The store partitions events by tenant or by the archived flag only, and adds
+the partition column to its unique stream-and-version index when it does. A
+sliding window by sequence, for an events table too large to manage whole,
+is not a store feature, so it would be ours to add through the patched
+schema: a partition function on `seq_id` with a new range switched in ahead
+of the head and old ranges switched out to archive. It forces the sequence
+into the stream-and-version unique index, as every aligned unique index must
+carry the partition column, which leaves per-stream version uniqueness to
+the store's own commit-time check rather than the index. It would be a fourth
+value of `Nightingale:Store:Partitioning`, fixed at initialization and
+exclusive with the others, since a table has one partition scheme. Built when
+sizing demands it.
 
 ## Ordinals on a store initialized without them
 
@@ -390,14 +658,91 @@ store unit `DESIGN.md` describes under *A registry of stores*: the management
 calls answer, the health endpoint says why, the operations that need nothing
 of what is missing still work, and the store is enabled once the schema is
 brought up to date, by a pipeline or by an operator. Migrations themselves
-then run beside the server rather than ahead of it. Two more pieces belong
+then run beside the server rather than ahead of it. One more piece belongs
 with it: `--schema-script <file>`, the delta the server would apply as one
 reviewable file, the event store's statements and the gateway's idempotent
 migration script in apply order, for the change too large to run at startup
 at all, an index over a very large events table say, which a database
 administrator runs by hand, the server accepting whatever matches its
-definition; and online or resumable index builds where the edition has them,
-an option appended to the index statements of that script.
+definition. How such an index is built without blocking the table is the
+next entry's.
+
+## Online and resumable index builds
+
+An index built over a large events table holds the table's schema lock for
+the whole build unless it is built online, and an online build that is
+stopped starts over unless it is resumable. The schema library writes plain
+index statements on SQL Server, where its PostgreSQL side has a concurrent
+option (`UPSTREAM.md`). Rather than wait for it, or rewrite the text it
+writes, the gateway takes the events table's indexes out of the library's
+hands and applies them itself. The shape, decided so nothing here is
+re-derived:
+
+- **Every index of `pc_events`, the store's and the gateway's.** The
+  definitions stay where they are made: the store's come from its own feature
+  and the gateway's from the patched one, rebuilt on every build, so an
+  upgrade of the store that changes an index still shows as a difference.
+  The patched feature moves them off the table definition and names each one
+  ignored (`IgnoreIndex`, which the schema library honours on SQL Server from
+  9.27, and which refuses a name the table still defines, so it is a move, not
+  a mark); the library then neither creates, compares nor drops them, and
+  manages the columns, the key and the partitioning as before.
+- **The comparison is the gateway's, on the library's own terms.** The table
+  as it is comes from the library's `FetchExistingAsync`, and each definition
+  is held against the index of its name with the library's `Matches`, the
+  canonical comparison the library itself uses, so it is exactly as strict: a
+  definition with no index is one to create, one whose index differs is one to
+  rebuild, and an index no definition names is one to drop, as the library
+  drops it today. Nothing is parsed: the statements are written from the
+  definitions, which carry the columns, uniqueness, included columns and
+  filter.
+- **The order is the whole difficulty.** A column an index uses cannot be
+  dropped or altered while the index stands, and an index cannot be built on a
+  column that is not there yet. So an apply runs in three steps around the
+  library's batches for the table: first, the indexes to drop, and every index
+  that uses a column the library is about to drop or alter, read from the
+  difference between the table's columns as defined and as fetched; then the
+  library's batches; then the indexes to create, and the ones to rebuild, as a
+  create with `DROP_EXISTING = ON` where the old index still stands, so it
+  serves until the new one is built, and a plain create where the first step
+  dropped it. Every combination is held by an integration test against a real
+  server: an index on a column added in the same apply, one on a column
+  dropped, one on a column whose type changes, a changed filter, a changed
+  uniqueness, an index renamed, an extra index, and each of those on a table
+  partitioned by tenant and by the archived flag.
+- **Online and resumable where the edition has them.** A create carries
+  `WITH (ONLINE = ON, RESUMABLE = ON)` on Enterprise, Developer and Azure SQL,
+  `SERVERPROPERTY('EngineEdition')` 3, 5 or 8, and runs offline elsewhere. On
+  a partitioned table SQL Server aligns the index with the table's scheme by
+  itself, so no `ON` clause is written. The script `--schema-script` exports
+  makes the choice in the statement itself, as dynamic SQL, since it runs on a
+  server the gateway has not seen.
+- **The lock wait inside the statement.** An online build still takes the
+  table's schema lock briefly at its start and its end, and a build queued for
+  it behind a long reader queues everything after it, the reason
+  `Nightingale:SchemaLockWaitTimeout` exists. An online statement carries its
+  own low-priority wait from the same setting, `WAIT_AT_LOW_PRIORITY
+  (MAX_DURATION = …, ABORT_AFTER_WAIT = SELF)`, which waits without holding
+  anyone up; its duration counts whole minutes, and which versions accept it
+  on a create rather than a rebuild is to be checked against the servers the
+  gateway supports when the slice starts.
+- **A paused build is not a missing index.** A resumable build that was
+  stopped leaves its index in the catalog, disabled, with a row in
+  `sys.index_resumable_operations`; read as missing, it would be built again
+  over the paused one. While such a row exists for the table, an apply refuses
+  and names it, and the operator resumes or aborts it.
+- **What the gateway then owns.** The library's creation script no longer
+  holds the indexes, so initialization creates them after the table,
+  `--export-schema` writes them, the approved schema snapshot holds them, the
+  hash of the creation script that fast boot trusts covers the definitions,
+  and the schema report lists the indexes to create, rebuild or drop beside
+  the library's difference. Online and resumable are how an index is built,
+  not what it is, so nothing of them is in the catalog afterwards and a store
+  built that way compares as current.
+
+What it does not cover: adding a column to a large table, the persisted
+category column of a store taking ordinals later say, is a change to every
+row, online or not, and stays a change to run by hand.
 
 ## Binary event bodies, beside the JSON one
 

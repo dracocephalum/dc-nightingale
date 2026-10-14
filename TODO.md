@@ -50,12 +50,12 @@ undecided adds it here rather than mentioning it once in a conversation.
   revision that was no longer current. Close by: a conditional archive
   statement that carries the expected revision, which is asked for in
   `UPSTREAM.md`.
-- **Range partitioning of the events table is not a store feature.** The
-  store partitions events by tenant or by the archived flag only, and adds
-  the partition column to its unique stream-and-version index when it does.
-  A sliding window by sequence for a very large table would be ours to add
-  through the patched schema, and it would force the sequence into that
-  unique index, leaving per-stream version uniqueness to the store's own
-  commit-time check, and it would be a fourth value of
-  `Nightingale:Store:Partitioning`, exclusive with the others like them. Close by: deciding when sizing demands it; see
-  `PENDING.md`.
+- **A virtual stream read across all tenants does not seek.** The indexes
+  behind `$ce-` and `$et-` lead with the tenant, and a read under the
+  wildcard names none, so it scans the index or the table with the category
+  or type checked on every row: a full scan for a rare one. One tenant and a
+  store of one tenant are fine, since the read names the tenant or the
+  store's default one. Close by: the wildcard read becomes one seek per
+  tenant of the directory, merged in position order in process, each asked
+  for the next page's worth only, with an integration test over several
+  tenants. Stores partitioned by tenant refuse the wildcard already.
