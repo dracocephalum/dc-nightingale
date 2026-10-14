@@ -225,7 +225,10 @@ public sealed class StreamRouter : IAsyncDisposable
         StreamSlice? page;
         try
         {
-            page = await _store.ReadAsync(stream, Direction.Forwards, first, count, cancellationToken).ConfigureAwait(false);
+            // As stored: a category's or a type's followers get these events too, and a stream's
+            // metadata hides nothing from them; a stream's own followers are live, as the
+            // reference's are, past what a catch-up read applied the metadata to.
+            page = await _store.ReadAsStoredAsync(stream, first, count, cancellationToken).ConfigureAwait(false);
         }
         catch (StreamDeletedException deleted)
         {

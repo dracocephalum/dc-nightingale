@@ -26,7 +26,14 @@ public interface IStreamStore
     Task<AppendResult> AppendAsync(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Reads one page of a stream. A <see langword="null"/> result means the stream has no events.
+    /// Reads one page of a stream, with the stream's metadata applied as the reference applies it:
+    /// nothing before the later of the last revision less <c>$maxCount</c> plus one and
+    /// <c>$tb</c>, which the head reports as its first revision, and nothing older than
+    /// <c>$maxAge</c>. Fewer events than asked for means nothing more is there to read, up to the
+    /// head's last revision, so a reader that got fewer has read through it even when metadata
+    /// hid what lay between. A stream whose metadata hides every event exists and reads empty. A
+    /// metadata stream is read as it is stored. A <see langword="null"/> result means the stream
+    /// has no events.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="direction">The direction to read in.</param>
@@ -37,6 +44,20 @@ public interface IStreamStore
     /// <returns>The head and the events of the page, or <see langword="null"/>.</returns>
     /// <exception cref="StreamDeletedException">The stream was soft-deleted.</exception>
     Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads one page of a stream forwards as it is stored, whatever its metadata says: what the
+    /// router fetches when the tail points at a stream's new events, which it hands to the
+    /// stream's followers and to the followers of its category and event type, whom a stream's
+    /// metadata does not concern. A <see langword="null"/> result means the stream has no events.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="from">The first revision, inclusive.</param>
+    /// <param name="count">The most events to return. Positive.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The head and the events of the page, or <see langword="null"/>.</returns>
+    /// <exception cref="StreamDeletedException">The stream was soft-deleted.</exception>
+    Task<StreamSlice?> ReadAsStoredAsync(string stream, long from, int count, CancellationToken cancellationToken);
 
     /// <summary>
     /// Reads one page of a stream for a caller that accepts a view which may lag behind the latest

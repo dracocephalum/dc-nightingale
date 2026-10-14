@@ -127,9 +127,7 @@ public static class ServiceCollectionExtensions
             return store;
         }).UseLightweightSessions();
 
-        // The second store exists only for bounded reads of plain streams on the read-only
-        // connection, and only when the host asks for them: it reads and never migrates.
-        // The mirror of the store's events table, once per connection: each is a type of its own,
+        // The mirror of the store's tables, once per connection: each is a type of its own,
         // so a reader asks for the one it means. The read-only one is always there; with the
         // read-only connection off it reaches the main one and nothing reads through it.
         services.AddSingleton(new EventStoreSchema(options.Store.Schema));
@@ -164,7 +162,7 @@ public static class ServiceCollectionExtensions
             options.Store.AssignOrdinals,
             readOnlyConnectionString is null ? null : provider.GetRequiredService<IDbContextFactory<ReadOnlyEventsDbContext>>(),
             readOnlyConnectionString is not null && options.ReadStreamsFromReadOnlyConnection
-                ? DocumentStore.For(store => Configure(store, readOnlyConnectionString, options))
+                ? provider.GetRequiredService<IDbContextFactory<ReadOnlyEventsDbContext>>()
                 : null,
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             !partitionedByTenant,

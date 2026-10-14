@@ -24,7 +24,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="tenantId">The tenant every read is scoped to, or <see langword="null"/> for all tenants, under the wildcard.</param>
 internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string? tenantId)
 {
-    private static readonly Expression<Func<EventRow, Raw>> Plain =
+    /// <summary>The columns of a read by position or revision, hydrated by <see cref="PageAsync"/>; a plain stream's read takes them too.</summary>
+    internal static readonly Expression<Func<EventRow, Raw>> Plain =
         e => new Raw(e.SeqId, e.Id, e.StreamId, e.Version, e.Data, e.Type, e.Timestamp, e.CorrelationId, e.CausationId, e.Headers, null);
 
     private static readonly Expression<Func<EventRow, Raw>> WithCategoryOrdinal =
@@ -280,7 +281,8 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         }
     }
 
-    private static async Task<IReadOnlyList<EventRecord>> PageAsync(IQueryable<EventRow> ordered, int count, Expression<Func<EventRow, Raw>> columns, CancellationToken cancellationToken)
+    /// <summary>The first rows of an ordered query, as event records.</summary>
+    internal static async Task<IReadOnlyList<EventRecord>> PageAsync(IQueryable<EventRow> ordered, int count, Expression<Func<EventRow, Raw>> columns, CancellationToken cancellationToken)
     {
         var rows = await ordered.Take(count).Select(columns).ToListAsync(cancellationToken).ConfigureAwait(false);
         var records = new EventRecord[rows.Count];
@@ -330,5 +332,5 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     }
 
     /// <summary>The columns a read selects: never the whole row, since a store without ordinals has no ordinal columns.</summary>
-    private sealed record Raw(long SeqId, Guid Id, string StreamId, long Version, string Data, string Type, DateTimeOffset Timestamp, string? CorrelationId, string? CausationId, string? Headers, long? Ordinal);
+    internal sealed record Raw(long SeqId, Guid Id, string StreamId, long Version, string Data, string Type, DateTimeOffset Timestamp, string? CorrelationId, string? CausationId, string? Headers, long? Ordinal);
 }

@@ -41,8 +41,9 @@ undecided adds it here rather than mentioning it once in a conversation.
   group, and the virtual streams by ordinal on a store initialized with
   `Nightingale:Store:AssignOrdinals`, filters on `$all` with their
   checkpoints, for reads, catch-up subscriptions and persistent groups, and a
-  stream's metadata, set and read back as events of `$$<stream>`, with `$de`
-  and `$mde` beside `$all`; the samples under `examples/` are the end-to-end
+  stream's metadata, set and read back as events of `$$<stream>` and applied
+  to reads of the stream, with `$de` and `$mde` beside `$all`; the samples
+  under `examples/` are the end-to-end
   runs. Not yet: the ordinal
   backfill, in `PENDING.md`. Close by: see `PENDING.md`.
 - **A delete's expected-revision check is not atomic with the archive.** The

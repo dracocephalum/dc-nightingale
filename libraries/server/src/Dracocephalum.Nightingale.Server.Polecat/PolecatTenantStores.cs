@@ -16,14 +16,14 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// rows. Both are made on first use and kept for the instance's life; they hold no connection
 /// of their own, so keeping one per tenant costs the objects and nothing else. The wildcard scope
 /// gets one stream store with no tenant, which reads <c>$all</c> and the virtual streams across
-/// tenants through the mirror of the events table. The store over the read-only connection, when
-/// the host reads plain streams through it, is made once here and shared.
+/// tenants through the mirror of the events table. Bounded reads of plain streams go through the
+/// mirror over the read-only connection when the host asks for it.
 /// </summary>
 /// <param name="store">The document store.</param>
 /// <param name="events">Makes the mirror of the store's events table over the main connection.</param>
 /// <param name="ordinals">Whether the store was initialized with ordinals.</param>
 /// <param name="readOnlyEvents">Makes the same mirror over the read-only connection, or <see langword="null"/> when the host does not read through it.</param>
-/// <param name="readOnlyStore">A store over the read-only connection for bounded reads of plain streams, owned here, or <see langword="null"/>.</param>
+/// <param name="readOnlyStreams">Makes the same mirror over the read-only connection for bounded reads of plain streams, or <see langword="null"/> when they stay on the main connection.</param>
 /// <param name="contexts">Makes the gateway's own context.</param>
 /// <param name="supportsAllTenants">Whether positions are coherent across tenants, which they are while the sequence is shared.</param>
 /// <param name="tails">The tail of a tenant by the id the store keeps for it: the one tail of the process while the sequence is shared, the tenant's own under a sequence per tenant.</param>
@@ -36,18 +36,18 @@ internal sealed class PolecatTenantStores(
     IDbContextFactory<EventsDbContext> events,
     bool ordinals,
     IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyEvents,
-    IDocumentStore? readOnlyStore,
+    IDbContextFactory<ReadOnlyEventsDbContext>? readOnlyStreams,
     IDbContextFactory<NightingaleDbContext> contexts,
     bool supportsAllTenants,
     Func<string, IStoreTail> tails,
     AppendSignal appended,
     NameComparison names,
     TimeProvider timeProvider,
-    ILogger<PolecatStreamStore> logger) : ITenantStores, IDisposable, IAsyncDisposable
+    ILogger<PolecatStreamStore> logger) : ITenantStores
 {
     private readonly ConcurrentDictionary<string, PolecatStreamStore> _streams = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SubscriptionGroupStore> _groups = new(StringComparer.Ordinal);
-    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStore, appended, timeProvider, logger));
+    private readonly Lazy<PolecatStreamStore> _allTenants = new(() => new PolecatStreamStore(store, null, events, ordinals, readOnlyEvents, readOnlyStreams, appended, timeProvider, logger));
 
     /// <inheritdoc/>
     public bool SupportsAllTenants => supportsAllTenants;
@@ -69,7 +69,7 @@ internal sealed class PolecatTenantStores(
             return _allTenants.Value;
         }
 
-        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStore, appended, timeProvider, logger));
+        return _streams.GetOrAdd(GetTenantId(scope), id => new PolecatStreamStore(store, id, events, ordinals, readOnlyEvents, readOnlyStreams, appended, timeProvider, logger));
     }
 
     /// <inheritdoc/>
@@ -96,12 +96,6 @@ internal sealed class PolecatTenantStores(
         // Under the wildcard the sequence is shared, and every tenant's tail is the one tail.
         return tails(GetTenantId(scope));
     }
-
-    /// <inheritdoc/>
-    public void Dispose() => readOnlyStore?.Dispose();
-
-    /// <inheritdoc/>
-    public ValueTask DisposeAsync() => readOnlyStore?.DisposeAsync() ?? ValueTask.CompletedTask;
 
     /// <summary>The id the store keeps for the scope's tenant; the store's default tenant for a scope that names none.</summary>
     private static string GetTenantId(TenantScope scope) => scope.StoreTenantId ?? JasperFx.StorageConstants.DefaultTenantId;

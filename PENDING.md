@@ -192,6 +192,20 @@ here is re-derived:
   group's filter included, so the reference's gap is not reproduced. The
   `$idx-` filter stays the adapter's: the gateway's own contract names the
   streams.
+- **Event numbers.** A reference record's `EventNumber` is its revision in
+  its own stream, never a position; positions are the log's. A `$ce-` or
+  `$et-` stream holds link events with revisions of their own, dense, and a
+  client reading one is on the link: `OriginalEventNumber`, the number a
+  stream subscription checkpoints with, is the link's revision, the
+  gateway's ordinal, while the resolved event's `EventNumber` is its
+  revision in its own stream. So the adapter serves `$ce-` and `$et-` under
+  ordinal numbering, the ordinal as the link's revision. On a store without
+  ordinals it serves positions in its place: they only increase, so a
+  checkpoint still resumes, but two of them subtracted are no count, a
+  variance to write when the adapter ships. A property of the core's own
+  client giving the number of the stream being read, whichever numbering,
+  is booked and not planned: it is the record and the numbering the caller
+  chose, so it goes on no wire.
 - **Not carried, answered `Unimplemented` until the core has them:** stream
   metadata (the `$$` streams), multi-stream append, projections, operations
   such as scavenge, and user management beyond what the credentials table
@@ -243,24 +257,58 @@ re-derived:
   `$all` carries the metadata events; `$de`, the data events, is `$all`
   without the types that begin with `$`, at the cost of `$all`, by position
   only and followed as `$all` is; `$mde` is `$et-$metadata` under another
-  name, ordinals included. `VARIANCES.md` says what is not applied yet. What
-  is left is below: enforcement on reads, then soft delete.
-- **Enforced inside the read's own statement.** A read of a plain stream finds
-  the last metadata event with a `TOP 1` seek on the same unique index, joined
-  to the page by an `OUTER APPLY`, so it costs no round trip: the lower bound
-  `max(last − $maxCount + 1, |$tb|)` becomes a seek bound on that index, and
-  `$maxAge` a check of each row's timestamp. A stream without metadata finds
-  nothing in that one probe and reads as it does today, so a store that never
-  sets metadata pays a probe of a few index pages per read and nothing else.
-  Reads of plain streams move from the store's fetch to the gateway's mirror
-  of the events table for it, as the pages of `$all` did. A subscription or a
-  group on the stream starts from the same bound. Neither `$all` nor a virtual
-  stream applies metadata, as in the reference. Nothing is cached: every
-  instance appends, and a cache would learn of a change only through the tail,
-  a polling interval late, serving meanwhile events a new `$maxCount` has cut.
-  If a measurement ever asks for less than the probe, the way out is a store
-  setting fixed at initialization that refuses metadata and skips it, not a
-  cache.
+  name, ordinals included. `VARIANCES.md` says what differs.
+- **Landed: enforced on reads, in the statements a read already ran.** A read
+  of a plain stream goes through the gateway's mirror of the store's tables,
+  as the pages of `$all` did, in the two statements the store's own fetch
+  took. The first finds the stream's row and, in the same statement, the last
+  metadata event with a `TOP 1` seek backwards on the store's unique index of
+  a stream's versions, so the probe costs no round trip and a stream without
+  metadata finds nothing in a few index pages. The second reads the page with
+  the lower bound `max(last − $maxCount + 1, $tb)` as the start of its seek on
+  that index and `$maxAge` as a check of each row's timestamp against the
+  database's clock, `SYSUTCDATETIME()`, the clock that stamped it; the check
+  comes before the page is counted, so a short page still means the end. The
+  head's first revision is that bound, beyond the last revision when the
+  metadata hides every event, and such a stream reads empty and exists, as in
+  the reference. A catch-up subscription or a group on the stream starts from
+  the bound because its reads do, and goes on from the head after a short
+  page, whatever the metadata hid. Live delivery is not checked, as in the
+  reference: the router reads what an append brought as it is stored, for the
+  stream's followers and its category's and type's alike. Neither `$all` nor
+  a virtual stream applies metadata, and a metadata stream reads its whole
+  history (`VARIANCES.md`). Nothing is cached: every instance appends, and a
+  cache would learn of a change only through the tail, a polling interval
+  late, serving meanwhile events a new `$maxCount` has cut. If a measurement
+  ever asks for less than the probe, the way out is a store setting fixed at
+  initialization that refuses metadata and skips it, not a cache. What is left
+  is soft delete, and the next bullet with it.
+- **With soft delete: the partition key in a stream's read.** On a store
+  partitioned by tenant the store's unique index of a stream's versions leads
+  with the tenant's partition key, `tenant_ordinal` in the store's names
+  (not an ordinal of the gateway's, `DESIGN.md` seam 6), which the read and
+  its probe do not name, so they may not seek, and a predicate on the tenant
+  alone eliminates no partition; the store's own fetch named it no more. The
+  store keeps the key per tenant in `pc_tenant_partitions`. The read names it
+  beside the tenant, so it seeks the existing index with only the tenant's
+  partition read, and no index is added: a second index
+  over the same columns would cost every append a second write. The tenant
+  stays in the predicate because tenants can share a partition. An
+  integration test on a partitioned store reads the plan of both statements.
+  Soft delete's own lock and its retry read the same rows, so the two ship
+  together.
+- **`$maxAge` reads its expired rows, booked.** A stream long past its
+  `$maxAge` reads its expired rows on every forwards read from the start,
+  each looked up in the table for its timestamp, which the unique index does
+  not hold. Physical removal (below) is the answer, as the reference's
+  scavenge is. Booked and not planned, since `$maxAge` is no first-tier path:
+  an index for it is one a host adds as it adds any optional index, never one
+  provisioned by default, because an index on the stream and the timestamp
+  costs every append to every stream a write, and the timestamp included in
+  the unique index is a change to the store's index; and a binary search by
+  version over the existing index, as the reference's read does, which
+  costs appends nothing and relies on a stream's timestamps rising with its
+  versions, which they do while the database's clock does not step back.
 - **Appends never read metadata.** The reference checks an append against
   the soft-delete value of `$tb` and writes an un-delete after it, which is
   safe there because one writer handles every write in turn. Here every

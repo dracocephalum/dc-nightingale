@@ -91,7 +91,7 @@ internal static class EventSource
             while (true)
             {
                 var page = await store.ReadAsync(stream, Direction.Forwards, next, pageSize, cancellationToken).ConfigureAwait(false);
-                if (page is null || page.Events.Count == 0)
+                if (page is null)
                 {
                     break;
                 }
@@ -101,9 +101,17 @@ internal static class EventSource
                     yield return FeedItem.Of(record);
                 }
 
-                next = page.Events[^1].Revision + 1;
+                if (page.Events.Count > 0)
+                {
+                    next = page.Events[^1].Revision + 1;
+                }
+
+                // A short page has read through the head, whatever the stream's metadata hid
+                // after its last event; without this, a stream it hides entirely would leave the
+                // feed before the first revision, and every live event would be ahead of it.
                 if (page.Events.Count < pageSize)
                 {
+                    next = Math.Max(next, page.Head.Last + 1);
                     break;
                 }
             }

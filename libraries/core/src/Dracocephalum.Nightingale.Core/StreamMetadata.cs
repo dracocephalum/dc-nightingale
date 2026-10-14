@@ -86,6 +86,30 @@ public sealed record StreamMetadata
         }
     }
 
+    /// <summary>
+    /// The first revision a read of the stream returns under <see cref="MaxCount"/> and
+    /// <see cref="TruncateBefore"/>: the later of the two bounds, the reference's lower bound for
+    /// every read of a stream. Beyond <paramref name="last"/> when the two hide every event.
+    /// <see cref="MaxAge"/> hides events by their age on top of it, which revisions do not tell.
+    /// </summary>
+    /// <param name="last">The stream's last revision.</param>
+    /// <returns>The first revision a read returns.</returns>
+    public long GetFirstRevision(long last)
+    {
+        var first = 0L;
+        if (MaxCount is { } maxCount)
+        {
+            first = Math.Max(first, last - maxCount + 1);
+        }
+
+        if (TruncateBefore is { } truncateBefore)
+        {
+            first = Math.Max(first, truncateBefore);
+        }
+
+        return first;
+    }
+
     /// <summary>The body of the <c>$metadata</c> event that stores this metadata: a JSON object in the reference's shape, the reserved keys first.</summary>
     /// <returns>The UTF-8 JSON.</returns>
     /// <exception cref="ArgumentException">The metadata is not valid; see <see cref="Validate"/>.</exception>

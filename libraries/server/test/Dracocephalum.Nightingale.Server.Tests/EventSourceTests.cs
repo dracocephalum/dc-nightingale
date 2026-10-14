@@ -28,7 +28,7 @@ public sealed class EventSourceTests
             .Returns(new StreamSlice(new StreamHead(0, 0), [Record(0, 10)]));
         A.CallTo(() => store.ReadPointersAsync(1, 20, StreamRouter.PointerPage, A<CancellationToken>._))
             .Returns([new EventPointer("orders-1", 2, 20, "order_placed")]);
-        A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 2, 1, A<CancellationToken>._))
+        A.CallTo(() => store.ReadAsStoredAsync("orders-1", 2, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record(2, 20)]));
         A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 1, 10, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record(1, 22), Record(2, 20)]));
@@ -48,6 +48,35 @@ public sealed class EventSourceTests
 
         // Assert
         delivered.ShouldBe([0, 1, 2]);
+    }
+
+    [Fact]
+    public async Task FollowStream_WhenMetadataHidesEveryEvent_ShouldGoLiveAfterTheHeadAndDeliverWhatComesNext()
+    {
+        // Arrange: the stream goes to revision 5 and its metadata hides all of it, so the catch-up
+        // read is empty; the router then brings revision 6, which is the next one to deliver, not
+        // an event ahead of revision 0 to read the stream again for.
+        var store = A.Fake<IStreamStore>(options => options.Strict());
+        var tail = new FakeTail();
+        await using var router = new StreamRouter(store, tail, StringComparer.Ordinal);
+        A.CallTo(() => store.ReadAsync("orders-1", Direction.Forwards, 0, 10, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(10, 5), []));
+        A.CallTo(() => store.ReadPointersAsync(1, 20, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([new EventPointer("orders-1", 6, 20, "order_placed")]);
+        A.CallTo(() => store.ReadAsStoredAsync("orders-1", 6, 1, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 6), [Record(6, 20)]));
+        var feed = EventSource.FollowAsync(store, tail, router, "orders-1", 0, 10, Numbering.Global, null, TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+
+        // Act
+        var next = feed.MoveNextAsync();
+        tail.Advance(20);
+        (await next).ShouldBeTrue();
+        var delivered = feed.Current.Record!.Revision;
+        await feed.DisposeAsync();
+
+        // Assert: delivered from the router; the stream was read once, for the catch-up.
+        delivered.ShouldBe(6);
+        A.CallTo(() => store.ReadAsync("orders-1", A<Direction>._, A<long?>._, A<int>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]

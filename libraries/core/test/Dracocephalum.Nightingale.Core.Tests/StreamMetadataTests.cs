@@ -140,6 +140,24 @@ public sealed class StreamMetadataTests
         Should.Throw<ArgumentException>(sut.Validate);
     }
 
+    [Theory]
+    [InlineData(null, null, 9, 0)]
+    [InlineData(3L, null, 9, 7)]
+    [InlineData(20L, null, 9, 0)]
+    [InlineData(null, 4L, 9, 4)]
+    [InlineData(3L, 4L, 9, 7)]
+    [InlineData(8L, 4L, 9, 4)]
+    [InlineData(null, 15L, 9, 15)]
+    [InlineData(1L, null, -1, 0)]
+    public void GetFirstRevision_ShouldBeTheLaterOfTheCountsBoundAndTheTruncation(long? maxCount, long? truncateBefore, long last, long expected)
+    {
+        // Arrange
+        var sut = new StreamMetadata { MaxCount = maxCount, TruncateBefore = truncateBefore };
+
+        // Act & Assert: beyond the last revision when the truncation hides every event.
+        sut.GetFirstRevision(last).ShouldBe(expected);
+    }
+
     [Fact]
     public void CarriedOver_ShouldNameTheKeysStoredWithoutEffect()
     {

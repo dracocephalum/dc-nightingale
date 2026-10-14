@@ -289,7 +289,8 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// Sets a stream's metadata, replacing what was set before as a whole. The expected state is
     /// that of the stream's metadata stream, never of the stream: <see cref="StreamState.NoStream"/>
     /// for the first set, then the revision the last get or set returned. The stream need not exist.
-    /// The server stores the metadata and gives it back; it does not yet apply it to reads.
+    /// The server applies it to the stream's reads, and to where a subscription to the stream starts,
+    /// from the next read on; never to <c>$all</c>, the virtual streams or events delivered live.
     /// </summary>
     /// <param name="stream">The plain stream's name.</param>
     /// <param name="expected">What the caller asserts about the metadata stream.</param>

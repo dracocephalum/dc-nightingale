@@ -554,12 +554,12 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             while (true)
             {
                 var behind = false;
-                while (page is not null && page.Events.Count > 0)
+                while (page is not null)
                 {
                     if (page.Events.Count == PageSize && page.Head.Last > page.Events[^1].Revision && !behind)
                     {
                         behind = true;
-                        await responseStream.WriteAsync(FellBehindAt(page.Head.Last, page.Head.Last - next + 1, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteAsync(FellBehindAt(page.Head.Last, page.Head.Last - Math.Max(next, page.Head.First) + 1, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
                     }
 
                     foreach (var record in page.Events)
@@ -567,9 +567,23 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                         await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
                     }
 
-                    next = page.Events[^1].Revision + 1;
+                    if (page.Events.Count > 0)
+                    {
+                        next = page.Events[^1].Revision + 1;
+                    }
+
                     head = page.Head.Last;
-                    page = page.Events.Count < PageSize ? null : await ReadPage(store, stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
+                    if (page.Events.Count < PageSize)
+                    {
+                        // Read through the head, whatever the stream's metadata hid after the
+                        // last event, so what the router brings next is not ahead of it.
+                        next = Math.Max(next, head + 1);
+                        page = null;
+                    }
+                    else
+                    {
+                        page = await ReadPage(store, stream, Direction.Forwards, next, PageSize, cancellationToken).ConfigureAwait(false);
+                    }
                 }
 
                 await responseStream.WriteAsync(CaughtUpAt(head, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
