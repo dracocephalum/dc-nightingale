@@ -106,7 +106,23 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
     }
 
     [Fact]
-    public async Task Delete_ShouldLeaveTheMetadataAsItIs()
+    public async Task Archive_ShouldLeaveTheMetadataAsItIs()
+    {
+        // Arrange
+        var stream = NewStream();
+        var sut = database.Store;
+        await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 3 }, TestContext.Current.CancellationToken);
+
+        // Act
+        await sut.ArchiveAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
+
+        // Assert
+        (await sut.GetStreamMetadataAsync(stream, TestContext.Current.CancellationToken)).Metadata.MaxCount.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Delete_ShouldRemoveTheMetadataStreamWithTheStream()
     {
         // Arrange
         var stream = NewStream();
@@ -116,22 +132,6 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
 
         // Act
         await sut.DeleteAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
-
-        // Assert
-        (await sut.GetStreamMetadataAsync(stream, TestContext.Current.CancellationToken)).Metadata.MaxCount.ShouldBe(3);
-    }
-
-    [Fact]
-    public async Task Tombstone_ShouldRemoveTheMetadataStreamWithTheStream()
-    {
-        // Arrange
-        var stream = NewStream();
-        var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 3 }, TestContext.Current.CancellationToken);
-
-        // Act
-        await sut.TombstoneAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
 
         // Assert: the name is free, and so is its metadata, which a stream taking it next starts without.
         (await sut.GetStreamMetadataAsync(stream, TestContext.Current.CancellationToken)).Revision.ShouldBe(-1);

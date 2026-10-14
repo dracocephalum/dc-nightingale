@@ -19,7 +19,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// <param name="stores">The backend's stores and tails, one per tenant; a call resolves those of the tenant it was authorized for.</param>
 /// <param name="routers">The routers a subscription to a plain stream takes its live events through, one per tenant.</param>
 /// <param name="timeProvider">The clock the progress notes are stamped with.</param>
-/// <param name="options">The common settings: which deletions the host allows.</param>
+/// <param name="options">The common settings: how far the host lets a stream be taken away.</param>
 public sealed class StreamsService(ITenantStores stores, StreamRouters routers, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
 {
     /// <summary>The longest stream name the store column holds.</summary>
@@ -241,6 +241,19 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     }
 
     /// <inheritdoc/>
+    public override async Task<ArchiveResponse> Archive(ArchiveRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+
+        var stream = RequirePlainStreamName(request.Stream);
+        RequireDeletionLevel(stream, DeletionLevel.Archive);
+        await RunDeletionAsync(stream, () => store.ArchiveAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
+        return new ArchiveResponse();
+    }
+
+    /// <inheritdoc/>
     public override async Task<DeleteResponse> Delete(DeleteRequest request, ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -248,30 +261,9 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         var stream = RequirePlainStreamName(request.Stream);
-        if (!options.Deletion.AllowDelete)
-        {
-            throw NightingaleErrors.DeletionDisabled(stream, "Delete");
-        }
-
+        RequireDeletionLevel(stream, DeletionLevel.Delete);
         await RunDeletionAsync(stream, () => store.DeleteAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
         return new DeleteResponse();
-    }
-
-    /// <inheritdoc/>
-    public override async Task<TombstoneResponse> Tombstone(TombstoneRequest request, ServerCallContext context)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(context);
-        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
-
-        var stream = RequirePlainStreamName(request.Stream);
-        if (!options.Deletion.AllowTombstone)
-        {
-            throw NightingaleErrors.DeletionDisabled(stream, "Tombstone");
-        }
-
-        await RunDeletionAsync(stream, () => store.TombstoneAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
-        return new TombstoneResponse();
     }
 
     /// <inheritdoc/>
@@ -330,6 +322,15 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         catch (ArgumentOutOfRangeException)
         {
             throw NightingaleErrors.InvalidArgument("The expected revision is neither a revision nor a named state.");
+        }
+    }
+
+    /// <summary>Refuses an operation the host's deletion level does not reach; each level allows what the levels below it allow.</summary>
+    private void RequireDeletionLevel(string stream, DeletionLevel operation)
+    {
+        if (options.Deletion.Allowed < operation)
+        {
+            throw NightingaleErrors.DeletionDisabled(stream, operation, options.Deletion.Allowed);
         }
     }
 

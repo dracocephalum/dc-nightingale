@@ -229,38 +229,40 @@ public sealed class NightingaleClient : IAsyncDisposable
         Subscribe(StreamNames.All, from, Numbering.Global, filter?.ToWire(checkpointInterval), cancellationToken);
 
     /// <summary>
-    /// Deletes a stream: its events leave every read and it cannot be appended to again. Only when
-    /// the server's host allows deletion; it does not by default.
+    /// Archives a stream: its events leave every read, <c>$all</c> included, and it cannot be
+    /// appended to again; the rows stay in the store. Only when the server's deletion level is
+    /// archive or delete; it is neither by default.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="expected">What the caller asserts about the stream.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the stream is deleted.</returns>
-    /// <exception cref="DeletionDisabledException">The server does not allow deletion.</exception>
+    /// <returns>A task that completes when the stream is archived.</returns>
+    /// <exception cref="DeletionDisabledException">The server does not allow archiving.</exception>
     /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
-    /// <exception cref="StreamDeletedException">The stream was already deleted.</exception>
+    /// <exception cref="StreamDeletedException">The stream was already archived.</exception>
     /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
-    public Task DeleteStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    public Task ArchiveStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return CallUnaryAsync(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallUnaryAsync(async () => await _streams.ArchiveAsync(new ArchiveRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
-    /// Tombstones a stream: it and its events are removed for good and the name reads as one that
-    /// never existed. Only when the server's host allows it; it does not by default.
+    /// Deletes a stream for good: it and its events are removed and the name reads as one that
+    /// never existed. Only when the server's deletion level is delete; it is not by default. Not
+    /// the reference client's delete, which is a reset here.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="expected">What the caller asserts about the stream.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the stream is gone.</returns>
-    /// <exception cref="DeletionDisabledException">The server does not allow tombstoning.</exception>
+    /// <exception cref="DeletionDisabledException">The server does not allow deleting.</exception>
     /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
     /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
-    public Task TombstoneStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    public Task DeleteStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return CallUnaryAsync(async () => await _streams.TombstoneAsync(new TombstoneRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallUnaryAsync(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>

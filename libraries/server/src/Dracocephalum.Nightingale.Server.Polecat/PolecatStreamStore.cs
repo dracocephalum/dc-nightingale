@@ -300,12 +300,12 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     }
 
     /// <inheritdoc/>
-    public async Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken)
+    public async Task ArchiveAsync(string stream, StreamState expected, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
 
         // The check and the archive are two statements in one session; an append that lands between
-        // them is archived with the rest, so the outcome is a deleted stream either way.
+        // them is archived with the rest, so the outcome is an archived stream either way.
         await using var session = store.LightweightSession(ToSessionOptions(RequireTenant(stream)));
         var state = await session.Events.FetchStreamStateAsync(stream, cancellationToken).ConfigureAwait(false);
         if (state is null || state.Version == 0)
@@ -324,7 +324,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     }
 
     /// <inheritdoc/>
-    public async Task TombstoneAsync(string stream, StreamState expected, CancellationToken cancellationToken)
+    public async Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
 

@@ -1,8 +1,8 @@
-// Streams: read, subscribe, append, delete.
+// Streams: read, subscribe, append, reset, archive, delete.
 //
 // The shape follows the reference protocol: one server-streaming Read that is
 // a subscription when the request says so, one client-streaming Append that
-// sends its options first, and two unary deletes. Message order on a Read is
+// sends its options first, and unary calls for the rest. Message order on a Read is
 // part of the contract; each response message documents when it may appear.
 // Numbers, names, bodies, headers and errors are defined in shared.proto.
 
@@ -34,15 +34,18 @@ service Streams {
   // shared.proto.
   rpc Append (stream AppendRequest) returns (AppendResponse);
 
-  // Soft-deletes a stream: its events leave every read, including $all, and
-  // appends to it fail with STREAM_DELETED. Errors: REVISION_CONFLICT,
-  // STREAM_NOT_FOUND, STREAM_DELETED.
-  rpc Delete (DeleteRequest) returns (DeleteResponse);
+  // Archives a stream: its events leave every read, $all and the virtual
+  // streams included, and appends to it fail with STREAM_DELETED; the rows
+  // stay in the store. Allowed when the server's deletion level is Archive or
+  // Delete. Errors: REVISION_CONFLICT, STREAM_NOT_FOUND, STREAM_DELETED,
+  // DELETION_DISABLED.
+  rpc Archive (ArchiveRequest) returns (ArchiveResponse);
 
-  // Removes a stream and its events permanently, and its metadata stream with
-  // them. Afterwards the name reads as a stream that never existed. Errors:
-  // REVISION_CONFLICT, STREAM_NOT_FOUND.
-  rpc Tombstone (TombstoneRequest) returns (TombstoneResponse);
+  // Deletes a stream for good: it, its events and its metadata stream are
+  // removed, and the name reads as a stream that never existed, free to be
+  // used again. Allowed when the server's deletion level is Delete. Errors:
+  // REVISION_CONFLICT, STREAM_NOT_FOUND, DELETION_DISABLED.
+  rpc Delete (DeleteRequest) returns (DeleteResponse);
 
   // Reads a stream's metadata as last set: the last event of its metadata
   // stream, $$<stream>. A stream whose metadata was never set answers with
@@ -204,6 +207,14 @@ message AppendResponse {
   sint64 position = 2;
 }
 
+message ArchiveRequest {
+  string stream = 1;
+  // A revision, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+}
+
+message ArchiveResponse {}
+
 message DeleteRequest {
   string stream = 1;
   // A revision, or one of the ExpectedRevision values.
@@ -211,14 +222,6 @@ message DeleteRequest {
 }
 
 message DeleteResponse {}
-
-message TombstoneRequest {
-  string stream = 1;
-  // A revision, or one of the ExpectedRevision values.
-  sint64 expected_revision = 2;
-}
-
-message TombstoneResponse {}
 
 // A stream's metadata. Each setting is absent unless set; the event that
 // stores them writes the reference's keys ($maxAge, $maxCount, $tb,

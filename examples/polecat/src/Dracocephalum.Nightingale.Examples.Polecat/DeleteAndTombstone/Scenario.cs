@@ -2,6 +2,7 @@ using System.Text;
 
 using Dracocephalum.Nightingale.Client;
 using Dracocephalum.Nightingale.Examples.Polecat.Common;
+using Dracocephalum.Nightingale.Server;
 
 namespace Dracocephalum.Nightingale.Examples.Polecat.DeleteAndTombstone;
 
@@ -49,8 +50,7 @@ public static class Scenario
 
         await using var server = await run.StartServerAsync(cancellationToken, options =>
         {
-            options.Deletion.AllowDelete = true;
-            options.Deletion.AllowTombstone = true;
+            options.Deletion.Allowed = DeletionLevel.Delete;
         }).ConfigureAwait(false);
         await output.WriteLineAsync($"2. Started a server at {server.Address} with delete and tombstone allowed, which the run's server, with the default settings, does not.").ConfigureAwait(false);
 
@@ -67,7 +67,7 @@ public static class Scenario
         long conflictActual;
         try
         {
-            await client.DeleteStreamAsync(stream, StreamState.StreamRevision(0), cancellationToken).ConfigureAwait(false);
+            await client.ArchiveStreamAsync(stream, StreamState.StreamRevision(0), cancellationToken).ConfigureAwait(false);
             throw new InvalidOperationException("A stale delete was accepted.");
         }
         catch (RevisionConflictException conflict)
@@ -76,7 +76,7 @@ public static class Scenario
             await output.WriteLineAsync($"4. A delete expecting revision 0 was refused; the stream is at revision {conflictActual}.").ConfigureAwait(false);
         }
 
-        await client.DeleteStreamAsync(stream, StreamState.StreamRevision(1), cancellationToken).ConfigureAwait(false);
+        await client.ArchiveStreamAsync(stream, StreamState.StreamRevision(1), cancellationToken).ConfigureAwait(false);
         string readAfterDelete;
         await using (var read = client.ReadStreamAsync(Direction.Forwards, stream, StreamPosition.Start, cancellationToken: cancellationToken))
         {
@@ -87,7 +87,7 @@ public static class Scenario
         var appendAfterDelete = await CaptureFailureAsync(() => client.AppendToStreamAsync(stream, StreamState.Any, [CreateEvent("order_shipped")], cancellationToken)).ConfigureAwait(false);
         await output.WriteLineAsync($"5. Deleted {stream}: a read fails with {readAfterDelete}, $ce-orders holds {after}, an append fails with {appendAfterDelete}.").ConfigureAwait(false);
 
-        await client.TombstoneStreamAsync(stream, StreamState.Any, cancellationToken).ConfigureAwait(false);
+        await client.DeleteStreamAsync(stream, StreamState.Any, cancellationToken).ConfigureAwait(false);
         ReadState afterTombstone;
         await using (var read = client.ReadStreamAsync(Direction.Forwards, stream, StreamPosition.Start, cancellationToken: cancellationToken))
         {
@@ -101,7 +101,7 @@ public static class Scenario
 
         await using var defaultConnection = run.Server.Connect(tenant);
         var defaultClient = defaultConnection.Client;
-        var refusal = await CaptureFailureAsync(() => defaultClient.DeleteStreamAsync(stream, StreamState.Any, cancellationToken)).ConfigureAwait(false);
+        var refusal = await CaptureFailureAsync(() => defaultClient.ArchiveStreamAsync(stream, StreamState.Any, cancellationToken)).ConfigureAwait(false);
         await output.WriteLineAsync($"8. The run's server, with the default settings, refused to delete {stream}: {refusal}.").ConfigureAwait(false);
 
         return new Report(stream, before, readAfterDelete, after, appendAfterDelete, afterTombstone, revived.Revision, conflictActual, refusal);

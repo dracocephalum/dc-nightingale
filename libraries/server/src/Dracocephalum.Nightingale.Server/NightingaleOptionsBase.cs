@@ -46,24 +46,30 @@ public abstract class NightingaleOptionsBase
     public TenantSettings Tenants { get; set; } = new();
 
     /// <summary>
-    /// Which deletions the server accepts. Both are off by default: a store that never deletes
-    /// keeps every event a consumer may still need and makes retention a decision rather than a
-    /// habit, and a caller cannot turn deletion on; only the operator can, here.
+    /// How far the server lets a stream be taken away. A reset is not among them: it writes one
+    /// metadata event and hides, never removes, so it is always allowed. Archive and delete are
+    /// off by default: a store that never deletes keeps every event a consumer may still need and
+    /// makes retention a decision rather than a habit, and a caller cannot raise the level; only
+    /// the operator can, here.
     /// </summary>
     public sealed class DeletionSettings
     {
-        /// <summary>
-        /// Gets or sets a value indicating whether a stream may be deleted: its events leave every
-        /// read and it cannot be appended to again, but the rows stay in the store.
-        /// </summary>
-        public bool AllowDelete { get; set; }
+        /// <summary>Gets or sets the deletion level: each allows what the levels below it allow.</summary>
+        public DeletionLevel Allowed { get; set; } = DeletionLevel.None;
 
         /// <summary>
-        /// Gets or sets a value indicating whether a stream may be tombstoned: it and its events are
-        /// removed for good, and the name reads as one that never existed. Irreversible, which is
-        /// why it is a switch of its own.
+        /// Refuses a level that is not one of the named ones. Configuration binds a number to the
+        /// enum unchecked, and since the levels are compared by order, a number above the highest
+        /// would allow everything.
         /// </summary>
-        public bool AllowTombstone { get; set; }
+        /// <exception cref="InvalidOperationException">The level is not a named one.</exception>
+        public void Validate()
+        {
+            if (!Enum.IsDefined(Allowed))
+            {
+                throw new InvalidOperationException($"{SectionName}:{nameof(Deletion)}:{nameof(Allowed)} {Allowed} is not one of {string.Join(", ", Enum.GetNames<DeletionLevel>())}.");
+            }
+        }
     }
 
     /// <summary>
