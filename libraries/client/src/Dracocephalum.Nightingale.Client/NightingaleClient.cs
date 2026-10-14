@@ -86,15 +86,25 @@ public sealed class NightingaleClient : IAsyncDisposable
         try
         {
             using var call = _streams.Append(cancellationToken: cancellationToken);
-            await call.RequestStream.WriteAsync(
-                new AppendRequest { Options = new AppendOptions { Stream = stream, ExpectedRevision = expected.ToInt64() } },
-                cancellationToken).ConfigureAwait(false);
-            foreach (var eventData in events)
+            try
             {
-                await call.RequestStream.WriteAsync(new AppendRequest { Event = eventData.ToProposedEvent() }, cancellationToken).ConfigureAwait(false);
+                await call.RequestStream.WriteAsync(
+                    new AppendRequest { Options = new AppendOptions { Stream = stream, ExpectedRevision = expected.ToInt64() } },
+                    cancellationToken).ConfigureAwait(false);
+                foreach (var eventData in events)
+                {
+                    await call.RequestStream.WriteAsync(new AppendRequest { Event = eventData.ToProposedEvent() }, cancellationToken).ConfigureAwait(false);
+                }
+
+                await call.RequestStream.CompleteAsync().ConfigureAwait(false);
+            }
+            catch (InvalidOperationException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The server refused the append part way, at an event it would not take, and ended
+                // the call; writing to an ended call fails without the reason, which the response
+                // below carries.
             }
 
-            await call.RequestStream.CompleteAsync().ConfigureAwait(false);
             var response = await call.ResponseAsync.ConfigureAwait(false);
             return new AppendResult(response.Revision, response.Position);
         }
