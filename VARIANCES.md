@@ -14,14 +14,15 @@ Deferred features that will close a gap later are in [`PENDING.md`](PENDING.md).
 **Reference:** `$ce-orders` and `$et-OrderCreated` are link streams built by
 system projections, with dense revisions of their own (0, 1, 2, ...).
 
-**Nightingale:** `$ce-`, `$et-` and `$all` are predicates over the event table.
+**Nightingale:** `$ce-`, `$et-`, `$all`, and `$de` and `$mde` (the data and
+the metadata events) are predicates over the event table.
 Their positions are the store's global sequence number: monotonic within the
 stream but sparse, because other streams' events occupy the numbers between.
 The head of each virtual stream is its own last event, never the global head,
 so a quiet category reports a stable head and zero lag, and a subscription to
 it says nothing while the store moves on without it. On a store initialized
-with `Nightingale:Store:AssignOrdinals`, a read or subscription of `$ce-` or `$et-`
-may ask for ordinal numbering instead: dense, zero-based numbers assigned
+with `Nightingale:Store:AssignOrdinals`, a read or subscription of `$ce-`, `$et-`
+or `$mde`, never `$de`, may ask for ordinal numbering instead: dense, zero-based numbers assigned
 after commit by one sequencer per cluster, so they trail the global head by
 its cadence, a deleted event leaves a hole that is skipped and never reused,
 and an event that committed late, after the head had passed its position,
@@ -281,8 +282,10 @@ link events to resolve.
 **Reference:** a read of a tombstoned stream fails with a stream-deleted
 error, and the name can never be used again.
 
-**Nightingale:** tombstone removes the stream and its events permanently, and
-afterwards the name reads as not found and may be appended to again.
+**Nightingale:** tombstone removes the stream and its events permanently, its
+metadata stream with them, and afterwards the name reads as not found and may
+be appended to again; metadata set on it afterwards is a new stream's, where
+the reference refuses every write to the name.
 
 **Why:** the store's hard delete leaves no marker behind.
 
@@ -372,18 +375,26 @@ length, would silently become one stream. Requiring UTF-8 removes the case
 rather than guarding it, and a collation is fixed when the database is
 created, which makes it an initialization choice rather than an API one.
 
-## `$all` holds only application events
+## `$all` holds no system events but stream metadata
 
-**Reference:** `$all` includes system events (`$`-prefixed), and a client
-filters them out with `ExcludeSystemEvents`.
+**Reference:** `$all` includes system events, those whose type begins with
+`$`: stream metadata, and the link events, statistics, settings, users,
+projections and subscriptions the reference keeps in its own log. A client
+filters them out with `ExcludeSystemEvents`, or reads the secondary index
+`$idx-all`.
 
-**Nightingale:** there are no system events. The filter is accepted and does
-nothing. Events of archived (soft-deleted) streams are excluded from `$all`
-and from the virtual streams. `resolveLinkTos` is accepted and ignored because
-no link events exist.
+**Nightingale:** the only system events are the `$metadata` events of the
+metadata streams, which `$all` carries in their place in the sequence. A
+filter that excludes system events does what the reference's does, with less
+to exclude; `$de`, the data events, is `$all` without them, read as a
+stream, and `$mde` is the metadata events alone. Events of archived
+(deleted) streams are excluded from `$all` and from the virtual streams.
+`resolveLinkTos` is accepted and ignored because no link events exist.
 
-**Why:** the store has no system streams, and hiding archived events is its
-convention on every read.
+**Why:** what the reference keeps as events, the store keeps in tables of
+its own; metadata stays an event because it changes what a stream reads, and
+a replay of `$all` needs a change of it in its place among the events around
+it. Hiding archived events is the store's convention on every read.
 
 ## Deletion is off unless the host turns it on
 
@@ -410,15 +421,34 @@ gateway exposes no un-archive.
 **Why:** archive and tombstone are the store's two primitives; recreating a
 soft-deleted stream with continuing revision numbers has no counterpart.
 
-## Stream metadata is not enforced
+## Stream metadata is stored but not yet enforced
 
-**Reference:** `$maxAge`, `$maxCount`, `$tb` (truncate before) and `$acl` on
-a stream's metadata change what a read returns and who may read it.
+**Reference:** a stream's metadata is the last `$metadata` event of
+`$$<stream>`. `$maxAge`, `$maxCount` and `$tb` (truncate before) change what
+a read of the stream returns, `$acl` who may read it, `$cacheControl` how its
+HTTP interface lets a response be cached, and `$tmp` whether its scavenge
+removes a deleted stream's metadata too. A reserved key of the wrong type is
+stored, and the stream's metadata then reads as empty, every key dropped. A
+persistent subscription can be made on any stream, a metadata stream
+included.
 
-**Nightingale:** there is no stream metadata yet: no call sets or reads it,
-and a `$$` stream is refused like every `$` name. See `PENDING.md`, *Stream
-metadata*, for the shape decided; `$acl` will be refused until stream ACLs
-arrive with authentication.
+**Nightingale:** `SetStreamMetadata` and `GetStreamMetadata` store the
+metadata as the same events in the same stream, in the reference's JSON, and
+read it back; `$$<stream>` is read and followed as a stream, written only by
+the metadata call, and refused for a persistent-subscription group. The
+settings are not applied to reads yet: `PENDING.md`, *Stream metadata*, holds
+the shape decided, and `$tb` at its largest value, the reference's soft
+delete, is refused until the gateway does soft delete. `$acl` is refused as
+an invalid argument until authentication carries stream ACLs. `$cacheControl`
+and `$tmp` are stored and returned without effect, keys carried over from the
+reference. A reserved key out of range or of the wrong type refuses the set
+rather than emptying the metadata.
+
+**Why:** metadata stored as events keeps its place in the one sequence and
+its history, and costs a stream that has none nothing; an access list stored
+and not enforced would read as a protection the stream does not have, and
+metadata silently dropped as a whole is a retention the operator thinks is in
+force and is not.
 
 ## An append is limited by its number of events
 

@@ -269,6 +269,45 @@ public sealed class VirtualStreamReaderTests
         events.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task ReadAsync_WhenTheDataEvents_ShouldLeaveTheSystemEventsOutAndCountAndBoundThemAlike()
+    {
+        // Arrange: a metadata event at 9 and a data event at 10 beside the seeded ones.
+        await using (var context = new Seeding(_root))
+        {
+            context.Set<EventRow>().AddRange(Row(9, "$$orders-1", 1, StreamNames.MetadataEventType), Row(10, "orders-1", 3, "order_shipped"));
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var data = new VirtualStreamName(VirtualStreamKind.DataEvents, string.Empty);
+        var metadata = new VirtualStreamName(VirtualStreamKind.EventType, StreamNames.MetadataEventType);
+
+        // Act
+        var page = await _sut.ReadAsync(data, Direction.Backwards, 100, 100, 3, TestContext.Current.CancellationToken);
+        var head = await _sut.HeadAsync(data, 9, TestContext.Current.CancellationToken);
+        var count = await _sut.CountAsync(data, 7, 100, TestContext.Current.CancellationToken);
+        var all = await _sut.ReadAllAsync(Direction.Backwards, 100, 100, 3, TestContext.Current.CancellationToken);
+        var metadataEvents = await _sut.ReadAsync(metadata, Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+
+        // Assert: $all holds the metadata event, the data events do not, $mde holds only it.
+        page.Select(record => record.Position).ShouldBe([10, 8, 7]);
+        head.ShouldBe(new StreamHead(1, 8));
+        count.ShouldBe(2);
+        all.Select(record => record.Position).ShouldBe([10, 9, 8]);
+        metadataEvents.ShouldHaveSingleItem().Stream.ShouldBe("$$orders-1");
+    }
+
+    [Fact]
+    public async Task ReadByOrdinalAsync_WhenTheDataEvents_ShouldRefuseSinceTheyHaveNoOrdinals()
+    {
+        // Arrange
+        var data = new VirtualStreamName(VirtualStreamKind.DataEvents, string.Empty);
+
+        // Act & Assert
+        await Should.ThrowAsync<ArgumentException>(() => _sut.ReadByOrdinalAsync(data, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<ArgumentException>(() => _sut.OrdinalHeadAsync(data, TestContext.Current.CancellationToken));
+    }
+
     /// <summary>
     /// Writes the rows the mirror reads. The mirror itself refuses to save, so the table is
     /// filled through a context of the test's own over the same in-memory database root.

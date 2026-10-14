@@ -263,7 +263,7 @@ public sealed class StreamRouter : IAsyncDisposable
         }
     }
 
-    /// <summary>Everyone an event is for: the followers of its stream, of its category, of its type and of <c>$all</c>.</summary>
+    /// <summary>Everyone an event is for: the followers of its stream, of its category, of its type, of <c>$all</c>, and of the data events when its type is not a system one.</summary>
     private List<StreamFollowing> Match(string stream, string type)
     {
         var matched = new List<StreamFollowing>();
@@ -273,6 +273,10 @@ public sealed class StreamRouter : IAsyncDisposable
             Collect(StreamNames.CategoryPrefix + StreamNames.CategoryOf(stream), matched);
             Collect(StreamNames.EventTypePrefix + type, matched);
             Collect(StreamNames.All, matched);
+            if (!StreamNames.IsSystemEventType(type))
+            {
+                Collect(StreamNames.DataEvents, matched);
+            }
         }
 
         return matched;
@@ -310,12 +314,15 @@ public sealed class StreamRouter : IAsyncDisposable
 
     private bool IsFollowed(string name) => _followers.ContainsKey(name);
 
-    /// <summary>Whether anyone follows anything, and whether anyone follows <c>$all</c>.</summary>
+    /// <summary>
+    /// Whether anyone follows anything, and whether anyone follows <c>$all</c> or the data events,
+    /// which are nearly all of it: either is served by one read of the range with its bodies.
+    /// </summary>
     private (bool Any, bool All) DescribeFollowed()
     {
         lock (_gate)
         {
-            return (_followers.Count > 0, _followers.ContainsKey(StreamNames.All));
+            return (_followers.Count > 0, _followers.ContainsKey(StreamNames.All) || _followers.ContainsKey(StreamNames.DataEvents));
         }
     }
 

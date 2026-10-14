@@ -56,5 +56,10 @@ public static class Scenarios
             "a group: consume with acknowledgements, retry and park, replay, resume from the checkpoint",
             PersistentSubscription.Scenario.RunAsync,
             report => $"Done: {report.Delivered.Count} delivered, one parked and replayed as {report.ReplayedType}; the group ended at checkpoint {report.CheckpointOnReturn}."),
+        ExampleScenario.Create(
+            "stream-metadata",
+            "a stream's metadata: set before the stream, read back, raced, its history, $acl refused, $all, $de and $mde",
+            StreamMetadata.Scenario.RunAsync,
+            report => $"Done: metadata of {report.Stream} set twice and read back at revision {report.Final.Revision}; $all {report.All}, $de {report.DataEvents}, $mde {report.MetadataEvents}."),
     ];
 }

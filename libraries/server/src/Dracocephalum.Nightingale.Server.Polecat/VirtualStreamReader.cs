@@ -205,6 +205,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <returns>The bounds, or <see langword="null"/> when nothing is numbered.</returns>
     public async Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
     {
+        RequireOrdinals(stream);
         await using var context = OpenContext();
         var all = FilterByKey(context.EventRows.AsNoTracking().Where(e => (tenantId == null || e.TenantId == tenantId)), stream);
         var ordinals = stream.Kind == VirtualStreamKind.Category
@@ -229,6 +230,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken)
     {
+        RequireOrdinals(stream);
         await using var context = OpenContext();
         var live = QueryLive(context, stream);
         var forwards = direction == Direction.Forwards;
@@ -253,12 +255,29 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             ? events.Where(e => e.SeqId >= from && e.SeqId <= head).OrderBy(e => e.SeqId)
             : events.Where(e => e.SeqId <= from).OrderByDescending(e => e.SeqId);
 
+    /// <summary>
+    /// The events of one virtual stream: a seek on the category or the type index, or, for the data
+    /// events, the type checked on the rows a read of <c>$all</c> reads anyway, at the cost of
+    /// <c>$all</c>. A prefix with no wildcard in it, so the database compares the first character.
+    /// </summary>
     private static IQueryable<EventRow> FilterByKey(IQueryable<EventRow> events, VirtualStreamName stream)
     {
         var key = stream.Key;
-        return stream.Kind == VirtualStreamKind.Category
-            ? events.Where(e => e.Category == key)
-            : events.Where(e => e.Type == key);
+        return stream.Kind switch
+        {
+            VirtualStreamKind.Category => events.Where(e => e.Category == key),
+            VirtualStreamKind.EventType => events.Where(e => e.Type == key),
+            _ => events.Where(e => !e.Type.StartsWith('$')),
+        };
+    }
+
+    /// <summary>A virtual stream read by ordinal: a category or an event type; the data events have none.</summary>
+    private static void RequireOrdinals(VirtualStreamName stream)
+    {
+        if (!stream.HasOrdinals)
+        {
+            throw new ArgumentException($"{stream.Name} is read by position only; it has no ordinals.", nameof(stream));
+        }
     }
 
     private static async Task<IReadOnlyList<EventRecord>> PageAsync(IQueryable<EventRow> ordered, int count, Expression<Func<EventRow, Raw>> columns, CancellationToken cancellationToken)

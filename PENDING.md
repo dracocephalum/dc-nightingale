@@ -225,43 +225,26 @@ write or a lock to every append is served on a path of its own at best
 effort, or written down as a variance. The shape, decided so nothing here is
 re-derived:
 
-- **Stored as events, in the events table.** `SetStreamMetadata` appends a
-  `$metadata` event to `$$<stream>` and `GetStreamMetadata` reads the last
-  one; a read of `$$<stream>` returns the history as real events. The gateway
-  keeps no table of its own for it, because a table would take the changes
-  out of the one sequence: a replication or a migration that reads `$all`
-  from the start needs a change of metadata in its place among the events
-  around it, or it applies a soft delete and the stream's recreation in the
-  wrong order, and the history is the audit of who changed a stream's
-  retention, and when. Every metadata event is kept; they are small and rare.
-- **Concurrency is the store's.** A set carries an expected revision of the
-  metadata stream, and two sets from two instances race on the store's unique
-  index of tenant, stream and version, as any two appends do. An append to the
-  stream and a change of its metadata touch different streams and neither
-  depends on the other, since metadata acts only when the stream is read.
-  Tombstone removes the stream and its metadata stream in one transaction;
-  delete, the archive, leaves the metadata stream as it is. A set does not
-  ask whether the stream exists, as in the reference, where setting
-  `$maxAge` before the first append is a common pattern: the metadata is in
-  force from the stream's first event. Since the gateway's tombstone frees
-  the name, a set after it is metadata for a new stream, where the reference,
-  whose tombstone keeps the name for good, refuses it.
-- **Written by the metadata call alone.** `Append` goes on refusing every `$`
-  name, so a `$$` stream is written only by `SetStreamMetadata`, which keeps
-  the application's keys as JSON. `$acl` is refused, with a reason of its
-  own, until authentication carries stream ACLs (*Authentication: what is
-  left*).
-- **Reserved keys are checked, and two are carried over without effect.** A
-  reserved key of the wrong type refuses the set, where the reference stores
-  it and then reads the stream's metadata as empty, every key dropped,
-  without a word. `$cacheControl`, a caching hint of the reference's HTTP
-  interface, and `$tmp`, which asks its scavenge to remove a deleted
-  stream's metadata too, are stored and returned so a client gets back what
-  it set, and have no effect in the gateway. The code keeps them in one
-  named list of keys carried over from the reference, each with what it
-  means there, so that supporting one is moving it out of that list and a
-  search shows which are still carried; `$tmp` gets its meaning with
-  physical removal (below).
+- **Landed: stored, set, read back, and `$all` the whole log.**
+  `SetStreamMetadata` appends a `$metadata` event to `$$<stream>`, in the
+  reference's JSON, and `GetStreamMetadata` reads the last one, with the
+  metadata stream's revision a set expects; no table of the gateway's, so a
+  change keeps its place in the one sequence for a replay of `$all` and the
+  history is the audit of who changed a stream's retention. Concurrency is
+  the store's unique index, as for any append; a set needs no stream, so
+  metadata can precede the first event; tombstone removes the metadata
+  stream in the same transaction and delete leaves it. `$$<stream>` is read
+  and followed as a stream, written only by the metadata call, and refused
+  for a group. Reserved keys are checked, a wrong type or a value out of
+  range refusing the set; `$acl` is refused as an invalid argument; `$tb` at
+  its largest value is refused until soft delete (below); `$cacheControl`
+  and `$tmp` are kept in `StreamMetadataKeys.CarriedOver`, stored and
+  returned without effect, `$tmp` to get its meaning with physical removal.
+  `$all` carries the metadata events; `$de`, the data events, is `$all`
+  without the types that begin with `$`, at the cost of `$all`, by position
+  only and followed as `$all` is; `$mde` is `$et-$metadata` under another
+  name, ordinals included. `VARIANCES.md` says what is not applied yet. What
+  is left is below: enforcement on reads, then soft delete.
 - **Enforced inside the read's own statement.** A read of a plain stream finds
   the last metadata event with a `TOP 1` seek on the same unique index, joined
   to the page by an `OUTER APPLY`, so it costs no round trip: the lower bound
@@ -278,18 +261,6 @@ re-derived:
   If a measurement ever asks for less than the probe, the way out is a store
   setting fixed at initialization that refuses metadata and skips it, not a
   cache.
-- **`$all` becomes the whole log, and two streams select from it.** With
-  metadata stored as events, `$all` carries them as the reference's does, and
-  the variance *`$all` holds only application events* goes. `$de`, the data
-  events, is `$all` without the events whose type begins with `$`, the
-  reference's `ExcludeSystemEvents`, at the cost of `$all`: the same range of
-  the clustered position, with the type checked on rows that are read anyway.
-  It is read by position and has no ordinals, since numbering it would write
-  every row a second time. `$mde`, the metadata events, is `$et-$metadata`
-  under another name, one seek on `ix_pc_events_type_seq`, since `$metadata`
-  is the only system type the table holds. Both are streams, so reads,
-  catch-up subscriptions and groups all take them. Category ordinals are
-  unaffected: `$$orders-1` is in the category `$$orders`, never `orders`.
 - **Appends never read metadata.** The reference checks an append against
   the soft-delete value of `$tb` and writes an un-delete after it, which is
   safe there because one writer handles every write in turn. Here every

@@ -30,6 +30,47 @@ public sealed class WireConversionsTests
     }
 
     [Fact]
+    public void ToStreamMetadata_ShouldReadBackEverySettingAndTheCustomKeysToWireWrote()
+    {
+        // Arrange
+        var metadata = new Dracocephalum.Nightingale.StreamMetadata
+        {
+            MaxAge = TimeSpan.FromHours(1),
+            MaxCount = 0,
+            TruncateBefore = 0,
+            CacheControl = TimeSpan.FromSeconds(30),
+            TempStream = false,
+            Custom = new JsonObject { ["owner"] = "billing" },
+        };
+
+        // Act
+        var wire = metadata.ToWire();
+        var back = wire.ToStreamMetadata();
+
+        // Assert: a zero and a false are settings, not absences; nothing is checked on the way.
+        wire.HasMaxCount.ShouldBeTrue();
+        wire.HasTempStream.ShouldBeTrue();
+        back.MaxAge.ShouldBe(TimeSpan.FromHours(1));
+        back.MaxCount.ShouldBe(0);
+        back.TruncateBefore.ShouldBe(0);
+        back.CacheControl.ShouldBe(TimeSpan.FromSeconds(30));
+        back.TempStream.ShouldBe(false);
+        back.Custom.ShouldNotBeNull()["owner"].ShouldNotBeNull().GetValue<string>().ShouldBe("billing");
+    }
+
+    [Fact]
+    public void ToStreamMetadata_WhenNothingIsSet_ShouldLeaveEverySettingUnset()
+    {
+        // Act
+        var back = new Protocols.Grpc.V1.StreamMetadata().ToStreamMetadata();
+        var missing = ((Protocols.Grpc.V1.StreamMetadata?)null).ToStreamMetadata();
+
+        // Assert
+        back.ShouldBe(Dracocephalum.Nightingale.StreamMetadata.Empty);
+        missing.ShouldBe(Dracocephalum.Nightingale.StreamMetadata.Empty);
+    }
+
+    [Fact]
     public void ToEventData_WhenMetadataIsEmpty_ShouldLeaveItNull()
     {
         // Arrange

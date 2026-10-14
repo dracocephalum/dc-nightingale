@@ -95,6 +95,28 @@ public sealed class StreamRouterTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Route_WhenTheDataEventsAreFollowed_ShouldReadTheRangeOnceAndLeaveThemTheSystemEventsOut()
+    {
+        // Arrange: the data events are nearly all of $all, so they are served as $all is; a
+        // metadata event is $all's and $mde's, never theirs.
+        A.CallTo(() => _store.ReadAllAsync(Direction.Forwards, 1, 3, StreamRouter.PointerPage, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 1), Record("$$orders-1", 0, 2, StreamNames.MetadataEventType), Record("orders-1", 1, 3)]);
+        using var data = _sut.Follow(StreamNames.DataEvents);
+        using var metadata = _sut.Follow(new VirtualStreamName(VirtualStreamKind.EventType, StreamNames.MetadataEventType).Name);
+
+        // Act
+        _tail.Advance(3);
+        var toData = await NextAsync(data, 2);
+        var toMetadata = await NextAsync(metadata, 1);
+
+        // Assert
+        toData.Select(record => record.Position).ShouldBe([1, 3]);
+        toMetadata.Single().Stream.ShouldBe("$$orders-1");
+        data.Events.TryRead(out _).ShouldBeFalse();
+        A.CallTo(() => _store.ReadPointersAsync(A<long>._, A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task Route_ShouldMatchNamesWithTheBackendsComparer()
     {
         // Arrange: a backend that compares names without regard to case, as a case-insensitive

@@ -882,6 +882,238 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         confirmed.ShouldHaveSingleItem().Confirmed.Head.ShouldBe(7);
     }
 
+    [Fact]
+    public async Task SetStreamMetadata_ShouldPassTheSettingsAndTheCustomKeysToTheStoreUnderTheMetadataStreamsExpectation()
+    {
+        // Arrange
+        StreamMetadata? captured = null;
+        A.CallTo(() => _store.SetStreamMetadataAsync("orders-1", StreamState.NoStream, A<StreamMetadata>._, A<CancellationToken>._))
+            .Invokes(call => captured = call.GetArgument<StreamMetadata>(2))
+            .Returns(new AppendResult(0, 41));
+        var client = new Streams.StreamsClient(_channel);
+        var metadata = new Protocols.Grpc.V1.StreamMetadata
+        {
+            MaxAge = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(TimeSpan.FromHours(1)),
+            MaxCount = 10,
+            TruncateBefore = 3,
+            TempStream = true,
+            Custom = ByteString.CopyFromUtf8("{\"owner\":\"billing\"}"),
+        };
+
+        // Act
+        var response = await client.SetStreamMetadataAsync(new SetStreamMetadataRequest { Stream = "orders-1", ExpectedRevision = -1, Metadata = metadata }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        response.Revision.ShouldBe(0);
+        response.Position.ShouldBe(41);
+        var stored = captured.ShouldNotBeNull();
+        stored.MaxAge.ShouldBe(TimeSpan.FromHours(1));
+        stored.MaxCount.ShouldBe(10);
+        stored.TruncateBefore.ShouldBe(3);
+        stored.CacheControl.ShouldBeNull();
+        stored.TempStream.ShouldBe(true);
+        stored.Custom.ShouldNotBeNull()["owner"].ShouldNotBeNull().GetValue<string>().ShouldBe("billing");
+    }
+
+    [Theory]
+    [InlineData("{\"$acl\":{\"$r\":\"$all\"}}", "$acl is not supported")]
+    [InlineData("{\"$maxCount\":5}", "set through its own property")]
+    [InlineData("[1]", "a JSON object")]
+    public async Task SetStreamMetadata_WhenTheCustomKeysAreRefused_ShouldAnswerInvalidArgumentWithoutTouchingTheStore(string custom, string why)
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+        var request = new SetStreamMetadataRequest { Stream = "orders-1", ExpectedRevision = -2, Metadata = new Protocols.Grpc.V1.StreamMetadata { Custom = ByteString.CopyFromUtf8(custom) } };
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.SetStreamMetadataAsync(request, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert: the strict store would have thrown on any call.
+        exception.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_ARGUMENT");
+        exception.Status.Detail.ShouldContain(why);
+    }
+
+    [Theory]
+    [InlineData(0L, null)]
+    [InlineData(null, -1L)]
+    [InlineData(null, long.MaxValue)]
+    public async Task SetStreamMetadata_WhenASettingIsOutOfRange_ShouldAnswerInvalidArgument(long? maxCount, long? truncateBefore)
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+        var metadata = new Protocols.Grpc.V1.StreamMetadata();
+        if (maxCount is { } count)
+        {
+            metadata.MaxCount = count;
+        }
+
+        if (truncateBefore is { } before)
+        {
+            metadata.TruncateBefore = before;
+        }
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.SetStreamMetadataAsync(new SetStreamMetadataRequest { Stream = "orders-1", ExpectedRevision = -2, Metadata = metadata }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_ARGUMENT");
+    }
+
+    [Theory]
+    [InlineData("$all")]
+    [InlineData("$$orders-1")]
+    [InlineData("$ce-orders")]
+    public async Task SetStreamMetadata_WhenTheStreamIsNotPlain_ShouldRejectTheName(string stream)
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.SetStreamMetadataAsync(new SetStreamMetadataRequest { Stream = stream, ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
+    }
+
+    [Fact]
+    public async Task SetStreamMetadata_WhenTheNameLeavesNoRoomForTheMetadataStreamsPrefix_ShouldRejectTheName()
+    {
+        // Arrange: a name that fits the column, whose metadata stream's would not.
+        var client = new Streams.StreamsClient(_channel);
+        var stream = new string('o', StreamsService.MaxStreamNameLength - 1);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.SetStreamMetadataAsync(new SetStreamMetadataRequest { Stream = stream, ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
+    }
+
+    [Fact]
+    public async Task SetStreamMetadata_WhenTheMetadataStreamMovedOn_ShouldFailWithTheConflict()
+    {
+        // Arrange
+        A.CallTo(() => _store.SetStreamMetadataAsync("orders-1", StreamState.FromInt64(0), A<StreamMetadata>._, A<CancellationToken>._))
+            .Throws(new RevisionConflictException("$$orders-1", StreamState.FromInt64(0), 1));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.SetStreamMetadataAsync(new SetStreamMetadataRequest { Stream = "orders-1", ExpectedRevision = 0 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert: the conflict names the metadata stream, whose revision the caller expected.
+        var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("REVISION_CONFLICT");
+        info.Metadata["stream"].ShouldBe("$$orders-1");
+        info.Metadata["actual"].ShouldBe("1");
+    }
+
+    [Fact]
+    public async Task GetStreamMetadata_ShouldAnswerWithTheMetadataAndItsRevision()
+    {
+        // Arrange
+        A.CallTo(() => _store.GetStreamMetadataAsync("orders-1", A<CancellationToken>._))
+            .Returns(new StreamMetadataResult("orders-1", 2, new StreamMetadata { MaxCount = 5, Custom = new JsonObject { ["owner"] = "billing" } }));
+        A.CallTo(() => _store.GetStreamMetadataAsync("orders-2", A<CancellationToken>._))
+            .Returns(new StreamMetadataResult("orders-2", -1, StreamMetadata.Empty));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var set = await client.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken);
+        var never = await client.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = "orders-2" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        set.Revision.ShouldBe(2);
+        set.Metadata.MaxCount.ShouldBe(5);
+        set.Metadata.HasTruncateBefore.ShouldBeFalse();
+        set.Metadata.Custom.ToStringUtf8().ShouldBe("{\"owner\":\"billing\"}");
+        never.Revision.ShouldBe(-1);
+        never.Metadata.HasMaxCount.ShouldBeFalse();
+        never.Metadata.Custom.IsEmpty.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingAMetadataStream_ShouldReadItAsThePlainStreamItIsInTheStore()
+    {
+        // Arrange
+        A.CallTo(() => _store.ReadEventualAsync("$$orders-1", Direction.Forwards, null, 10, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("$$orders-1", 0, 12, StreamNames.MetadataEventType)]));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$$orders-1", Start = new(), Count = 10 });
+
+        // Assert
+        messages.Count.ShouldBe(2);
+        messages[1].Event.EventType.ShouldBe("$metadata");
+    }
+
+    [Theory]
+    [InlineData("$$")]
+    [InlineData("$$$all")]
+    public async Task Read_WhenTheMetadataStreamNamesNoPlainStream_ShouldRejectTheName(string stream)
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, new ReadRequest { Stream = stream, Start = new(), Count = 1 }));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingTheMetadataEvents_ShouldReadTheEventTypeStreamOfMetadata()
+    {
+        // Arrange: $mde is $et-$metadata under another name.
+        var metadataEvents = new VirtualStreamName(VirtualStreamKind.EventType, StreamNames.MetadataEventType);
+        _tail.Advance(20);
+        A.CallTo(() => _store.VirtualHeadAsync(metadataEvents, 20, A<CancellationToken>._)).Returns(new StreamHead(12, 12));
+        A.CallTo(() => _store.ReadVirtualAsync(metadataEvents, Direction.Forwards, 12, 20, 10, A<CancellationToken>._))
+            .Returns([Record("$$orders-1", 0, 12, StreamNames.MetadataEventType)]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$mde", Start = new(), Count = 10 });
+
+        // Assert
+        messages[0].Head.ShouldSatisfyAllConditions(head => head.First.ShouldBe(12), head => head.Last.ShouldBe(12));
+        messages.Skip(1).ShouldHaveSingleItem().Event.Stream.ShouldBe("$$orders-1");
+    }
+
+    [Fact]
+    public async Task Read_WhenReadingTheDataEvents_ShouldReadThemAsAVirtualStreamByPosition()
+    {
+        // Arrange
+        var dataEvents = new VirtualStreamName(VirtualStreamKind.DataEvents, string.Empty);
+        _tail.Advance(20);
+        A.CallTo(() => _store.VirtualHeadAsync(dataEvents, 20, A<CancellationToken>._)).Returns(new StreamHead(5, 17));
+        A.CallTo(() => _store.ReadVirtualAsync(dataEvents, Direction.Forwards, 5, 20, 10, A<CancellationToken>._))
+            .Returns([Record("orders-1", 0, 5, "a"), Record("orders-1", 1, 17, "b")]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var messages = await ReadAll(client, new ReadRequest { Stream = "$de", Start = new(), Count = 10 });
+
+        // Assert
+        messages.Skip(1).Select(message => message.Event.Position).ShouldBe([5, 17]);
+    }
+
+    [Fact]
+    public async Task Read_WhenTheDataEventsAreAskedForByOrdinal_ShouldReject()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+        var request = new ReadRequest { Stream = "$de", Start = new(), Count = 1, Numbering = Protocols.Grpc.V1.Numbering.Ordinal };
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(() => ReadAll(client, request));
+
+        // Assert
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_ARGUMENT");
+    }
+
     private sealed class TestOptions : NightingaleOptionsBase
     {
     }
