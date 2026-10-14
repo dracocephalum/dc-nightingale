@@ -605,6 +605,31 @@ virtual stream's, as the reference's resolved links show. Under ordinals
 only, since finding a key's first event without the sequencer is a lookup a
 row.
 
+## A listing of categories
+
+The reference has no stream that lists its categories: a client that wants
+them writes a projection of its own. The gateway could serve one,
+`$categories`, holding each category once, as the first event of its first
+stream, which is what a reader of the categories wants: the name, and when
+the category began. It is the gateway's own, with nothing in the reference
+for the adapter to map to it.
+
+By position it needs no new index. `ix_pc_events_category_starts` is ordered
+by tenant, category and position, so each category's first row is one seek,
+the next category the next seek past it, a skip scan written as a recursive
+query; the categories are few, tens or hundreds where streams are millions,
+so a page, its bounds and its count are a seek a category, sorted by
+position in the statement. Live, the router asks only of an event that
+begins a stream, and only while `$categories` is followed, whether its
+category had a stream before it: one more seek of the same index.
+
+Under ordinals it is cheaper still. A category's first stream is the event
+the sequencer numbers 0 in `$category-x`, so `$categories` is the links of
+that type at ordinal 0, an index on them filtered to that ordinal, and the
+numbers of `$categories` itself are one more type of link, filled in the
+same batch. With S5b in, this is the way to build it; by position is the way
+without the sequencer. Not until someone asks for it.
+
 ## Separator characters, chosen at initialization
 
 The category rule is one, a hyphen. A store could choose its separator
