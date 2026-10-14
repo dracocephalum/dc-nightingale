@@ -42,7 +42,8 @@ undecided adds it here rather than mentioning it once in a conversation.
   `Nightingale:Store:AssignOrdinals`, filters on `$all` with their
   checkpoints, for reads, catch-up subscriptions and persistent groups, and a
   stream's metadata, set and read back as events of `$$<stream>` and applied
-  to reads of the stream, with `$de` and `$mde` beside `$all`; the samples
+  to reads of the stream, with `$de` and `$mde` beside `$all`, and binary
+  data beside an event's JSON or instead of it; the samples
   under `examples/` are the end-to-end
   runs. Not yet: the ordinal
   backfill, in `PENDING.md`. Close by: see `PENDING.md`.

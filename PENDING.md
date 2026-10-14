@@ -133,10 +133,12 @@ a core call it makes unconditionally fails in front of the application, so
 parity comes first, in the order the client exposes it:
 
 1. **Stream metadata**, `$maxAge`, `$maxCount` and `$tb`, read and set as the
-   client's own calls do (*Stream metadata* below); `$acl` waits for the
-   authentication that is left.
-2. **Binary event bodies** (below): every append from the client carries a
-   content type, and one that is not JSON is refused today.
+   client's own calls do, and the reference's delete as the gateway's reset:
+   done. `$acl` waits for the authentication that is left (*Stream metadata*
+   below).
+2. **Binary event bodies**: done, as a second body beside the JSON one
+   (`VARIANCES.md`, *An event has two bodies*); the mapping to the
+   reference's one body is the adapter's, under *Bodies* below.
 3. **The small ones together**: `$bc-` by correlation id, `$streams`, and
    the `Stop` action of a group's nack.
 4. **Multi-stream and conditional appends** (below), the client's newest.
@@ -218,6 +220,17 @@ here is re-derived:
   store then needs a read of a metadata stream that returns it, built with
   the adapter. A reset of a stream with metadata but no events is served as
   the cleared metadata it is here.
+- **Bodies.** A reference event has one body, and its `content-type` says
+  which: `application/json` appends JSON data, `application/octet-stream`
+  binary data alone, stored with the `{}` placeholder. A read serves one
+  body by the store's own rule for telling a binary event from a JSON one:
+  the binary data, as `application/octet-stream`, when the JSON is the `{}`
+  placeholder, and the JSON otherwise, so an event of the gateway's own with
+  both bodies shows a reference client its JSON. That rule needs nothing
+  stored. A writer that wants a reference client to see the binary data of
+  an event whose JSON is real would need a marker, booked under the name
+  `$primaryDataSlot`, a metadata key of `json` or `binary`, `json` when
+  absent, and written only when someone needs it.
 - **Not carried, answered `Unimplemented` until the core has them:**
   multi-stream append, projections, operations
   such as scavenge, and user management beyond what the credentials table
@@ -759,30 +772,6 @@ re-derived:
 What it does not cover: adding a column to a large table, the persisted
 category column of a store taking ordinals later say, is a change to every
 row, online or not, and stays a change to run by hand.
-
-## Binary event bodies, beside the JSON one
-
-A body that is not JSON: a Protobuf or Avro payload, or personal data
-encrypted with a key per subject, so that deleting the key forgets the
-subject in a store that never deletes, which is the case most likely to make
-this real. The shape, decided so the lazy route is not taken: never Base64
-inside the JSON body, which the events table's native JSON column would parse
-on every write on top of the size and the encoding; the table already has a
-binary column, `bdata`, beside `data`, the store's own binary path, and a
-binary body goes there raw. A content type on the wire says which; JSON stays
-the default, and nothing else changes, since filters, the virtual streams and
-the ordinals work on names and index columns, never on a body. The store's
-typed binary path, which wants a serializer per event type, is not used; the
-gateway's own readers hydrate rows themselves and read either column, and the
-plain-stream read through the store's session needs the sticky event seam to
-take a row whose JSON body is null, which is the one thing to probe. An event
-may carry both at once, a JSON body and a binary one, which is the better
-shape for encrypted personal data: what stays readable is JSON, the personal
-part is the encrypted binary beside it, and shredding the key leaves an event
-that still says what happened rather than a dead row. Only the gateway's own
-protocol carries two bodies; the reference protocol has one per event, and the
-compatibility adapter would carry the JSON one. No schema change: the column
-exists. Deferred until a consumer needs it.
 
 ## Regular-expression filters in the database
 

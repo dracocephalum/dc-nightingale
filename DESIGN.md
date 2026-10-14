@@ -84,6 +84,35 @@ come last. Everything else stays in the headers column as the client sent it.
 An integration test guards this seam: if a store release stops honouring the
 caller's type name, or changes what a body comes back as, it fails.
 
+An event may carry a second body, binary data: any bytes, stored as they are
+sent, beside the JSON or instead of it, with `$binaryContentType` among the
+metadata keys saying what they are. The store has a binary column already,
+`bdata`, and a binary path of its own, which is not used: it takes one body
+or the other, never both, and wants a serializer per event type, which a
+gateway without event classes does not have. So the store writes every event
+as JSON, an event with binary data only as its own placeholder for one, `{}`,
+since its JSON column takes no null, and leaves the binary column null.
+`BinaryDataWriter` then sets the binary column of the rows the store just
+inserted. It is a participant in the append's transaction, the store's public
+seam for statements of a caller's own, which the store runs after all of its
+own statements and before its commit: one statement for the whole append,
+each row found by the position the store has read back and checked by its
+id, tenant and stream, refusing, and so rolling the append back, when it finds
+fewer rows than events. The store's queued commands would have been the
+simpler seam, but they bind every value as text and refuse bytes. Only an
+append that carries binary data has the participant, and its statement has
+parameters of its own, so the limit on events in one append is unchanged.
+
+The value the participant writes is one the store's own readers read
+differently: to them a row with binary data is a binary event, and without
+a serializer for its type they refuse it. The gateway does not call them.
+Every read of events goes through the mirror, which reads both columns, and
+the check that recognises a retried append reads the ids through it too,
+rather than through the store's fetch of a stream. An integration test holds
+the store to the order the participant relies on: the participant finds the
+row the append inserted, and a participant that refuses leaves nothing of the
+append behind.
+
 ### 2. The schema is patched, not replaced
 
 Category and event-type streams (`$ce-orders`, `$et-OrderCreated`) are
