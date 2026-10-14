@@ -18,15 +18,15 @@ while the operator runs those projections.
 
 **Nightingale:** `$ce-`, `$et-`, `$bc-`, `$streams`, `$category-`, `$all`,
 and `$de` and `$mde` (the data and the metadata events) are predicates over
-the event table, always there. `$bc-`, `$streams`, `$category-` and `$de`
-are read by position only.
+the event table, always there. `$de` is read by position only.
 Their positions are the store's global sequence number: monotonic within the
 stream but sparse, because other streams' events occupy the numbers between.
 The head of each virtual stream is its own last event, never the global head,
 so a quiet category reports a stable head and zero lag, and a subscription to
 it says nothing while the store moves on without it. On a store initialized
-with `Nightingale:Store:AssignOrdinals`, a read or subscription of `$ce-`, `$et-`
-or `$mde`, never `$de`, may ask for ordinal numbering instead: dense, zero-based numbers assigned
+with `Nightingale:Store:AssignOrdinals`, a read or subscription of `$ce-`,
+`$et-`, `$mde`, `$bc-`, `$streams` or `$category-`, never `$de`, may ask
+for ordinal numbering instead: dense, zero-based numbers assigned
 after commit by one sequencer per cluster, so they trail the global head by
 its cadence, a deleted event leaves a hole that is skipped and never reused,
 and an event that committed late, after the head had passed its position,
@@ -38,7 +38,9 @@ its position.
 
 **Why:** no link events, no projection lag, no extra writes by default; and
 where a dense number is worth a numbering pass, it is two columns and one
-seek rather than a second copy of every event.
+seek rather than a second copy of every event, and for the correlations and
+the listings, which most events are in none of, a link only for each event
+that is.
 
 ## A name without a hyphen is its own category
 
