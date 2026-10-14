@@ -21,4 +21,7 @@ internal sealed class StreamRow
 
     /// <summary>Gets or sets the version through which the store compacted the stream; 0 when it never did.</summary>
     public long CompactedVersion { get; set; }
+
+    /// <summary>Gets or sets the tenant's partition key, on a store partitioned by tenant only; see <see cref="EventRow.PartitionKey"/>.</summary>
+    public int PartitionKey { get; set; }
 }

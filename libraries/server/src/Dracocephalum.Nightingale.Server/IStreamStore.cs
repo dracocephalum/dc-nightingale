@@ -191,18 +191,35 @@ public interface IStreamStore
     Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Deletes a stream: its events leave every read and it cannot be appended to again, but its
-    /// rows stay in the store. The expected state is checked first, against the stream's current
-    /// revision.
+    /// Resets a stream, the reference's soft delete: one metadata event that makes the stream read
+    /// as not found until its next append, which continues its revisions with every older event
+    /// hidden from the stream's reads. Nothing is removed, and <c>$all</c> and the virtual streams
+    /// keep the events. The reset replaces the metadata as a whole, as the reference's does. A
+    /// stream with no events but with metadata has its metadata cleared, which is what a reset
+    /// comes to when there is nothing to hide.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="expected">What the caller asserts about the stream, checked against its last revision.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The revision and position of the metadata event.</returns>
+    /// <exception cref="StreamNotFoundException">The stream has neither events nor metadata.</exception>
+    /// <exception cref="StreamDeletedException">The stream is archived.</exception>
+    /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
+    Task<AppendResult> ResetAsync(string stream, StreamState expected, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Archives a stream: its events leave every read, <c>$all</c> and the virtual streams included,
+    /// and it cannot be appended to again, but its rows stay in the store. The expected state is
+    /// checked first, against the stream's current revision.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="expected">What the caller asserts about the stream.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the stream is deleted.</returns>
+    /// <returns>A task that completes when the stream is archived.</returns>
     /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
-    /// <exception cref="StreamDeletedException">The stream was already deleted.</exception>
+    /// <exception cref="StreamDeletedException">The stream was already archived.</exception>
     /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
-    Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken);
+    Task ArchiveAsync(string stream, StreamState expected, CancellationToken cancellationToken);
 
     /// <summary>
     /// Reads a stream's metadata as last set: the last event of its metadata stream. The stream
@@ -210,13 +227,17 @@ public interface IStreamStore
     /// </summary>
     /// <param name="stream">The plain stream's name.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The metadata and the metadata stream's revision; revision -1 and no settings when it was never set.</returns>
+    /// <returns>The metadata and the metadata stream's revision, revision -1 and no settings when it was never set; after a reset, whether the stream is still reset, and its truncation as the revision it continues from.</returns>
     Task<StreamMetadataResult> GetStreamMetadataAsync(string stream, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sets a stream's metadata: appends one <c>$metadata</c> event to its metadata stream, checked
     /// against the expected state of that metadata stream, never of the stream itself, which need
-    /// not exist. The new metadata replaces the old as a whole.
+    /// not exist. The new metadata replaces the old as a whole. A <see cref="StreamMetadata.TruncateBefore"/>
+    /// at its largest value resets the stream, as <see cref="ResetAsync"/> does, keeping the other
+    /// settings. On a stream that is reset, the set brings it back in two events, as the
+    /// reference's does: the metadata as given, then the same with the truncation the reset left;
+    /// the result is the second's.
     /// </summary>
     /// <param name="stream">The plain stream's name.</param>
     /// <param name="expected">What the caller asserts about the metadata stream.</param>
@@ -228,8 +249,8 @@ public interface IStreamStore
     Task<AppendResult> SetStreamMetadataAsync(string stream, StreamState expected, StreamMetadata metadata, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Tombstones a stream: it and its events are removed for good, its metadata stream with them,
-    /// and the name afterwards reads as one that never existed. A deleted stream can be tombstoned.
+    /// Deletes a stream for good: it and its events are removed, its metadata stream with them,
+    /// and the name afterwards reads as one that never existed. An archived stream can be deleted.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="expected">What the caller asserts about the stream.</param>
@@ -237,5 +258,5 @@ public interface IStreamStore
     /// <returns>A task that completes when the stream is gone.</returns>
     /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
     /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
-    Task TombstoneAsync(string stream, StreamState expected, CancellationToken cancellationToken);
+    Task DeleteAsync(string stream, StreamState expected, CancellationToken cancellationToken);
 }

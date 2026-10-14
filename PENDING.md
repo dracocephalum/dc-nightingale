@@ -204,8 +204,22 @@ here is re-derived:
   checkpoint still resumes, but two of them subtracted are no count, a
   variance to write when the adapter ships. The core's own client gets its
   one number per record differently, as *A record's locus* below.
-- **Not carried, answered `Unimplemented` until the core has them:** stream
-  metadata (the `$$` streams), multi-stream append, projections, operations
+- **Deletes and metadata.** The reference's delete is the gateway's `Reset`
+  and its tombstone the gateway's `Delete`, one call each; the gateway's
+  `Archive` has no reference call to map. That client reads metadata as the
+  last event of `$$<stream>` and its parser throws on a negative `$tb`, so
+  the adapter translates the stored reset mark on every `$$` page it serves:
+  on the last metadata event, `$tb` at its largest while the mark is beyond
+  the stream's last revision and the mark itself once an append has reached
+  it, what the reference's delete and un-delete events hold; on an earlier
+  event, always the largest, what the reference held there. The stream's last
+  revision comes from the first statement of the `$$` read, the one that
+  finds the head, so the page and the revision are one moment's view; the
+  store then needs a read of a metadata stream that returns it, built with
+  the adapter. A reset of a stream with metadata but no events is served as
+  the cleared metadata it is here.
+- **Not carried, answered `Unimplemented` until the core has them:**
+  multi-stream append, projections, operations
   such as scavenge, and user management beyond what the credentials table
   covers. The client refuses what the feature table does not advertise rather
   than degrading.
@@ -244,12 +258,12 @@ re-derived:
   change keeps its place in the one sequence for a replay of `$all` and the
   history is the audit of who changed a stream's retention. Concurrency is
   the store's unique index, as for any append; a set needs no stream, so
-  metadata can precede the first event; tombstone removes the metadata
-  stream in the same transaction and delete leaves it. `$$<stream>` is read
-  and followed as a stream, written only by the metadata call, and refused
+  metadata can precede the first event; delete removes the metadata stream
+  in the same transaction and archive leaves it. `$$<stream>` is read
+  and followed as a stream, written only by the metadata calls, and refused
   for a group. Reserved keys are checked, a wrong type or a value out of
   range refusing the set; `$acl` is refused as an invalid argument; `$tb` at
-  its largest value is refused until soft delete (below); `$cacheControl`
+  its largest value resets the stream (below); `$cacheControl`
   and `$tmp` are kept in `StreamMetadataKeys.CarriedOver`, stored and
   returned without effect, `$tmp` to get its meaning with physical removal.
   `$all` carries the metadata events; `$de`, the data events, is `$all`
@@ -279,22 +293,22 @@ re-derived:
   cache would learn of a change only through the tail, a polling interval
   late, serving meanwhile events a new `$maxCount` has cut. If a measurement
   ever asks for less than the probe, the way out is a store setting fixed at
-  initialization that refuses metadata and skips it, not a cache. What is left
-  is soft delete, and the next bullet with it.
-- **With soft delete: the partition key in a stream's read.** On a store
-  partitioned by tenant the store's unique index of a stream's versions leads
-  with the tenant's partition key, `tenant_ordinal` in the store's names
-  (not an ordinal of the gateway's, `DESIGN.md` seam 6), which the read and
-  its probe do not name, so they may not seek, and a predicate on the tenant
-  alone eliminates no partition; the store's own fetch named it no more. The
-  store keeps the key per tenant in `pc_tenant_partitions`. The read names it
-  beside the tenant, so it seeks the existing index with only the tenant's
-  partition read, and no index is added: a second index
-  over the same columns would cost every append a second write. The tenant
-  stays in the predicate because tenants can share a partition. An
-  integration test on a partitioned store reads the plan of both statements.
-  Soft delete's own lock and its retry read the same rows, so the two ship
-  together.
+  initialization that refuses metadata and skips it, not a cache.
+- **Landed: the partition key in a stream's read.** On a store partitioned by
+  tenant the store's unique index of a stream's versions leads with the
+  tenant's partition key, `tenant_ordinal` in the store's names (not an
+  ordinal of the gateway's, `DESIGN.md` seam 6), which the read and its probe
+  did not name, any more than the store's own fetch had, so they could not
+  seek it, and a predicate on the tenant alone eliminates no partition. Every
+  statement of a stream's read now names it, through a subquery of the
+  store's registry, `pc_tenant_partitions`, so nothing about a tenant is
+  cached; the tenant stays in the predicate because tenants can share a
+  partition. No index is added: a second index over the same columns would
+  cost every append a second write. The key is selected nullable, since the
+  first of an `int` is wrapped in `COALESCE(..., 0)`, which the database does
+  not seek by. An integration test forces each statement onto the index by
+  the key and the stream: the statements naming the key run, and the same
+  ones without it are refused with error 8622.
 - **`$maxAge` reads its expired rows, booked.** A stream long past its
   `$maxAge` reads its expired rows on every forwards read from the start,
   each looked up in the table for its timestamp, which the unique index does
@@ -317,84 +331,44 @@ re-derived:
   the stream is read. The one sequence already places a change of metadata
   among the events around it for a reader of `$all`, which is all the
   reference's single writer gives a reader.
-- **Delete and soft delete are different features.** Delete, the store's
-  archive, flags the stream and every one of its events, hides them from
-  `$all` too and refuses appends; undoing it, which the gateway does not
-  offer, would bring every event back. The reference's soft delete hides the
-  events from reads of the stream alone, leaves them in `$all`, and is undone
-  by the next append, which recreates the stream: its revisions go on from
-  the last one, since the old events keep theirs until a scavenge, and the old
-  events stay hidden. Delete cannot stand in for it, so soft delete is a call
-  of its own, named when the slice starts, and a `$tb` set to its largest
-  value through `SetStreamMetadata` on a stream that is not soft-deleted is
-  the same request.
-- **Soft delete is a read rule, stored as a negative `$tb`.** The reference
-  writes `$tb` at its largest value, replacing the other keys, and that value
-  is its only mark of a soft delete; its un-delete then rewrites `$tb` as the
-  last revision plus one. The gateway writes, in one metadata event, the
-  negative of the last revision plus one, `-6` for a stream whose last
-  revision is 5, and nothing else, so one number says both that the stream
-  was soft-deleted and where it is truncated. A read finds the stream deleted
-  while `$tb` is negative and its absolute value is beyond the last revision:
-  not found. Otherwise the absolute value is the truncation, so recreation
-  needs nothing of its own: the next append lands at 6, the stream reads
-  again from there, and the same `-6` now means what the reference's
-  un-delete writes. The value never leaves the gateway as it is stored: the
-  core's metadata call reports a soft delete as a field of its own, and the
-  KurrentDB adapter serves a read of `$$<stream>`, which is how that client
-  reads metadata, with `$tb` at its largest value while the stream is deleted
-  and at 6 after, the two values the reference's history holds; that
-  client's parser throws on a negative `$tb`. A negative `$tb` from a caller
-  is refused, where the reference ignores it; its client cannot send one. A
-  stream with no events cannot be soft-deleted, as in the reference, so the
-  value is never 0. Since no write has to follow the append, no interleaving
-  of an append and a soft delete on two instances strands an event: an
-  append committed before the soft delete reads the last revision is hidden
-  by it, one committed after is the recreation, the two orders the
-  reference's writer allows. The soft delete reads the last revision and then
-  writes, and so does a metadata set on a soft-deleted stream (next), so both
-  take the update lock on the stream's row in the store's streams table
-  first; every append takes that lock anyway to move the version, so the
-  lock is paid on those two paths and never by an append.
-- **A metadata set on a soft-deleted stream un-deletes it.** In the
-  reference, any write to `$$<stream>` while the stream is soft-deleted is
-  followed by its un-delete, which rewrites `$tb` in what was just written:
-  a set of `$tb` at 3 ends at 6, the old events stay hidden, and so does a
-  set of `$tb` at its largest value, which un-deletes rather than deletes
-  again; the other keys of the set are kept. The gateway writes that end
-  state in one event: the caller's keys with `$tb` at the absolute value of
-  the stored one, under the lock above. Once the stream is recreated, a set
-  of `$tb` at 3 is a plain set and the events from 3 read again, in both,
-  until physical removal (below) takes them.
-- **"No stream" after a soft delete, by a retry on its failure.** The
-  reference accepts an append that expects no stream on a soft-deleted stream
-  and numbers its events from the last revision plus one, exactly as an
-  append that expects the last revision; a recreated stream never starts
-  again at 0. Here such an append fails on the store's check, and only then,
-  on the failure path, the gateway reads the metadata: when the stream is
-  soft-deleted with `$tb` at the negative of the revision the failure
-  reports plus one, the
-  append is retried once expecting that revision, which the store checks as
-  atomically as any. An append that succeeds never reads metadata.
-- **What stays a variance**, written into `VARIANCES.md` when the slice
-  ships. An append that expects the stream to exist is accepted on a
-  soft-deleted stream, where the reference refuses it: refusing it means
-  reading metadata when the append would succeed, which is acceptable only
-  if that expected state alone pays for it, as a probe before such appends,
-  and even then a soft delete landing between the probe and the append gets
-  through; it waits for a consumer that asks, and is then built that way,
-  never as a check on every append. The metadata stream's history has no
-  un-delete event, stores the negative `$tb` the adapter translates, and
-  has one event where a set on a soft-deleted stream gives the reference
-  two, so the reference's moment between them, with the caller's `$tb` in
-  force, does not exist here. A wrongly typed reserved key is refused rather
-  than emptying the metadata; `$cacheControl` and `$tmp` are stored without
-  effect; and a set after a tombstone is accepted, a line for the existing
-  variance *A tombstoned stream reads as one that never existed*. And a
-  change of metadata that un-deletes the stream
-  between a failed "no stream" append and its retry lets the retry through
-  where the reference would refuse it; that window is a variance, not a
-  lock.
+- **Landed: reset, archive and delete, under one deletion level.** Three
+  calls where the reference has two, named for what each does: `Reset` is
+  the reference's delete, its soft delete, which hides and comes back;
+  `Archive` is the store's archive, which the gateway called delete before,
+  flagging the stream and its events out of every read, `$all` included, and
+  refusing appends, the rows kept; `Delete` is the reference's tombstone,
+  removing the stream and freeing its name. `Nightingale:Deletion:Allowed`,
+  `None`, `Archive` or `Delete`, each allowing what is below it, replaces the
+  two switches; a reset is allowed at every level, authorized as a metadata
+  set, since it removes nothing and a set undoes it. `VARIANCES.md`, *Reset,
+  archive and delete*, has what differs from the reference.
+- **Reset is a read rule, stored as a negative `$tb`.** One metadata event
+  replacing the metadata as the reference's does, `{"$tb": -6}` for a stream
+  reset at revision 5, so one number says both that the stream was reset and
+  where it is truncated. A read finds it not found while the mark is beyond
+  the last revision; once an append reaches it, it is a plain truncation,
+  which is what the reference's un-delete writes, so recreation needs nothing
+  of its own and no write follows an append. No interleaving of an append
+  and a reset on two instances strands an event: an append committed before
+  the reset reads the last revision is hidden by it, one committed after is
+  the recreation, the two orders the reference's writer allows. A caller can
+  never set a negative `$tb`, and the metadata call reports the truncation
+  and the reset apart. A stream with no events but with metadata has it
+  cleared, which is what a reset comes to with nothing to hide. A set at the
+  largest `$tb` resets keeping the other settings; a set on a reset stream
+  brings it back in the reference's two events, the metadata as given, then
+  the same with the reset's truncation, in one append, and a second set
+  lowers the truncation. An append that expects no stream and finds a reset
+  one is retried once on the failure path, expecting the last revision, and
+  the same events sent again after a lost answer succeed with what was
+  written; an append that succeeds never reads metadata.
+- **No row lock.** The design held the update lock on the stream's row for a
+  reset and a set on a reset stream. Neither needs it: each decision is
+  written under an expected revision of the metadata stream, so a change of
+  metadata between its read and its write is caught by the store's unique
+  index and decided again, and an append landing between them is ordered
+  after the decision, which is one of the two orders the reference's single
+  writer could have given.
 - **Physical removal** of the events metadata hides is a separate maintenance
   job, the analogue of a scavenge, and a slice of its own; whether the store
   can delete a stream's events below a version, or that is a request in

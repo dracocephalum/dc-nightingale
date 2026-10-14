@@ -65,12 +65,19 @@ public static class NightingaleErrors
     public static RpcException InvalidArgument(string message) =>
         Build(StatusCode.InvalidArgument, ErrorReason.InvalidArgument, message);
 
-    /// <summary>The host has not enabled this kind of deletion.</summary>
+    /// <summary>The host's deletion level does not reach this operation.</summary>
     /// <param name="stream">The stream.</param>
-    /// <param name="operation">What was refused: delete or tombstone.</param>
+    /// <param name="operation">What was refused: archive or delete.</param>
+    /// <param name="allowed">The level the host set.</param>
     /// <returns>The exception to throw.</returns>
-    public static RpcException DeletionDisabled(string stream, string operation) =>
-        Build(StatusCode.PermissionDenied, ErrorReason.DeletionDisabled, $"{operation} is disabled on this server; the host enables it under Nightingale:Deletion.", ("stream", stream), ("operation", operation));
+    public static RpcException DeletionDisabled(string stream, DeletionLevel operation, DeletionLevel allowed) =>
+        Build(
+            StatusCode.PermissionDenied,
+            ErrorReason.DeletionDisabled,
+            $"{operation} is disabled on this server: Nightingale:Deletion:Allowed is {allowed}, and {operation} needs {operation} or above.",
+            ("stream", stream),
+            ("operation", operation.ToString()),
+            ("allowed", allowed.ToString()));
 
     /// <summary>A group with that name exists on the stream.</summary>
     /// <param name="stream">The stream.</param>

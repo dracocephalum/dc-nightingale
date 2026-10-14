@@ -35,8 +35,8 @@ undecided adds it here rather than mentioning it once in a conversation.
   `shared.proto` for the numbers, names, bodies, headers and error conventions
   and `errors.proto` for the reasons. Implemented and verified against a local
   SQL Server: `Append`, bounded reads and catch-up subscriptions over plain
-  streams, `$all` and the virtual streams, `Delete` and `Tombstone` behind the
-  host's switches, persistent subscriptions with create, delete, one
+  streams, `$all` and the virtual streams, `Reset`, and `Archive` and `Delete`
+  behind the host's deletion level, persistent subscriptions with create, delete, one
   consumer with acknowledgements, retries, parking and replay, on a lease per
   group, and the virtual streams by ordinal on a store initialized with
   `Nightingale:Store:AssignOrdinals`, filters on `$all` with their

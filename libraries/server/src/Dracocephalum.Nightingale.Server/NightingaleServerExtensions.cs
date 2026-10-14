@@ -53,6 +53,7 @@ public static class NightingaleServerExtensions
         options.Cluster.Validate();
         options.Auth.Validate();
         options.Tenants.Validate();
+        options.Deletion.Validate();
         if (options.MaxEventsPerAppend < 1)
         {
             throw new InvalidOperationException($"{NightingaleOptionsBase.SectionName}:{nameof(NightingaleOptionsBase.MaxEventsPerAppend)} must be at least 1. It was {options.MaxEventsPerAppend}.");

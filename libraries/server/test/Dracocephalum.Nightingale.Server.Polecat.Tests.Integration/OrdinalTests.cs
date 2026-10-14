@@ -25,8 +25,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         _host = await TestDatabases.StartProvisionedHostAsync(_name, options =>
         {
             options.Store.AssignOrdinals = true;
-            options.Deletion.AllowDelete = true;
-            options.Deletion.AllowTombstone = true;
+            options.Deletion.Allowed = DeletionLevel.Delete;
 
             // A short lease, so the sequencer's quiet-store pass, on renewal, comes within a second.
             options.OrdinalSequencerLeaseDuration = TimeSpan.FromSeconds(3);
@@ -82,14 +81,14 @@ public sealed class OrdinalTests : IAsyncLifetime
         await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
         var third = await sut.AppendAsync("orders-3", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
         await NumberedAsync(third.Position);
-        await sut.DeleteAsync("orders-2", StreamState.Any, TestContext.Current.CancellationToken);
+        await sut.ArchiveAsync("orders-2", StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
         var withHole = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
         var fourth = await sut.AppendAsync("orders-4", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
         await NumberedAsync(fourth.Position);
         var afterFourth = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
-        await sut.TombstoneAsync("orders-1", StreamState.Any, TestContext.Current.CancellationToken);
+        await sut.DeleteAsync("orders-1", StreamState.Any, TestContext.Current.CancellationToken);
         var afterTombstone = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
         var bounds = await sut.OrdinalHeadAsync(Orders, TestContext.Current.CancellationToken);
 

@@ -160,6 +160,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IDocumentStore>(),
             provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(),
             options.Store.AssignOrdinals,
+            partitionedByTenant,
             readOnlyConnectionString is null ? null : provider.GetRequiredService<IDbContextFactory<ReadOnlyEventsDbContext>>(),
             readOnlyConnectionString is not null && options.ReadStreamsFromReadOnlyConnection
                 ? provider.GetRequiredService<IDbContextFactory<ReadOnlyEventsDbContext>>()

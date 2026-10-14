@@ -1,8 +1,8 @@
-// Streams: read, subscribe, append, delete.
+// Streams: read, subscribe, append, reset, archive, delete.
 //
 // The shape follows the reference protocol: one server-streaming Read that is
 // a subscription when the request says so, one client-streaming Append that
-// sends its options first, and two unary deletes. Message order on a Read is
+// sends its options first, and unary calls for the rest. Message order on a Read is
 // part of the contract; each response message documents when it may appear.
 // Numbers, names, bodies, headers and errors are defined in shared.proto.
 
@@ -34,15 +34,28 @@ service Streams {
   // shared.proto.
   rpc Append (stream AppendRequest) returns (AppendResponse);
 
-  // Soft-deletes a stream: its events leave every read, including $all, and
-  // appends to it fail with STREAM_DELETED. Errors: REVISION_CONFLICT,
-  // STREAM_NOT_FOUND, STREAM_DELETED.
-  rpc Delete (DeleteRequest) returns (DeleteResponse);
+  // Resets a stream, the reference's soft delete: it reads as not found
+  // until its next append, which continues its revisions with every older
+  // event hidden from its reads; $all and the virtual streams keep them. One
+  // metadata event is written and nothing is removed, so a reset is always
+  // allowed, and undone by setting the metadata twice: once to bring the
+  // stream back, again to lower its truncation. A reset of a stream with no
+  // events clears its metadata. Errors: REVISION_CONFLICT, STREAM_NOT_FOUND
+  // (no events and no metadata), STREAM_DELETED (archived).
+  rpc Reset (ResetRequest) returns (ResetResponse);
 
-  // Removes a stream and its events permanently, and its metadata stream with
-  // them. Afterwards the name reads as a stream that never existed. Errors:
-  // REVISION_CONFLICT, STREAM_NOT_FOUND.
-  rpc Tombstone (TombstoneRequest) returns (TombstoneResponse);
+  // Archives a stream: its events leave every read, $all and the virtual
+  // streams included, and appends to it fail with STREAM_DELETED; the rows
+  // stay in the store. Allowed when the server's deletion level is Archive or
+  // Delete. Errors: REVISION_CONFLICT, STREAM_NOT_FOUND, STREAM_DELETED,
+  // DELETION_DISABLED.
+  rpc Archive (ArchiveRequest) returns (ArchiveResponse);
+
+  // Deletes a stream for good: it, its events and its metadata stream are
+  // removed, and the name reads as a stream that never existed, free to be
+  // used again. Allowed when the server's deletion level is Delete. Errors:
+  // REVISION_CONFLICT, STREAM_NOT_FOUND, DELETION_DISABLED.
+  rpc Delete (DeleteRequest) returns (DeleteResponse);
 
   // Reads a stream's metadata as last set: the last event of its metadata
   // stream, $$<stream>. A stream whose metadata was never set answers with
@@ -53,7 +66,10 @@ service Streams {
   // Sets a stream's metadata: appends one $metadata event to $$<stream>,
   // under an expected revision of that metadata stream, never of the stream
   // itself; the new metadata replaces the old as a whole. The stream need not
-  // exist, so metadata can be set before its first event. Applied to the
+  // exist, so metadata can be set before its first event. On a stream that is
+  // reset, the set brings it back and appends two events, as the reference
+  // does: the metadata as given, then the same with truncate_before at the
+  // revision the stream continues from; the response is the second. Applied to the
   // stream's reads and to where a subscription to it starts, from the next
   // read on; never to $all, the virtual streams or live delivery. Errors:
   // REVISION_CONFLICT, INVALID_STREAM_NAME, INVALID_ARGUMENT (a setting out
@@ -204,6 +220,26 @@ message AppendResponse {
   sint64 position = 2;
 }
 
+message ResetRequest {
+  string stream = 1;
+  // A revision of the stream, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+}
+
+message ResetResponse {
+  // Revision of the metadata event in the metadata stream, and its position.
+  sint64 revision = 1;
+  sint64 position = 2;
+}
+
+message ArchiveRequest {
+  string stream = 1;
+  // A revision, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+}
+
+message ArchiveResponse {}
+
 message DeleteRequest {
   string stream = 1;
   // A revision, or one of the ExpectedRevision values.
@@ -211,14 +247,6 @@ message DeleteRequest {
 }
 
 message DeleteResponse {}
-
-message TombstoneRequest {
-  string stream = 1;
-  // A revision, or one of the ExpectedRevision values.
-  sint64 expected_revision = 2;
-}
-
-message TombstoneResponse {}
 
 // A stream's metadata. Each setting is absent unless set; the event that
 // stores them writes the reference's keys ($maxAge, $maxCount, $tb,
@@ -229,8 +257,10 @@ message StreamMetadata {
   // How many of the stream's last events are read. Positive.
   optional int64 max_count = 2;
   // The first revision read; the events before it are hidden. Never
-  // negative. Its largest value is the reference's soft delete, refused
-  // until this server does that.
+  // negative. Set to its largest value, the reference's soft delete, it
+  // resets the stream, as Reset does, keeping the other settings; on a
+  // stream that is reset, any set brings it back, from the truncation the
+  // reset left, whatever this value is.
   optional int64 truncate_before = 3;
   // Carried over from the reference, without effect here: a caching hint of
   // its HTTP interface. Positive, whole seconds.
@@ -252,7 +282,12 @@ message GetStreamMetadataResponse {
   // The metadata stream's last revision, which the next set expects; -1 when
   // the metadata was never set.
   sint64 revision = 1;
+  // After a reset, truncate_before is the revision the stream continues
+  // from.
   StreamMetadata metadata = 2;
+  // The stream is reset and not yet back: it reads as not found until its
+  // next append, or the next set of its metadata.
+  bool reset = 3;
 }
 
 message SetStreamMetadataRequest {

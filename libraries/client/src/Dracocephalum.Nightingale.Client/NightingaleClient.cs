@@ -229,38 +229,68 @@ public sealed class NightingaleClient : IAsyncDisposable
         Subscribe(StreamNames.All, from, Numbering.Global, filter?.ToWire(checkpointInterval), cancellationToken);
 
     /// <summary>
-    /// Deletes a stream: its events leave every read and it cannot be appended to again. Only when
-    /// the server's host allows deletion; it does not by default.
+    /// Resets a stream, the reference client's delete: it reads as not found until its next
+    /// append, which continues its revisions with every older event hidden from its reads.
+    /// Nothing is removed, <c>$all</c> keeps the events, and the server allows it whatever its
+    /// deletion level. Undone by setting the metadata twice: the first set brings the stream
+    /// back, the second lowers its truncation.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="expected">What the caller asserts about the stream.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task that completes when the stream is deleted.</returns>
-    /// <exception cref="DeletionDisabledException">The server does not allow deletion.</exception>
-    /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
-    /// <exception cref="StreamDeletedException">The stream was already deleted.</exception>
+    /// <returns>The revision and position of the metadata event the reset wrote.</returns>
+    /// <exception cref="StreamNotFoundException">The stream has neither events nor metadata.</exception>
+    /// <exception cref="StreamDeletedException">The stream is archived.</exception>
     /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
-    public Task DeleteStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    public async Task<AppendResult> ResetStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return CallUnaryAsync(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        try
+        {
+            var response = await _streams.ResetAsync(new ResetRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return new AppendResult(response.Revision, response.Position);
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
     }
 
     /// <summary>
-    /// Tombstones a stream: it and its events are removed for good and the name reads as one that
-    /// never existed. Only when the server's host allows it; it does not by default.
+    /// Archives a stream: its events leave every read, <c>$all</c> included, and it cannot be
+    /// appended to again; the rows stay in the store. Only when the server's deletion level is
+    /// archive or delete; it is neither by default.
+    /// </summary>
+    /// <param name="stream">The stream name.</param>
+    /// <param name="expected">What the caller asserts about the stream.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the stream is archived.</returns>
+    /// <exception cref="DeletionDisabledException">The server does not allow archiving.</exception>
+    /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
+    /// <exception cref="StreamDeletedException">The stream was already archived.</exception>
+    /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
+    public Task ArchiveStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stream);
+        return CallUnaryAsync(async () => await _streams.ArchiveAsync(new ArchiveRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Deletes a stream for good: it and its events are removed and the name reads as one that
+    /// never existed. Only when the server's deletion level is delete; it is not by default. Not
+    /// the reference client's delete, which is a reset here.
     /// </summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="expected">What the caller asserts about the stream.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the stream is gone.</returns>
-    /// <exception cref="DeletionDisabledException">The server does not allow tombstoning.</exception>
+    /// <exception cref="DeletionDisabledException">The server does not allow deleting.</exception>
     /// <exception cref="StreamNotFoundException">The stream has no events.</exception>
     /// <exception cref="RevisionConflictException">The stream is not in the expected state.</exception>
-    public Task TombstoneStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
+    public Task DeleteStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return CallUnaryAsync(async () => await _streams.TombstoneAsync(new TombstoneRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallUnaryAsync(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -277,7 +307,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         try
         {
             var response = await _streams.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = stream }, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return new StreamMetadataResult(stream, response.Revision, response.Metadata.ToStreamMetadata());
+            return new StreamMetadataResult(stream, response.Revision, response.Metadata.ToStreamMetadata(), response.Reset);
         }
         catch (RpcException exception)
         {

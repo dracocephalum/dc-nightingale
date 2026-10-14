@@ -128,7 +128,6 @@ public sealed class StreamMetadataTests
         new StreamMetadata { MaxAge = TimeSpan.FromMilliseconds(1500) },
         new StreamMetadata { MaxCount = 0 },
         new StreamMetadata { TruncateBefore = -1 },
-        new StreamMetadata { TruncateBefore = long.MaxValue },
         new StreamMetadata { CacheControl = TimeSpan.FromSeconds(-1) },
     };
 
@@ -156,6 +155,16 @@ public sealed class StreamMetadataTests
 
         // Act & Assert: beyond the last revision when the truncation hides every event.
         sut.GetFirstRevision(last).ShouldBe(expected);
+    }
+
+    [Fact]
+    public void Validate_WhenTruncateBeforeIsAtItsLargest_ShouldAcceptItAsTheReferencesReset()
+    {
+        // Arrange: the reference's soft delete, which a set may carry and which resets the stream.
+        var sut = new StreamMetadata { TruncateBefore = long.MaxValue, MaxCount = 3 };
+
+        // Act & Assert
+        Should.NotThrow(sut.Validate);
     }
 
     [Fact]

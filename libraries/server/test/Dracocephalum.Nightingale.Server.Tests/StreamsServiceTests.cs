@@ -657,59 +657,67 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Delete_ByDefault_ShouldBeRefusedAsDisabledWithoutTouchingTheStore()
+    public async Task Archive_ByDefault_ShouldBeRefusedAsDisabledWithoutTouchingTheStore()
     {
         // Arrange
         var client = new Streams.StreamsClient(_channel);
 
         // Act
-        var exception = await Should.ThrowAsync<RpcException>(async () => await client.DeleteAsync(new DeleteRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.ArchiveAsync(new ArchiveRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.PermissionDenied);
         var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
         info.Reason.ShouldBe("DELETION_DISABLED");
+        info.Metadata["operation"].ShouldBe("Archive");
+        info.Metadata["allowed"].ShouldBe("None");
+    }
+
+    [Fact]
+    public async Task Delete_WhenTheLevelIsArchive_ShouldBeRefusedWhileArchiveIsAllowed()
+    {
+        // Arrange: each level allows what the levels below it allow, and no more.
+        _serverOptions.Deletion.Allowed = DeletionLevel.Archive;
+        A.CallTo(() => _store.ArchiveAsync("orders-1", StreamState.Any, A<CancellationToken>._)).Returns(Task.CompletedTask);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        await client.ArchiveAsync(new ArchiveRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken);
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.DeleteAsync(new DeleteRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        A.CallTo(() => _store.ArchiveAsync("orders-1", StreamState.Any, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        var info = exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("DELETION_DISABLED");
         info.Metadata["operation"].ShouldBe("Delete");
+        info.Metadata["allowed"].ShouldBe("Archive");
     }
 
     [Fact]
-    public async Task Tombstone_ByDefault_ShouldBeRefusedAsDisabled()
+    public async Task Archive_WhenAllowed_ShouldPassTheExpectedStateToTheStore()
     {
-        // Arrange
+        // Arrange: the delete level allows archiving too.
+        _serverOptions.Deletion.Allowed = DeletionLevel.Delete;
+        A.CallTo(() => _store.ArchiveAsync("orders-1", StreamState.StreamRevision(4), A<CancellationToken>._)).Returns(Task.CompletedTask);
         var client = new Streams.StreamsClient(_channel);
 
         // Act
-        var exception = await Should.ThrowAsync<RpcException>(async () => await client.TombstoneAsync(new TombstoneRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+        await client.ArchiveAsync(new ArchiveRequest { Stream = "orders-1", ExpectedRevision = 4 }, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
-        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Metadata["operation"].ShouldBe("Tombstone");
+        A.CallTo(() => _store.ArchiveAsync("orders-1", StreamState.StreamRevision(4), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
-    public async Task Delete_WhenAllowed_ShouldPassTheExpectedStateToTheStore()
+    public async Task Archive_WhenTheStreamIsMissing_ShouldFailAsNotFound()
     {
         // Arrange
-        _serverOptions.Deletion.AllowDelete = true;
-        A.CallTo(() => _store.DeleteAsync("orders-1", StreamState.StreamRevision(4), A<CancellationToken>._)).Returns(Task.CompletedTask);
+        _serverOptions.Deletion.Allowed = DeletionLevel.Archive;
+        A.CallTo(() => _store.ArchiveAsync("orders-9", StreamState.Any, A<CancellationToken>._)).ThrowsAsync(new StreamNotFoundException("orders-9"));
         var client = new Streams.StreamsClient(_channel);
 
         // Act
-        await client.DeleteAsync(new DeleteRequest { Stream = "orders-1", ExpectedRevision = 4 }, cancellationToken: TestContext.Current.CancellationToken);
-
-        // Assert
-        A.CallTo(() => _store.DeleteAsync("orders-1", StreamState.StreamRevision(4), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
-    }
-
-    [Fact]
-    public async Task Delete_WhenTheStreamIsMissing_ShouldFailAsNotFound()
-    {
-        // Arrange
-        _serverOptions.Deletion.AllowDelete = true;
-        A.CallTo(() => _store.DeleteAsync("orders-9", StreamState.Any, A<CancellationToken>._)).ThrowsAsync(new StreamNotFoundException("orders-9"));
-        var client = new Streams.StreamsClient(_channel);
-
-        // Act
-        var exception = await Should.ThrowAsync<RpcException>(async () => await client.DeleteAsync(new DeleteRequest { Stream = "orders-9", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.ArchiveAsync(new ArchiveRequest { Stream = "orders-9", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.NotFound);
@@ -717,16 +725,16 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Tombstone_WhenAllowedAndTheRevisionIsStale_ShouldFailWithTheConflict()
+    public async Task Delete_WhenAllowedAndTheRevisionIsStale_ShouldFailWithTheConflict()
     {
         // Arrange
-        _serverOptions.Deletion.AllowTombstone = true;
-        A.CallTo(() => _store.TombstoneAsync("orders-1", StreamState.StreamRevision(1), A<CancellationToken>._))
+        _serverOptions.Deletion.Allowed = DeletionLevel.Delete;
+        A.CallTo(() => _store.DeleteAsync("orders-1", StreamState.StreamRevision(1), A<CancellationToken>._))
             .ThrowsAsync(new RevisionConflictException("orders-1", StreamState.StreamRevision(1), 3));
         var client = new Streams.StreamsClient(_channel);
 
         // Act
-        var exception = await Should.ThrowAsync<RpcException>(async () => await client.TombstoneAsync(new TombstoneRequest { Stream = "orders-1", ExpectedRevision = 1 }, cancellationToken: TestContext.Current.CancellationToken));
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.DeleteAsync(new DeleteRequest { Stream = "orders-1", ExpectedRevision = 1 }, cancellationToken: TestContext.Current.CancellationToken));
 
         // Assert
         exception.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Metadata["actual"].ShouldBe("3");
@@ -965,7 +973,6 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     [Theory]
     [InlineData(0L, null)]
     [InlineData(null, -1L)]
-    [InlineData(null, long.MaxValue)]
     public async Task SetStreamMetadata_WhenASettingIsOutOfRange_ShouldAnswerInvalidArgument(long? maxCount, long? truncateBefore)
     {
         // Arrange
@@ -1058,6 +1065,72 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         never.Revision.ShouldBe(-1);
         never.Metadata.HasMaxCount.ShouldBeFalse();
         never.Metadata.Custom.IsEmpty.ShouldBeTrue();
+        set.Reset.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetStreamMetadata_WhenTheStreamIsReset_ShouldSaySoBesideTheTruncation()
+    {
+        // Arrange
+        A.CallTo(() => _store.GetStreamMetadataAsync("orders-1", A<CancellationToken>._))
+            .Returns(new StreamMetadataResult("orders-1", 3, new StreamMetadata { TruncateBefore = 6 }, Reset: true));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var response = await client.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = "orders-1" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        response.Reset.ShouldBeTrue();
+        response.Metadata.TruncateBefore.ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task Reset_AtTheDefaultDeletionLevel_ShouldBeAllowedAndAnswerTheMetadataEvent()
+    {
+        // Arrange: a reset hides and removes nothing, so no level stands in its way.
+        A.CallTo(() => _store.ResetAsync("orders-1", StreamState.StreamRevision(5), A<CancellationToken>._)).Returns(new AppendResult(2, 40));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var response = await client.ResetAsync(new ResetRequest { Stream = "orders-1", ExpectedRevision = 5 }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        _serverOptions.Deletion.Allowed.ShouldBe(DeletionLevel.None);
+        response.Revision.ShouldBe(2);
+        response.Position.ShouldBe(40);
+    }
+
+    [Theory]
+    [InlineData("missing", StatusCode.NotFound, "STREAM_NOT_FOUND")]
+    [InlineData("archived", StatusCode.FailedPrecondition, "STREAM_DELETED")]
+    public async Task Reset_WhenTheStoreRefuses_ShouldAnswerTheContractsError(string why, StatusCode status, string reason)
+    {
+        // Arrange
+        Exception refusal = why == "missing" ? new StreamNotFoundException("orders-1") : new StreamDeletedException("orders-1");
+        A.CallTo(() => _store.ResetAsync("orders-1", StreamState.Any, A<CancellationToken>._)).ThrowsAsync(refusal);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.ResetAsync(new ResetRequest { Stream = "orders-1", ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        exception.StatusCode.ShouldBe(status);
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe(reason);
+    }
+
+    [Theory]
+    [InlineData("$all")]
+    [InlineData("$$orders-1")]
+    public async Task Reset_WhenTheStreamIsNotPlain_ShouldRejectTheName(string stream)
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var exception = await Should.ThrowAsync<RpcException>(async () => await client.ResetAsync(new ResetRequest { Stream = stream, ExpectedRevision = -2 }, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert: the strict store would have thrown on any call.
+        exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("INVALID_STREAM_NAME");
     }
 
     [Fact]

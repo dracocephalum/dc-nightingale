@@ -15,7 +15,7 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
     private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
 
     [Fact]
-    public async Task Delete_ShouldHideTheStreamFromEveryReadAndRefuseAppends()
+    public async Task Archive_ShouldHideTheStreamFromEveryReadAndRefuseAppends()
     {
         // Arrange
         var (stream, category) = Names();
@@ -23,18 +23,18 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
         var appended = await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
 
         // Act
-        await sut.DeleteAsync(stream, StreamState.StreamRevision(1), TestContext.Current.CancellationToken);
+        await sut.ArchiveAsync(stream, StreamState.StreamRevision(1), TestContext.Current.CancellationToken);
 
         // Assert
         await Should.ThrowAsync<StreamDeletedException>(() => sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken));
         await Should.ThrowAsync<StreamDeletedException>(() => sut.AppendAsync(stream, StreamState.Any, [Event()], TestContext.Current.CancellationToken));
         (await sut.ReadAllAsync(Direction.Forwards, appended.Position - 1, appended.Position, 10, TestContext.Current.CancellationToken)).ShouldBeEmpty();
         (await sut.VirtualHeadAsync(new VirtualStreamName(VirtualStreamKind.Category, category), appended.Position, TestContext.Current.CancellationToken)).ShouldBeNull();
-        await Should.ThrowAsync<StreamDeletedException>(() => sut.DeleteAsync(stream, StreamState.Any, TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<StreamDeletedException>(() => sut.ArchiveAsync(stream, StreamState.Any, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task Delete_WhenTheExpectedRevisionIsStale_ShouldConflictAndLeaveTheStreamAlone()
+    public async Task Archive_WhenTheExpectedRevisionIsStale_ShouldConflictAndLeaveTheStreamAlone()
     {
         // Arrange
         var (stream, _) = Names();
@@ -42,8 +42,8 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
         await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
 
         // Act
-        var conflict = await Should.ThrowAsync<RevisionConflictException>(() => sut.DeleteAsync(stream, StreamState.StreamRevision(0), TestContext.Current.CancellationToken));
-        var noStream = await Should.ThrowAsync<RevisionConflictException>(() => sut.DeleteAsync(stream, StreamState.NoStream, TestContext.Current.CancellationToken));
+        var conflict = await Should.ThrowAsync<RevisionConflictException>(() => sut.ArchiveAsync(stream, StreamState.StreamRevision(0), TestContext.Current.CancellationToken));
+        var noStream = await Should.ThrowAsync<RevisionConflictException>(() => sut.ArchiveAsync(stream, StreamState.NoStream, TestContext.Current.CancellationToken));
 
         // Assert
         conflict.ActualRevision.ShouldBe(1);
@@ -52,27 +52,27 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
     }
 
     [Fact]
-    public async Task Delete_WhenTheStreamDoesNotExist_ShouldFailAsNotFound()
+    public async Task Archive_WhenTheStreamDoesNotExist_ShouldFailAsNotFound()
     {
         // Arrange
         var (stream, _) = Names();
 
         // Act & Assert
+        await Should.ThrowAsync<StreamNotFoundException>(() => database.Store.ArchiveAsync(stream, StreamState.Any, TestContext.Current.CancellationToken));
         await Should.ThrowAsync<StreamNotFoundException>(() => database.Store.DeleteAsync(stream, StreamState.Any, TestContext.Current.CancellationToken));
-        await Should.ThrowAsync<StreamNotFoundException>(() => database.Store.TombstoneAsync(stream, StreamState.Any, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task Tombstone_ShouldRemoveTheStreamAndFreeItsName()
+    public async Task Delete_ShouldRemoveTheStreamAndFreeItsName()
     {
         // Arrange: a deleted stream can be tombstoned too.
         var (stream, _) = Names();
         var sut = database.Store;
         await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        await sut.DeleteAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
+        await sut.ArchiveAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
-        await sut.TombstoneAsync(stream, StreamState.StreamRevision(0), TestContext.Current.CancellationToken);
+        await sut.DeleteAsync(stream, StreamState.StreamRevision(0), TestContext.Current.CancellationToken);
 
         // Assert
         (await sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldBeNull();

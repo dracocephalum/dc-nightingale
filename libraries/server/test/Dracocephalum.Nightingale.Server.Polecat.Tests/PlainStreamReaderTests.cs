@@ -30,7 +30,7 @@ public sealed class PlainStreamReaderTests
     public PlainStreamReaderTests()
     {
         var options = new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("events", _root).Options;
-        _sut = new PlainStreamReader(() => new EventsDbContext(options, Schema), Tenant, NullLogger.Instance);
+        _sut = new PlainStreamReader(() => new EventsDbContext(options, Schema), Tenant, partitionedByTenant: false, NullLogger.Instance);
         using var context = new Seeding(_root);
         for (var revision = 0; revision < 6; revision++)
         {
@@ -162,6 +162,57 @@ public sealed class PlainStreamReaderTests
         // Assert
         page.ShouldNotBeNull().Head.ShouldBe(new StreamHead(0, 1));
         page.Events.Select(record => record.Type).ShouldBe([StreamNames.MetadataEventType, StreamNames.MetadataEventType]);
+    }
+
+    [Fact]
+    public async Task ReadAsync_WhileAResetMarkIsBeyondTheLastRevision_ShouldReadAsNotFound()
+    {
+        // Arrange: reset at revision 5, stored as the negative of 6; nothing appended since.
+        await SetMetadataAsync("""{"$tb":-6}""");
+
+        // Act
+        var forwards = await _sut.ReadAsync(Stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken);
+        var backwards = await _sut.ReadAsync(Stream, Direction.Backwards, null, 10, TestContext.Current.CancellationToken);
+        var stored = await _sut.ReadAsStoredAsync(Stream, 0, 10, TestContext.Current.CancellationToken);
+
+        // Assert: the router still gets what is stored.
+        forwards.ShouldBeNull();
+        backwards.ShouldBeNull();
+        stored.ShouldNotBeNull().Events.Count.ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task ReadAsync_OnceAnAppendReachesTheResetMark_ShouldReadFromTheMarkOn()
+    {
+        // Arrange: reset at revision 3, stored as the negative of 4; revisions 4 and 5 came after.
+        await SetMetadataAsync("""{"$tb":-4}""");
+
+        // Act
+        var page = await _sut.ReadAsync(Stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken);
+
+        // Assert
+        page.ShouldNotBeNull().Head.ShouldBe(new StreamHead(4, 5));
+        page.Events.Select(record => record.Revision).ShouldBe([4, 5]);
+    }
+
+    [Fact]
+    public async Task ReadMetadataStateAsync_ShouldTellAResetFromATruncationByTheStreamsLastRevision()
+    {
+        // Arrange
+        await SetMetadataAsync("""{"$maxCount":3}""", """{"$tb":-6}""");
+
+        // Act
+        var reset = await _sut.ReadMetadataStateAsync(Stream, TestContext.Current.CancellationToken);
+        var none = await _sut.ReadMetadataStateAsync("orders-404", TestContext.Current.CancellationToken);
+
+        // Assert
+        reset.ShouldSatisfyAllConditions(
+            state => state.StreamLast.ShouldBe(5),
+            state => state.MetadataRevision.ShouldBe(1),
+            state => state.ContinuesFrom.ShouldBe(6),
+            state => state.IsReset.ShouldBeTrue());
+        none.ShouldBe(new PlainStreamReader.MetadataState(-1, false, -1, StreamMetadata.Empty));
+        none.IsReset.ShouldBeFalse();
     }
 
     [Fact]

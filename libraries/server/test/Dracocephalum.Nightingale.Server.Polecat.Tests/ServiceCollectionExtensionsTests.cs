@@ -38,7 +38,7 @@ public sealed class ServiceCollectionExtensionsTests
             ("Nightingale:TailPollingInterval", "00:00:00.250"),
             ("Nightingale:Store:Collation", "Latin1_General_100_BIN2"),
             ("Nightingale:Store:Partitioning", "ArchivedStream"),
-            ("Nightingale:Deletion:AllowTombstone", "true"));
+            ("Nightingale:Deletion:Allowed", "Archive"));
         var services = new ServiceCollection();
 
         // Act
@@ -56,8 +56,7 @@ public sealed class ServiceCollectionExtensionsTests
             bound => bound.TailPollingInterval.ShouldBe(TimeSpan.FromMilliseconds(250)),
             bound => bound.Store.Collation.ShouldBe("Latin1_General_100_BIN2"),
             bound => bound.Store.Partitioning.ShouldBe(PartitioningMode.ArchivedStream),
-            bound => bound.Deletion.AllowDelete.ShouldBeFalse(),
-            bound => bound.Deletion.AllowTombstone.ShouldBeTrue());
+            bound => bound.Deletion.Allowed.ShouldBe(DeletionLevel.Archive));
         provider.GetRequiredService<NightingaleOptionsBase>().ShouldBeSameAs(options);
         provider.GetRequiredService<IStreamStore>().ShouldBeOfType<PolecatStreamStore>();
     }
@@ -76,6 +75,21 @@ public sealed class ServiceCollectionExtensionsTests
 
         // Assert
         exception.Message.ShouldContain("Sideways");
+    }
+
+    [Theory]
+    [InlineData("Everything")]
+    [InlineData("7")]
+    public void AddNightingalePolecat_WhenTheDeletionLevelIsNotANamedOne_ShouldRefuseAtRegistration(string level)
+    {
+        // Arrange: a number binds unchecked, and one above the highest level would allow everything.
+        var configuration = Configuration(
+            ("ConnectionStrings:Nightingale", ConnectionString),
+            ("Nightingale:Deletion:Allowed", level));
+        var services = new ServiceCollection();
+
+        // Act & Assert
+        Should.Throw<InvalidOperationException>(() => services.AddNightingalePolecat(configuration)).Message.ShouldContain(level);
     }
 
     [Fact]

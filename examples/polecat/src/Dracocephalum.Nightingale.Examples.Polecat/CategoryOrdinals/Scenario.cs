@@ -2,6 +2,7 @@ using System.Text;
 
 using Dracocephalum.Nightingale.Client;
 using Dracocephalum.Nightingale.Examples.Polecat.Common;
+using Dracocephalum.Nightingale.Server;
 
 namespace Dracocephalum.Nightingale.Examples.Polecat.CategoryOrdinals;
 
@@ -51,7 +52,7 @@ public static class Scenario
         var tenant = await run.CreateTenantAsync("category-ordinals", cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync($"1. Created the tenant {tenant.Name} for this scenario; its ordinals are numbered within it, from 0.").ConfigureAwait(false);
 
-        await using var server = await run.StartServerAsync(cancellationToken, options => options.Deletion.AllowDelete = true).ConfigureAwait(false);
+        await using var server = await run.StartServerAsync(cancellationToken, options => options.Deletion.Allowed = DeletionLevel.Archive).ConfigureAwait(false);
         await output.WriteLineAsync($"2. Started a server at {server.Address} with deletion allowed for step 7, over the run's store, which was initialized with ordinals.").ConfigureAwait(false);
 
         await using var connection = server.Connect(tenant);
@@ -73,7 +74,7 @@ public static class Scenario
         var confirmed = await subscription.Confirmed.ConfigureAwait(false);
         await output.WriteLineAsync($"6. Subscribed to {Category} by ordinal from the end: confirmed at ordinal {confirmed.Head}.").ConfigureAwait(false);
 
-        await client.DeleteStreamAsync("orders-1", StreamState.Any, cancellationToken).ConfigureAwait(false);
+        await client.ArchiveStreamAsync("orders-1", StreamState.Any, cancellationToken).ConfigureAwait(false);
         await client.AppendToStreamAsync("orders-3", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync("7. Deleted orders-1, whose two events held ordinals 0 and 1, then appended to orders-3.").ConfigureAwait(false);
 

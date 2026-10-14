@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 namespace Dracocephalum.Nightingale.Server.Polecat.Data;
 
 /// <summary>
-/// A read-only mirror of three tables the store owns: its events, with the columns the gateway
-/// adds to them, its streams, and the row its high-water mark is kept in. The store creates and
+/// A read-only mirror of the tables the store owns: its events, with the columns the gateway
+/// adds to them, its streams, the row its high-water mark is kept in, and, partitioned by tenant,
+/// the registry of each tenant's partition key. The store creates and
 /// migrates them; this context only reads, and refuses to save, so the gateway's reads of a
 /// stream, by category, by event type and by position are LINQ a unit test can run on the
 /// in-memory provider. The column
@@ -21,6 +22,9 @@ internal class EventsDbContext : DbContext, ISchemaScoped
 {
     /// <summary>The name of the progression row that holds the high-water mark.</summary>
     public const string HighWaterMark = "HighWaterMark";
+
+    /// <summary>The store's partitioning column on a store partitioned by tenant: the tenant's partition key, which the store calls an ordinal and the gateway does not.</summary>
+    public const string TenantPartitionColumn = "tenant_ordinal";
 
     /// <summary>Initializes a new instance of the <see cref="EventsDbContext"/> class over the main connection.</summary>
     /// <param name="options">The options, which name the provider and the connection.</param>
@@ -45,6 +49,9 @@ internal class EventsDbContext : DbContext, ISchemaScoped
 
     /// <summary>Gets the streams.</summary>
     public DbSet<StreamRow> StreamRows => Set<StreamRow>();
+
+    /// <summary>Gets the tenants' partition keys, on a store partitioned by tenant only.</summary>
+    public DbSet<TenantPartitionRow> TenantPartitionRows => Set<TenantPartitionRow>();
 
     /// <summary>Gets the progression rows; the high-water mark is one of them.</summary>
     public DbSet<ProgressionRow> ProgressionRows => Set<ProgressionRow>();
@@ -92,6 +99,10 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             row.Property(e => e.Category).HasColumnName("category").HasColumnType("varchar(250)");
             row.Property(e => e.CategoryOrdinal).HasColumnName(PatchedEventStoreFeature.CategoryOrdinalColumn).HasColumnType("bigint");
             row.Property(e => e.TypeOrdinal).HasColumnName(PatchedEventStoreFeature.TypeOrdinalColumn).HasColumnType("bigint");
+
+            // Only on a store partitioned by tenant, like the ordinals on one without them; a
+            // query names it only there.
+            row.Property(e => e.PartitionKey).HasColumnName(TenantPartitionColumn).HasColumnType("int");
         });
 
         modelBuilder.Entity<StreamRow>(row =>
@@ -106,6 +117,16 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             row.Property(s => s.Version).HasColumnName("version").HasColumnType("bigint");
             row.Property(s => s.IsArchived).HasColumnName("is_archived").HasColumnType("bit");
             row.Property(s => s.CompactedVersion).HasColumnName("compacted_version").HasColumnType("bigint");
+            row.Property(s => s.PartitionKey).HasColumnName(TenantPartitionColumn).HasColumnType("int");
+        });
+
+        // The registry of a store partitioned by tenant, which exists only there.
+        modelBuilder.Entity<TenantPartitionRow>(row =>
+        {
+            row.ToTable("pc_tenant_partitions");
+            row.HasKey(p => p.TenantId);
+            row.Property(p => p.TenantId).HasColumnName("tenant_id").HasColumnType("varchar(200)");
+            row.Property(p => p.PartitionKey).HasColumnName("ordinal").HasColumnType("int");
         });
 
         modelBuilder.Entity<ProgressionRow>(row =>

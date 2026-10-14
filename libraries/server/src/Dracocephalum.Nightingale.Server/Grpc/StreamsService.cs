@@ -19,7 +19,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// <param name="stores">The backend's stores and tails, one per tenant; a call resolves those of the tenant it was authorized for.</param>
 /// <param name="routers">The routers a subscription to a plain stream takes its live events through, one per tenant.</param>
 /// <param name="timeProvider">The clock the progress notes are stamped with.</param>
-/// <param name="options">The common settings: which deletions the host allows.</param>
+/// <param name="options">The common settings: how far the host lets a stream be taken away.</param>
 public sealed class StreamsService(ITenantStores stores, StreamRouters routers, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
 {
     /// <summary>The longest stream name the store column holds.</summary>
@@ -241,6 +241,36 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
     }
 
     /// <inheritdoc/>
+    public override async Task<ResetResponse> Reset(ResetRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // A write of metadata, authorized as a set of it is: it hides, removes nothing, and is
+        // undone by setting the metadata, so no deletion level stands in its way.
+        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false));
+        var stream = RequirePlainStreamName(request.Stream);
+        var result = await RunDeletionAsync(stream, () => store.ResetAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
+        return new ResetResponse { Revision = result.Revision, Position = result.Position };
+    }
+
+    /// <inheritdoc/>
+    public override async Task<ArchiveResponse> Archive(ArchiveRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+
+        var stream = RequirePlainStreamName(request.Stream);
+        RequireDeletionLevel(stream, DeletionLevel.Archive);
+        return await RunDeletionAsync(stream, async () =>
+        {
+            await store.ArchiveAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken).ConfigureAwait(false);
+            return new ArchiveResponse();
+        }).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
     public override async Task<DeleteResponse> Delete(DeleteRequest request, ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -248,30 +278,12 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
 
         var stream = RequirePlainStreamName(request.Stream);
-        if (!options.Deletion.AllowDelete)
+        RequireDeletionLevel(stream, DeletionLevel.Delete);
+        return await RunDeletionAsync(stream, async () =>
         {
-            throw NightingaleErrors.DeletionDisabled(stream, "Delete");
-        }
-
-        await RunDeletionAsync(stream, () => store.DeleteAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
-        return new DeleteResponse();
-    }
-
-    /// <inheritdoc/>
-    public override async Task<TombstoneResponse> Tombstone(TombstoneRequest request, ServerCallContext context)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(context);
-        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
-
-        var stream = RequirePlainStreamName(request.Stream);
-        if (!options.Deletion.AllowTombstone)
-        {
-            throw NightingaleErrors.DeletionDisabled(stream, "Tombstone");
-        }
-
-        await RunDeletionAsync(stream, () => store.TombstoneAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken)).ConfigureAwait(false);
-        return new TombstoneResponse();
+            await store.DeleteAsync(stream, ToStreamState(request.ExpectedRevision), context.CancellationToken).ConfigureAwait(false);
+            return new DeleteResponse();
+        }).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -283,7 +295,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
         var stream = RequireMetadataStreamName(request.Stream);
         var result = await store.GetStreamMetadataAsync(stream, context.CancellationToken).ConfigureAwait(false);
-        return new GetStreamMetadataResponse { Revision = result.Revision, Metadata = result.Metadata.ToWire() };
+        return new GetStreamMetadataResponse { Revision = result.Revision, Metadata = result.Metadata.ToWire(), Reset = result.Reset };
     }
 
     /// <inheritdoc/>
@@ -333,11 +345,21 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         }
     }
 
-    private static async Task RunDeletionAsync(string stream, Func<Task> operation)
+    /// <summary>Refuses an operation the host's deletion level does not reach; each level allows what the levels below it allow.</summary>
+    private void RequireDeletionLevel(string stream, DeletionLevel operation)
+    {
+        if (options.Deletion.Allowed < operation)
+        {
+            throw NightingaleErrors.DeletionDisabled(stream, operation, options.Deletion.Allowed);
+        }
+    }
+
+    /// <summary>Runs a reset, an archive or a delete, translating the store's refusals into the contract's errors.</summary>
+    private static async Task<T> RunDeletionAsync<T>(string stream, Func<Task<T>> operation)
     {
         try
         {
-            await operation().ConfigureAwait(false);
+            return await operation().ConfigureAwait(false);
         }
         catch (StreamNotFoundException)
         {
