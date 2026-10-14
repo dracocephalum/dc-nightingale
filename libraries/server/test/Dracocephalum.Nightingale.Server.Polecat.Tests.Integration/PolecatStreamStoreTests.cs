@@ -1,6 +1,8 @@
+using System.Data;
 using System.Text;
 using System.Text.Json.Nodes;
 
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
@@ -274,6 +276,56 @@ public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)
 
         // Act & Assert
         await Should.NotThrowAsync(() => databases[0].AssertDatabaseMatchesConfigurationAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SaveChanges_ShouldRunATransactionParticipantAfterTheEventsItAppendsAndInTheirTransaction()
+    {
+        // Arrange: binary data is written beside the JSON by a participant in the append's own
+        // transaction, which finds the rows the append inserted and refuses when it finds fewer.
+        // The store promises a participant runs after all of its own statements and before the
+        // commit; a release that ran it before would leave the first stream unwritten, and one
+        // that committed apart would keep the second stream's event without its binary data. The
+        // store's queued commands are not the seam: they bind every value as text, never bytes.
+        var store = database.Services.GetRequiredService<global::Polecat.IDocumentStore>();
+        var written = NewStream();
+        var refused = NewStream();
+        byte[] binary = [0x00, 0xFF, 0x10, 0x80];
+
+        // Act
+        await using (var session = store.LightweightSession())
+        {
+            session.Events.StartStream(written, JsonEvent.From(Placed("order_placed")));
+            session.AddTransactionParticipant(new BinaryDataSetter(written, binary));
+            await session.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using (var session = store.LightweightSession())
+        {
+            session.Events.StartStream(refused, JsonEvent.From(Placed("order_placed")));
+            session.AddTransactionParticipant(new BinaryDataSetter(NewStream(), binary));
+            await Should.ThrowAsync<SqlException>(() => session.SaveChangesAsync(TestContext.Current.CancellationToken));
+        }
+
+        // Assert: both columns on the one row, and nothing at all of the refused append.
+        (await TestDatabases.ScalarAsync<byte[]>(database.Name, $"SELECT bdata FROM dbo.pc_events WHERE stream_id = '{written}'")).ShouldBe(binary);
+        JsonNode.DeepEquals(
+            JsonNode.Parse(await TestDatabases.ScalarAsync<string>(database.Name, $"SELECT CAST(data AS nvarchar(max)) FROM dbo.pc_events WHERE stream_id = '{written}'")),
+            JsonNode.Parse(PlacedBody)).ShouldBeTrue();
+        (await TestDatabases.ScalarAsync<int>(database.Name, $"SELECT COUNT(*) FROM dbo.pc_events WHERE stream_id = '{refused}'")).ShouldBe(0);
+        (await TestDatabases.ScalarAsync<int>(database.Name, $"SELECT COUNT(*) FROM dbo.pc_streams WHERE id = '{refused}'")).ShouldBe(0);
+    }
+
+    /// <summary>Sets the binary data of a stream's first event, and refuses unless it finds that event.</summary>
+    private sealed class BinaryDataSetter(string stream, byte[] binary) : global::Polecat.ITransactionParticipant
+    {
+        public async Task BeforeCommitAsync(SqlConnection connection, SqlTransaction transaction, CancellationToken token)
+        {
+            await using var command = new SqlCommand("UPDATE dbo.pc_events SET bdata = @bdata WHERE stream_id = @stream AND version = 1; IF @@ROWCOUNT <> 1 THROW 50000, 'The appended row was not found.', 1;", connection, transaction);
+            command.Parameters.Add("@bdata", SqlDbType.VarBinary, -1).Value = binary;
+            command.Parameters.Add("@stream", SqlDbType.VarChar, 250).Value = stream;
+            await command.ExecuteNonQueryAsync(token);
+        }
     }
 
     private static List<EventData> Many(int count) => Enumerable.Range(0, count).Select(_ => Paid("order_paid")).ToList();
