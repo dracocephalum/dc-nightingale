@@ -143,7 +143,10 @@ parity comes first, in the order the client exposes it:
    `$category-`, by position, and by ordinal through links the sequencer
    writes: done. The `Stop` action of a group's nack is a
    variance, mapped by the adapter under *Group nacks* below.
-4. **Multi-stream and conditional appends** (below), the client's newest.
+4. **Multi-stream and conditional appends**: done, as `AppendToStreams`,
+   the reference's append session and its consistency checks on streams
+   not written in one call; what is left of them is under *Multi-stream and
+   conditional appends* below, and the mapping under *Multi-stream appends*.
 
 Parity is not bought with the core's speed. The gateway is not a clone, and
 some of the reference's behaviour is there for its history or its single
@@ -241,15 +244,26 @@ here is re-derived:
   in it, which a reference client sees too (`VARIANCES.md`). Their numbers
   are the link revisions a reference client counts on a store with
   ordinals, and positions on one without, the same variance as `$ce-` there.
+- **Multi-stream appends.** The v2 `AppendSession` maps onto
+  `AppendToStreams` one stream a request, reporting the first conflict of
+  the list as the reference does, and `STREAM_ALREADY_IN_APPEND_SESSION` for
+  a stream named twice. `AppendRecords` maps by grouping its records per
+  stream, in the order the streams first appear, each stream expecting any
+  revision; a check on a stream written becomes its expected state, any
+  other a check, and every violation is reported by its check's index. A
+  record's typed properties become the event's JSON metadata, and a record
+  of `$$<stream>` a metadata set, parsed as the reference's metadata. The
+  reference's deleted and tombstoned check states map onto a reset and a
+  deleted stream; its byte limits on a record and a transaction have no
+  counterpart beside the event count.
 - **Group nacks.** The reference client's `Stop` is served as the consumer
   leaving: its call ends, and its events in flight go back to the group,
   not counted as a retry. The reference server skips them instead
   (`VARIANCES.md`, *A group's nack has no Stop*).
 - **Not carried, answered `Unimplemented` until the core has them:**
-  multi-stream append, projections, operations
-  such as scavenge, and user management beyond what the credentials table
-  covers. The client refuses what the feature table does not advertise rather
-  than degrading.
+  projections, operations such as scavenge, and user management beyond what
+  the credentials table covers. The client refuses what the feature table
+  does not advertise rather than degrading.
 - **Tenancy.** The KurrentDB client knows no tenant: a host binds the adapter
   to one tenant, or the credential carries it, which the gateway already
   does: a credential bound to a tenant that names none works in its own.
@@ -403,14 +417,33 @@ re-derived:
 
 ## Multi-stream and conditional appends
 
-The reference protocol's second version has two: an append session, several streams written
-atomically each with its own expected revision, and an append with consistency
-checks on streams that are not written. Both map onto the store directly: one
-session with several appends is already one transaction, and a stream-state
-check is the store's version assertion without an append. The store's own
-consistency model is richer still, tag-based conditions of the form "no event
-matching this query since sequence N", and can be exposed once the single-stream
-contract is stable.
+`AppendToStreams` carries both of the reference's: the append session,
+several streams each under its own expected revision, and the consistency
+checks on streams not written. What is left of them:
+
+- **Records in one order across streams.** The reference's `AppendRecords`
+  keeps the order the records were given in, a1, b1, a2; the store positions
+  a commit stream by stream (`VARIANCES.md`). Only a reader of several
+  streams at once sees the difference, `$all`, a correlation or a category,
+  within one commit. Not without the store writing a commit's events in the
+  order given, which no public seam offers.
+- **A reset inside an append to several streams.** Refused: the mark it
+  writes is the stream's last revision plus one, and in the same commit that
+  revision includes the commit's own events, which exist only inside the
+  store's write. A participant reading the stream's version under a lock
+  after the store's inserts could compute it; one more statement the gateway
+  writes itself, so not until someone needs it.
+- **Deleted and tombstoned as check states.** The reference's checks can
+  assert a stream is deleted or tombstoned; the gateway's assert a revision,
+  no stream or that it exists. The adapter maps the two onto a reset and a
+  deleted stream when it comes.
+- **A total beside the per-append limit.** The store writes each stream of a
+  commit as its own command, so the parameter limit binds one stream's
+  events; the total is held to the same count only so that a request held in
+  full stays bounded. One of the tunables in `TODO.md`.
+- **The store's own conditions.** Tag-based, of the form "no event matching
+  this query since position N", richer than a stream's state; the
+  reference's query check is unimplemented too. Once someone needs them.
 
 ## Database per tenant
 

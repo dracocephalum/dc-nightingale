@@ -113,6 +113,27 @@ the store to the order the participant relies on: the participant finds the
 row the append inserted, and a participant that refuses leaves nothing of the
 append behind.
 
+An append to several streams is the store's too: one session holding every
+stream's append, each under its own expected state, which the store writes
+in one transaction and positions stream by stream, in the order given,
+writing each stream as a command of its own, so the parameter limit binds a
+stream's events and not the total. What it adds is checks on streams the
+append does not write, and those are a second participant,
+`StreamStateChecker`: one statement reading the checked streams' rows under
+an update lock held to the commit, a range lock where a stream has no row,
+so no append to a checked stream, and no stream begun under a checked name,
+can commit between the check and the append's commit. The store has a check
+of a stream without events of its own, but it reads without a lock, which an
+append landing in between would pass. Only an append with checks has the
+participant. When the store refuses, the gateway reads every stream named
+again, in one statement through the mirror, and reports every condition that
+failed rather than the first the store met, the failure path paying for
+what the success path never does. A metadata set in such an append is
+decided as a set of it alone is, on its metadata stream as read just before,
+and written as its events under that stream's expected revision; a reset is
+not a set there, since the value it writes depends on its stream's last
+revision, which in the same commit would include the commit's own events.
+
 ### 2. The schema is patched, not replaced
 
 Category, event-type and correlation streams (`$ce-orders`,

@@ -12,8 +12,9 @@ What an application uses to talk to a Nightingale server.
 ## What it does
 
 The client-side package: `NightingaleClient` over the generated stub, with
-append, bounded reads of a plain stream, of its metadata stream
-(`$$<stream>`), of `$all` and of the virtual streams (`$ce-<category>`,
+append, to one stream or to several in one commit with checks on streams
+not written, every failed condition reported at once, bounded reads of a
+plain stream, of its metadata stream (`$$<stream>`), of `$all` and of the virtual streams (`$ce-<category>`,
 `$et-<event type>`, `$bc-<correlation id>`, `$streams`, `$category-<category>`,
 `$de`, `$mde`), `$all` filtered by stream-name prefix, regular expression or
 whole category, or by event-type prefix, regular expression or exact type, and
