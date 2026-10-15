@@ -33,6 +33,14 @@ public sealed class PolecatTenantTailsTests : IAsyncDisposable
     public ValueTask DisposeAsync() => _sut.DisposeAsync();
 
     [Fact]
+    public void StaleAfter_ShouldBeTheStoresOwnThreshold()
+    {
+        // Act & Assert: the poller gives a gap up as the store's agent does, so a version of the
+        // store that moves its default moves the poller's, and this fails until it is followed.
+        PolecatTenantTails.StaleAfter.ShouldBe(new global::Polecat.StoreOptions().DaemonSettings.StaleSequenceThreshold);
+    }
+
+    [Fact]
     public async Task Look_ShouldFollowEachTenantsOwnPrefixAndLetAGapHoldThatTenantAlone()
     {
         // Arrange: tenant a has a gap at 4; tenant b has none, and its positions are its own.
