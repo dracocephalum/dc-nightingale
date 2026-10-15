@@ -124,6 +124,12 @@
     <PackageVersion Include="Grpc.Net.Client" Version="2.83.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.83.0" />
     <PackageVersion Include="Polecat" Version="5.29.0" />
+    <!-- An override, not a choice: Microsoft.Data.SqlClient, which the store and EF Core's
+         SQL Server provider both bring, asks for an affected version even at its latest, 7.1.1, and every
+         version to 9.0.20 and 10.0.12 is affected by CVE-2026-70162 and CVE-2026-84008.
+         Referenced directly by the backend, which every project above it inherits. Remove it,
+         and the reference, once SqlClient asks for a fixed version (docs/rules/store-upgrades.md). -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <!-- google.rpc.Status details (ErrorInfo) on failed calls; the server builds them, the client reads them. -->
     <PackageVersion Include="Grpc.StatusProto" Version="2.83.0" />
     <PackageVersion Include="Google.Api.CommonProtos" Version="2.17.0" />

@@ -12,6 +12,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
     <!-- Design time only: what `dotnet ef migrations add` needs to generate a migration. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <!-- Overrides the affected version Microsoft.Data.SqlClient asks for; Directory.Packages.props says why and when it goes. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
   </ItemGroup>
 
   <ItemGroup>
