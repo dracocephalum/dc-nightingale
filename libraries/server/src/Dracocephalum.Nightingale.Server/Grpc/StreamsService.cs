@@ -188,28 +188,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                 throw NightingaleErrors.AppendSizeExceeded(stream, options.MaxEventsPerAppend);
             }
 
-            var proposed = requestStream.Current.Event;
-            if (string.IsNullOrEmpty(proposed.EventType))
-            {
-                throw NightingaleErrors.InvalidArgument("Every event needs a type.");
-            }
-
-            EventData eventData;
-            try
-            {
-                eventData = proposed.ToEventData();
-            }
-            catch (FormatException)
-            {
-                throw NightingaleErrors.InvalidArgument("An event id is a UUID in its canonical form.");
-            }
-            catch (System.Text.Json.JsonException)
-            {
-                throw NightingaleErrors.InvalidArgument("Event metadata is a JSON object.");
-            }
-
-            CheckBodies(eventData);
-            events.Add(eventData);
+            events.Add(ToCheckedEventData(requestStream.Current.Event));
         }
 
         if (events.Count == 0)
@@ -239,6 +218,103 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         catch (ValueTooLongException tooLong) when (tooLong.What == ValueTooLongException.StreamName)
         {
             throw NightingaleErrors.InvalidStreamName(stream, "it is longer than the store holds");
+        }
+        catch (ValueTooLongException tooLong)
+        {
+            throw NightingaleErrors.InvalidArgument(tooLong.Message);
+        }
+    }
+
+    /// <inheritdoc/>
+    public override async Task<AppendToStreamsResponse> AppendToStreams(IAsyncStreamReader<AppendToStreamsRequest> requestStream, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(requestStream);
+        ArgumentNullException.ThrowIfNull(context);
+        var store = stores.GetStreams(await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false));
+
+        // The parts as they arrive: a header opens a stream's events, which run until the next
+        // part that is not an event. Held in full until stored, so the count is refused at the
+        // first event too many, before the rest is received.
+        var appends = new List<StreamAppend>();
+        var checks = new List<StreamCheck>();
+        (string Stream, StreamState Expected, List<EventData> Events)? open = null;
+        var eventCount = 0;
+        void Close()
+        {
+            if (open is { } stream)
+            {
+                appends.Add(new StreamAppend.OfEvents(stream.Stream, stream.Expected, stream.Events));
+                open = null;
+            }
+        }
+
+        while (await requestStream.MoveNext(context.CancellationToken).ConfigureAwait(false))
+        {
+            var part = requestStream.Current;
+            switch (part.ContentCase)
+            {
+                case AppendToStreamsRequest.ContentOneofCase.Stream:
+                    Close();
+                    open = (RequirePlainStreamName(part.Stream.Stream), ToStreamState(part.Stream.ExpectedRevision), []);
+                    break;
+                case AppendToStreamsRequest.ContentOneofCase.Event when open is { } stream:
+                    if (eventCount == options.MaxEventsPerAppend)
+                    {
+                        throw NightingaleErrors.AppendSizeExceeded(stream.Stream, options.MaxEventsPerAppend);
+                    }
+
+                    stream.Events.Add(ToCheckedEventData(part.Event));
+                    eventCount++;
+                    break;
+                case AppendToStreamsRequest.ContentOneofCase.Event:
+                    throw NightingaleErrors.InvalidArgument("An event of an append to several streams follows the header of its stream.");
+                case AppendToStreamsRequest.ContentOneofCase.Metadata:
+                    Close();
+                    appends.Add(new StreamAppend.OfMetadata(RequireMetadataStreamName(part.Metadata.Stream), ToStreamState(part.Metadata.ExpectedRevision), ToStreamMetadata(part.Metadata.Metadata)));
+                    break;
+                case AppendToStreamsRequest.ContentOneofCase.Check:
+                    Close();
+                    if (checks.Count == options.MaxEventsPerAppend)
+                    {
+                        throw NightingaleErrors.InvalidArgument($"An append to several streams carries at most {options.MaxEventsPerAppend} checks.");
+                    }
+
+                    checks.Add(new StreamCheck(RequirePlainStreamName(part.Check.Stream), ToStreamState(part.Check.ExpectedRevision)));
+                    break;
+                default:
+                    throw NightingaleErrors.InvalidArgument("Every message of an append to several streams carries a stream's header, an event, a metadata set or a check.");
+            }
+        }
+
+        Close();
+        var problems = StreamAppends.FindProblems(appends, checks);
+        if (problems.Count > 0)
+        {
+            throw NightingaleErrors.InvalidArgument(string.Join(" ", problems));
+        }
+
+        try
+        {
+            var results = await store.AppendToStreamsAsync(appends, checks, context.CancellationToken).ConfigureAwait(false);
+            var response = new AppendToStreamsResponse();
+            response.Appended.AddRange(results.Select(result => new AppendedStream { Stream = result.Stream, Revision = result.Revision, Position = result.Position }));
+            return response;
+        }
+        catch (StreamConflictsException conflicts)
+        {
+            throw NightingaleErrors.StreamConflicts(conflicts);
+        }
+        catch (StreamDeletedException deleted)
+        {
+            throw NightingaleErrors.StreamDeleted(deleted.Stream);
+        }
+        catch (AppendSizeExceededException exceeded)
+        {
+            throw NightingaleErrors.AppendSizeExceeded(exceeded.Stream, options.MaxEventsPerAppend);
+        }
+        catch (ValueTooLongException tooLong) when (tooLong.What == ValueTooLongException.StreamName)
+        {
+            throw NightingaleErrors.InvalidArgument("A stream name is longer than the store holds.");
         }
         catch (ValueTooLongException tooLong)
         {
@@ -378,6 +454,45 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         catch (RevisionConflictException conflict)
         {
             throw NightingaleErrors.RevisionConflict(conflict);
+        }
+    }
+
+    /// <summary>An event as proposed, read and checked: a type, an id in its canonical form, metadata that is a JSON object, and bodies as <see cref="CheckBodies"/> has them.</summary>
+    private static EventData ToCheckedEventData(ProposedEvent proposed)
+    {
+        if (string.IsNullOrEmpty(proposed.EventType))
+        {
+            throw NightingaleErrors.InvalidArgument("Every event needs a type.");
+        }
+
+        EventData eventData;
+        try
+        {
+            eventData = proposed.ToEventData();
+        }
+        catch (FormatException)
+        {
+            throw NightingaleErrors.InvalidArgument("An event id is a UUID in its canonical form.");
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw NightingaleErrors.InvalidArgument("Event metadata is a JSON object.");
+        }
+
+        CheckBodies(eventData);
+        return eventData;
+    }
+
+    /// <summary>Stream metadata as sent, read; its settings are checked with the rest of the request.</summary>
+    private static StreamMetadata ToStreamMetadata(Protocols.Grpc.V1.StreamMetadata metadata)
+    {
+        try
+        {
+            return metadata.ToStreamMetadata();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw NightingaleErrors.InvalidArgument("Custom stream metadata is a JSON object.");
         }
     }
 

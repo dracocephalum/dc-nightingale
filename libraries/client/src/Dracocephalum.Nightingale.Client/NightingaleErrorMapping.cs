@@ -20,7 +20,8 @@ internal static class NightingaleErrorMapping
     /// <returns>The exception to throw: a domain exception, an argument exception, or the original.</returns>
     public static Exception ToException(RpcException exception)
     {
-        var info = exception.GetRpcStatus()?.GetDetail<ErrorInfo>();
+        var status = exception.GetRpcStatus();
+        var info = status?.GetDetail<ErrorInfo>();
         if (info is null || info.Domain != ErrorReasons.Domain)
         {
             return exception;
@@ -29,6 +30,8 @@ internal static class NightingaleErrorMapping
         var stream = info.Metadata.TryGetValue("stream", out var name) ? name : string.Empty;
         return ErrorReasons.Parse(info.Reason) switch
         {
+            ErrorReason.StreamConflicts when status!.GetDetail<AppendConflicts>() is { Conflicts.Count: > 0 } conflicts => new StreamConflictsException(
+                conflicts.Conflicts.Select(conflict => new StreamConflict(conflict.Index, conflict.Stream, StreamState.FromInt64(conflict.ExpectedRevision), conflict.ActualRevision)).ToList()),
             ErrorReason.RevisionConflict => new RevisionConflictException(
                 stream,
                 StreamState.FromInt64(GetNumber(info, "expected", (long)ExpectedRevision.Any)),

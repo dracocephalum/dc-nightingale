@@ -149,6 +149,33 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         theirListing.Select(record => record.Stream).ShouldBe(["payments-1"]);
     }
 
+    [Fact]
+    public async Task AppendToStreams_ShouldCheckAndReportEachTenantsOwnStreams()
+    {
+        // Arrange: the same names in two tenants; the ledger exists in the default tenant only.
+        var stores = Stores;
+        var acme = await CreateTenantAsync("acme");
+        var defaults = stores.GetStreams(TenantScope.Default);
+        var acmes = stores.GetStreams(acme);
+        await defaults.AppendAsync("ledger-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+
+        // Act: in acme the ledger has no events and orders-1 does not exist.
+        var refused = await Should.ThrowAsync<StreamConflictsException>(() => acmes.AppendToStreamsAsync(
+            [new StreamAppend.OfEvents("orders-1", StreamState.StreamRevision(0), [Event()])],
+            [new StreamCheck("ledger-1", StreamState.StreamExists)],
+            TestContext.Current.CancellationToken));
+        var written = await acmes.AppendToStreamsAsync(
+            [new StreamAppend.OfEvents("orders-1", StreamState.NoStream, [Event()])],
+            [new StreamCheck("ledger-1", StreamState.NoStream)],
+            TestContext.Current.CancellationToken);
+
+        // Assert: what the default tenant holds under those names is not acme's; the append and the
+        // check both fail there, and both are reported.
+        refused.Conflicts.ShouldBe([new StreamConflict(0, "orders-1", StreamState.StreamRevision(0), -1), new StreamConflict(1, "ledger-1", StreamState.StreamExists, -1)]);
+        written.ShouldHaveSingleItem().Revision.ShouldBe(0);
+    }
+
     private ITenantStores Stores => _host!.Services.GetRequiredService<ITenantStores>();
 
     private static EventData Correlated(string correlationId) =>
