@@ -43,6 +43,27 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
     }
 
     [Fact]
+    public async Task AppendToStreams_WithAsManyEventsInEachStreamAsOneAppendTakes_ShouldCommitThemAll()
+    {
+        // Arrange: two streams each as full as one append may be. The store writes each stream of
+        // a commit as a command of its own, so the database's limit on parameters binds a
+        // stream's events, not the commit's; a version that writes a commit as one command fails
+        // here, and the limit must then bind the total.
+        var sut = database.Store;
+        var (orders, payments) = (NewName("orders"), NewName("payments"));
+        List<EventData> Full() => Enumerable.Range(0, PolecatStreamStore.MaxEventsPerAppend).Select(_ => Event()).ToList();
+
+        // Act
+        var results = await sut.AppendToStreamsAsync(
+            [new StreamAppend.OfEvents(orders, StreamState.NoStream, Full()), new StreamAppend.OfEvents(payments, StreamState.NoStream, Full())],
+            [],
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        results.Select(result => result.Revision).ShouldBe([PolecatStreamStore.MaxEventsPerAppend - 1L, PolecatStreamStore.MaxEventsPerAppend - 1L]);
+    }
+
+    [Fact]
     public async Task AppendToStreams_WhenStreamsAreNotInTheirExpectedStates_ShouldWriteNothingAndReportEveryOneInOrder()
     {
         // Arrange: a stream at revision 1 expected at 0, one that exists expected not to, and one

@@ -19,7 +19,7 @@ exist.
 | `libraries/` | packages published to NuGet |
 | `examples/` | end-to-end sample programs that double as integration tests |
 | `agentics/` | the toolkit's — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/`; replaced whole by a sync, never edited in place |
-| `docs/rules/` | this repository's own rules, the day it has one — not present yet; `AGENTS.md` there is then their index, started from `agentics/templates/rules-AGENTS.md`, and the sync copies its rows into the table below |
+| `docs/rules/` | this repository's own rules; `AGENTS.md` there is their index, started from `agentics/templates/rules-AGENTS.md`, and the sync copies its rows into the table below |
 | `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync, a shim of the same name included |
 
 Build configuration lives **once, at the repository root** — `Directory.Build.props`,
@@ -61,6 +61,7 @@ makes it selectable from a plain-language request.
 | Understanding how the pieces fit, or why the code is shaped the way it is | `DESIGN.md` at the root — the seams and the reasons; type comments say what, it says why. Written the day a reader could not infer it; see *Root documents* in [`agentics/rules/layout.md`](agentics/rules/layout.md) |
 | Starting any source-control action, or asked what this repository's settings and defaults are | [`.agentics.yaml`](.agentics.yaml) — the mode the agent works in (`auto`, `local`, `manual`) and every choice made at initialization |
 | Leaving something unfinished, blocked, or undecided — or asked what is still open | [`TODO.md`](TODO.md) — add it there; a remark in a conversation is lost |
+| Upgrading the event store's packages: Polecat, Marten, and the JasperFx and Weasel packages they bring | [`docs/rules/store-upgrades.md`](docs/rules/store-upgrades.md) |
 
 The documents above are the substance, for every tool. In Claude Code some
 are also invocable through a shim in `.claude/skills/` -
