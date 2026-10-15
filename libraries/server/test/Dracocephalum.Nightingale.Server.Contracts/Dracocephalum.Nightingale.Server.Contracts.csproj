@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    What every backend must do, as abstract tests: a backend's integration project
+    derives a class from each contract and supplies its database, and the contract's
+    tests run there. A library, not a test project, so it carries the xunit attributes
+    without the runner and never runs on its own.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- Test names keep the Method_WhenCondition_ShouldResult convention, as in Tests.props. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.extensibility.core" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
+  </ItemGroup>
+
+</Project>

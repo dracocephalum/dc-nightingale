@@ -623,10 +623,18 @@ next ordinal of their keys, as the sequencer numbers a late row today, and
 moves on. A long transaction keeps the checkpoint pending; nothing is lost and
 nothing is kept per position. The horizon is one small query a database:
 
-- SQL Server: no transaction of this database whose first write began before
-  the marker, from `sys.dm_tran_database_transactions`; a position is taken by
-  the insert itself, so there is no moment a transaction holds one unseen. The
-  gateway's login needs `VIEW DATABASE STATE`.
+- SQL Server: the oldest transaction of this database still open that has
+  written, from `DBCC OPENTRAN`, began after the marker. The transaction views
+  would list every one, but from SQL Server 2022 they need
+  `VIEW SERVER PERFORMANCE STATE`, a permission on the whole server;
+  `DBCC OPENTRAN` needs `VIEW DATABASE STATE`, on the journal alone. The
+  store writes the stream's row before it takes a position, so no transaction
+  holds one unseen. The start is reported on the server's local clock and
+  read in UTC by the server's own time zone, which takes an hour that happens
+  twice as its earlier instant, against a marker on its UTC clock: a change of
+  daylight saving time can only make the horizon wait. Built:
+  `SqlServerTransactionHorizon`, with the port and the checkpoint in the
+  server's `Sequencing` namespace.
 - PostgreSQL: no session of this database that has written began its
   transaction before the marker, from `pg_stat_activity` (`backend_xid` set),
   and no prepared transaction older than it. Readers do not hold it back, nor

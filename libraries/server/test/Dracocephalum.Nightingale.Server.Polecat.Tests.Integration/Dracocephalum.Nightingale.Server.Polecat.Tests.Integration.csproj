@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />
+    <ProjectReference Include="../Dracocephalum.Nightingale.Server.Contracts/Dracocephalum.Nightingale.Server.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

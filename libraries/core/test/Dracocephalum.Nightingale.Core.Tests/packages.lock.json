@@ -509,14 +509,6 @@
           "xunit.v3.runner.inproc.console": "[4.0.1]"
         }
       },
-      "xunit.v3.extensibility.core": {
-        "type": "Transitive",
-        "resolved": "4.0.1",
-        "contentHash": "J0d5OfFcp920nZxCRIvU14+TZhiSPQR0wvqEMZ3MRiJLPu1VmYlcRNkmcSW0i1DwkB81gAHc+fHUQf/cU64MYg==",
-        "dependencies": {
-          "xunit.v3.common": "[4.0.1]"
-        }
-      },
       "xunit.v3.mtp-v2": {
         "type": "Transitive",
         "resolved": "4.0.1",
@@ -547,23 +539,7 @@
         }
       },
       "dracocephalum.nightingale.core": {
-        "type": "Project",
-        "dependencies": {
-          "Google.Protobuf": "[3.36.1, )",
-          "Grpc.Core.Api": "[2.83.0, )"
-        }
-      },
-      "Google.Protobuf": {
-        "type": "CentralTransitive",
-        "requested": "[3.36.1, )",
-        "resolved": "3.36.1",
-        "contentHash": "77AqPEoaY1ODE+syYBHti0jXiwQq0J/fUr/fRyYhNlc9oKtH5dZZEr/OLKtdKNVG83PRnCYB2r8B80ZrObzOGQ=="
-      },
-      "Grpc.Core.Api": {
-        "type": "CentralTransitive",
-        "requested": "[2.83.0, )",
-        "resolved": "2.83.0",
-        "contentHash": "xU8BT2bCw4Ct+/qIFJhhjkDEilKUbBOfp4US7l3Xa3hnlkN9l2LgISCbOw4PFYpW5jJFcK7FUAyWOFIQ94Hiqg=="
+        "type": "Project"
       },
       "Microsoft.Extensions.Hosting": {
         "type": "CentralTransitive",
@@ -593,6 +569,15 @@
           "Microsoft.Extensions.Logging.EventLog": "10.0.11",
           "Microsoft.Extensions.Logging.EventSource": "10.0.11",
           "Microsoft.Extensions.Options": "10.0.11"
+        }
+      },
+      "xunit.v3.extensibility.core": {
+        "type": "CentralTransitive",
+        "requested": "[4.0.1, )",
+        "resolved": "4.0.1",
+        "contentHash": "J0d5OfFcp920nZxCRIvU14+TZhiSPQR0wvqEMZ3MRiJLPu1VmYlcRNkmcSW0i1DwkB81gAHc+fHUQf/cU64MYg==",
+        "dependencies": {
+          "xunit.v3.common": "[4.0.1]"
         }
       }
     }

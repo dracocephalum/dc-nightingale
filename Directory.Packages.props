@@ -82,6 +82,9 @@
   -->
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <!-- The attributes and test context without the runner, for a library of
+         abstract tests that test projects derive from; the same release as xunit.v3. -->
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.1" />
     <PackageVersion Include="Xunit.Combinatorial" Version="2.1.41" />
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
 

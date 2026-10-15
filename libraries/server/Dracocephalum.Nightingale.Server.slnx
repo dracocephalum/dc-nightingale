@@ -4,6 +4,7 @@
     <Project Path="src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
   </Folder>
   <Folder Name="/test/">
+    <Project Path="test/Dracocephalum.Nightingale.Server.Contracts/Dracocephalum.Nightingale.Server.Contracts.csproj" />
     <Project Path="test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration.csproj" />
     <Project Path="test/Dracocephalum.Nightingale.Server.Polecat.Tests/Dracocephalum.Nightingale.Server.Polecat.Tests.csproj" />
     <Project Path="test/Dracocephalum.Nightingale.Server.Tests/Dracocephalum.Nightingale.Server.Tests.csproj" />

@@ -8,7 +8,7 @@ the default host.
 | Category | `libraries/` |
 | Kind | library, plus a service library |
 | Solution | `Dracocephalum.Nightingale.Server.slnx` |
-| Projects | `src/Dracocephalum.Nightingale.Server`, `src/Dracocephalum.Nightingale.Server.Polecat`, `test/Dracocephalum.Nightingale.Server.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration` |
+| Projects | `src/Dracocephalum.Nightingale.Server`, `src/Dracocephalum.Nightingale.Server.Polecat`, `test/Dracocephalum.Nightingale.Server.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration`, `test/Dracocephalum.Nightingale.Server.Contracts` |
 
 ## What it does
 
@@ -23,6 +23,14 @@ to the statuses the contract promises. A host calls two extension methods:
 `AddNightingaleServer()` to register the core and the transport, and
 `MapNightingaleServer()` to map. It has no entry point and no backend of its
 own.
+
+Its `Sequencing` namespace holds what every backend supplies or shares for
+its sequences, the transaction horizon first: the port a backend implements
+over its database, and the checkpoint the tail and the ordinal audit judge
+by it. `test/Dracocephalum.Nightingale.Server.Contracts` holds those ports'
+contracts as abstract tests, a library and not a test project: a backend's
+integration project derives a class from each and supplies its database,
+and the contract's tests run there.
 
 `Dracocephalum.Nightingale.Server.Polecat` is the backend over the Polecat
 event-sourcing framework and the default host: one project that packs as a
