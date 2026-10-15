@@ -508,7 +508,10 @@ index by type, tenant and position means no batch can link an event twice.
 Rows are never removed: a link whose event was archived or deleted is a
 hole the read skips, and the last ordinal of a key stays, so none is reused.
 A store whose events carry no correlation id holds two links a stream and
-nothing more.
+nothing more. The category's and the type's ordinals are to become links too,
+on both backends, with an audit settled by the database's transaction horizon
+in place of the index over the unnumbered rows (`PENDING.md`, *The ordinal
+audit*).
 
 `OrdinalSequencer` is the sequencer: one per cluster, on the same lease rows the
 persistent-subscription groups use, walking the events table behind the
