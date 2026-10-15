@@ -96,6 +96,7 @@ documents of the repository and not rules.
 
 | When you are | Read |
 |---|---|
+| Naming a concept, or unsure what a term means here | [`GLOSSARY.md`](GLOSSARY.md) — use its word; add a term there when a new one settles |
 | Making the API behave differently from the reference event store on purpose, or asked why it differs | [`VARIANCES.md`](VARIANCES.md) — record the difference and the reason there |
 | Deferring a product feature with its approach already decided | [`PENDING.md`](PENDING.md) — record it there; `TODO.md` is for what is owed soon |
 | Working around a limit of the store, or wanting something only its maintainers can change | [`UPSTREAM.md`](UPSTREAM.md) — record the request and the workaround there; it becomes a `TODO.md` entry only while it blocks |

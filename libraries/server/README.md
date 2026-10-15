@@ -35,6 +35,21 @@ when `Nightingale:SchemaMode` allows, creates or initializes it and records
 the settings that shaped it; a database that is not its own is refused.
 `DESIGN.md` at the repository root says why.
 
+## Database requirements
+
+What a store needs, by what the host uses. A tier adds to the ones above it;
+what the server can check, it checks at start-up and refuses with what is
+missing. The PostgreSQL column is the planned Marten backend's
+(`PENDING.md`, *Marten backend*).
+
+| Tier | SQL Server (Polecat) | PostgreSQL (Marten, planned) |
+|---|---|---|
+| **Core**: appends, reads and subscriptions, groups, metadata, appends to several streams, the virtual streams by position | SQL Server 2025 or later, for its native `json` type; a UTF-8 collation, `Latin1_General_100_BIN2_UTF8` by default; any edition, Express for development only | PostgreSQL 13 or later, Marten's own floor |
+| **Ordinals**: the virtual streams by number | nothing more under the default locking read committed; under read committed snapshot, as Azure SQL Database runs by default, or on a readable secondary, `VIEW DATABASE STATE` for the gateway's login (`PENDING.md`, *The ordinal audit*) | the gateway's role must see the sessions that write events: its own, or `pg_read_all_stats` when other roles write; a database-level `transaction_timeout` (17 or later) is recommended, not required |
+| **Read replicas** | an availability group with a readable secondary, an Enterprise feature, or Azure | a streaming replica |
+| **Partitioning** by tenant or by archived stream | table partitioning, in every edition since 2016 SP1 | declarative partitioning |
+| **Online index builds** (`PENDING.md`) | Enterprise, or Azure | `CREATE INDEX CONCURRENTLY` |
+
 ## Run it
 
     dotnet build Dracocephalum.Nightingale.Server.slnx --nologo -v:q

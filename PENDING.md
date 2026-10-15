@@ -585,17 +585,99 @@ value of `Nightingale:Store:Partitioning`, fixed at initialization and
 exclusive with the others, since a table has one partition scheme. Built when
 sizing demands it.
 
-## Ordinals on a store initialized without them
+## The ordinal audit
 
-Ordinal numbering of the virtual streams (`DESIGN.md`, seam 6) is a store
-setting fixed at initialization, and a store initialized without it refuses
-the setting. Adopting it later is a backfill: the migrate command adds the two
-columns and their indexes, then the sequencer numbers from position 0, which
-on a large store takes as long as one pass over the table and is done while
-the store is served, because a batch is atomic and a read under ordinal
-numbering sees only what is numbered. The setting's row is written once the columns exist, before the backfill
-completes, so the server knows the store has the feature and readers see the
-ordinals arrive.
+Dense numbers are what make the reference's virtual streams usable, and what
+a client of it counts on: a checkpoint, a count by subtraction, a page by
+number. The reference gets them from one writer appending to one log, whose
+order of positions is its order of commits; the gateway's stores have many
+writers taking positions from a sequence and committing in any order, so a
+lower position can appear after a higher one. The sequencer today finds what
+it has not numbered through an index over the rows whose ordinal is null, on
+SQL Server, which is exact however late a row arrives. It needs columns on the
+events table, and that is the part that does not travel: the Marten backend
+cannot add a column to a table whose migrations drop what they do not know,
+and on PostgreSQL every update of an event row writes the whole row again, in
+every index. So the ordinals move out of the events table on both backends,
+and an audit replaces the marker.
+
+Every ordinal becomes a link in `OrdinalLink`, the category's and the type's
+beside the correlation's and the listings', a type each. The sequencer numbers
+the range of positions from its progress to the high-water mark through the
+events table's own key, and every event gets one category link, so "is this
+event numbered" is "has it a category link". What the sequencer can miss is a
+row that commits late, below a range it has passed: where readers read past an
+open transaction (PostgreSQL always; SQL Server under read committed snapshot,
+as Azure SQL Database runs by default, or on a readable secondary), a slow
+append's row appears after the sequencer and the mark have moved on. Under SQL
+Server's default locking read committed it cannot: the sequencer's read waits
+on the open row.
+
+The audit settles each range once, by the database's own transaction horizon.
+It keeps a settled position and one pending checkpoint: a position the
+sequencer has passed, when it passed it, and a marker of the horizon then. The
+range is final once no transaction that could still commit into it is open,
+and the checkpoint is older than a minimum age; the audit then looks once for
+events of the range without a category link, numbers any it finds with the
+next ordinal of their keys, as the sequencer numbers a late row today, and
+moves on. A long transaction keeps the checkpoint pending; nothing is lost and
+nothing is kept per position. The horizon is one small query a database:
+
+- SQL Server: no transaction of this database whose first write began before
+  the marker, from `sys.dm_tran_database_transactions`; a position is taken by
+  the insert itself, so there is no moment a transaction holds one unseen. The
+  gateway's login needs `VIEW DATABASE STATE`.
+- PostgreSQL: no session of this database that has written began its
+  transaction before the marker, from `pg_stat_activity` (`backend_xid` set),
+  and no prepared transaction older than it. Readers do not hold it back, nor
+  do other databases on the server. Marten takes a position with `nextval()`
+  before the insert that gives its transaction an id, a moment the query
+  cannot see; the minimum age, a minute against microseconds, covers it, and
+  any lock wait comes after the transaction has its id. Where session details
+  are hidden, transaction ids are the fallback (`pg_current_xact_id()` as the
+  marker, settled once `pg_snapshot_xmin` passes it): exact but for the same
+  moment, held back by writers in other databases.
+
+Behind it, three scrubs run the same check, an anti-join of events against
+category links over a range of positions, with a different window and
+meaning:
+
+- a light guardrail every few minutes over the last quarter of an hour,
+  whose finding is a known gap the settle pass missed, logged and counted;
+- a daily scrub over the last day, throttled, whose finding is an alert:
+  nothing known explains it;
+- a manual scrub from the host, `--scrub-ordinals` over any range of positions
+  or from a date, found by a binary search over positions reading each probe's
+  timestamp, for an operator who wants the whole store proven.
+
+What it costs, measured in a prototype on both databases over a million
+events, on a held connection: a horizon check of 1 to 5 ms, and the check of a
+range at some 2 to 4 µs a position on SQL Server and 8 on PostgreSQL, so the
+guardrail over a quarter of an hour at a thousand events a second is seconds,
+and the daily scrub minutes. On PostgreSQL 17 or later, a database-level
+`transaction_timeout` with the minimum age above it keeps a stuck session from
+holding the audit back for ever and bounds writers the horizon cannot see; it
+is a recommendation, not a requirement, and the schema apply lifts it for its
+own session, whose index builds outlast any such cap.
+
+Adopting ordinals on a store initialized without them becomes the sequencer
+numbering from position 0 into the links, while the store is served, with no
+change to the events table.
+
+## Giving a position up by the transaction horizon
+
+Where readers read past an open transaction, the tail gives a missing
+position up after the store's stale threshold, 3 seconds, and an append that
+commits after that lands below the mark: a subscription or a group reading by
+position has passed it and never delivers it (`TODO.md`). The audit's horizon
+settles it for readers too: a position is given up once no transaction that
+could hold it is still open, so one given up can never commit, and none is
+given up while its owner lives. That needs the gateway's own high-water logic
+for every store, where today a store with one sequence follows the store's
+agent, which gives a gap up by time; the poller of a store partitioned by
+tenant is already the gateway's, and takes the rule first. Under SQL Server's
+locking read committed nothing changes, since a gap held by an open
+transaction is never seen.
 
 ## Virtual streams in `$streams`
 
@@ -896,5 +978,34 @@ regular-expression functions can move the filter into the query.
 ## Marten backend
 
 The same gateway over Marten on PostgreSQL. The event wrapper, the feed
-abstraction and the tailer are backend-neutral by design; the schema patch and
-the wake-up (PostgreSQL has notifications) are the backend-specific parts.
+abstraction and the tailer are backend-neutral by design; the wake-up
+(PostgreSQL has notifications) is a backend's own. Read against Marten's
+source and tried on PostgreSQL, nothing stops it, and the store is taken as it
+ships:
+
+- **No change to Marten's tables or tenancy.** Its migrations drop columns they
+  do not know, and supplying a database of our own means a tenancy of our own,
+  under which Marten refuses its managed tenant partitions. The category is an
+  expression index on an immutable function of the stream name, which needs no
+  column and is served by a seek in position order on the live partition;
+  Marten's documented `IgnoreIndex` keeps its migrations off it and off the
+  other indexes. The ordinals are links (*The ordinal audit*).
+- **Its placeholder rows.** After a save that fails once positions were taken,
+  Marten writes a `tombstone` event in the stream `mt_tombstone` at each, so
+  its high-water mark need not wait. Every read and the sequencer leave that
+  stream out.
+- **Checks before Marten writes.** A multi-stream append's checks run in a
+  transaction of the gateway's own, which Marten's session joins
+  (`SessionOptions.ForTransaction`), so a refused check never reaches its
+  write. PostgreSQL has no lock on a row that does not exist: a check that a
+  stream does not exist holds the name with an uncommitted placeholder row in
+  `mt_streams`, inserted and deleted before the commit, which no other session
+  ever sees and which makes a concurrent creation of the stream wait.
+- **Bodies.** `jsonb` orders an object's keys, keeps the last of duplicate
+  keys and refuses `\u0000`, where SQL Server's `json` keeps the order and the
+  first duplicate. Each store's JSON rules are its own, a variance to record;
+  the refusal maps to `INVALID_ARGUMENT`, and binary data keeps exact bytes on
+  either.
+- **Its own types.** Marten's "stream already exists" is not the shared
+  JasperFx exception, and an append to an archived stream throws its own; it
+  has no hard delete or un-archive, so `Delete` is the gateway's statement.
