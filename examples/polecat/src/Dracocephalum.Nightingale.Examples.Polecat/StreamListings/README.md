@@ -14,7 +14,9 @@ event a stream, its first; read `$ce-orders` and see the stream named just
 `orders` in it; read `$all` with the category filter `orders`, the prefix
 filter `orders-` and the type filter `order_placed`, and see what each keeps;
 then subscribe to `$streams` from the end and see a new stream handed over,
-and a stream that only moved on not.
+and a stream that only moved on not; read `$bc-checkout-1` and `$streams`
+by ordinal, dense from 0; and subscribe to `$category-orders` by ordinal
+from the end and see a new order stream handed over with the next number.
 The scenario's test runs exactly the same code and asserts the report it
 returns.
 
@@ -33,6 +35,9 @@ least one character, and the whole name otherwise, so the stream named just
 `orders` is in category `orders`. The category filter keeps it, as
 `$ce-orders` does; the prefix filter `orders-` does not, because its name
 does not begin with the prefix. `$bc-`, `$streams` and `$category-` are read
-by position, each through a filtered index that holds only the rows it
-reads: the events that carry a correlation id, and the first event of each
-stream.
+by position through filtered indexes that hold only the rows they read: the
+events that carry a correlation id, and the first event of each stream. By
+ordinal they are read through links the sequencer writes in the gateway's
+own table, one for each event a correlation or a listing holds, so a store
+whose events carry no correlation id pays for none; the run's store was
+initialized with ordinals, as every sample's is.

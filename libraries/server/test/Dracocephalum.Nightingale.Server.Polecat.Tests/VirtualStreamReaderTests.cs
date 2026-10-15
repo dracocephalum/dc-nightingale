@@ -1,5 +1,6 @@
 using System.Text;
 
+using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -313,6 +314,45 @@ public sealed class VirtualStreamReaderTests
     }
 
     [Fact]
+    public async Task ReadByOrdinalAsync_OfACorrelationOrAListing_ShouldFollowItsLinksToTheTenantsLiveEvents()
+    {
+        // Arrange: a workflow's links at 1, at 4, which is deleted, and at 6, and another
+        // tenant's under the same id at 5; the listing of streams links each stream's first event,
+        // the deleted stream's at 4 among them.
+        await using (var context = new Seeding(_root))
+        {
+            context.Set<OrdinalLink>().AddRange(
+                Link(OrdinalLinkType.Correlation, "workflow", 0, 1),
+                Link(OrdinalLinkType.Correlation, "workflow", 1, 4),
+                Link(OrdinalLinkType.Correlation, "workflow", 2, 6),
+                Link(OrdinalLinkType.Correlation, "workflow", 0, 5, "tenant-b"),
+                Link(OrdinalLinkType.Streams, string.Empty, 0, 1),
+                Link(OrdinalLinkType.Streams, string.Empty, 1, 2),
+                Link(OrdinalLinkType.Streams, string.Empty, 2, 4),
+                Link(OrdinalLinkType.Streams, string.Empty, 3, 6));
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var workflow = new VirtualStreamName(VirtualStreamKind.Correlation, "workflow");
+        var streams = new VirtualStreamName(VirtualStreamKind.Streams, string.Empty);
+
+        // Act
+        var forwards = await _sut.ReadByOrdinalAsync(workflow, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+        var backwards = await _sut.ReadByOrdinalAsync(workflow, Direction.Backwards, 2, 1, TestContext.Current.CancellationToken);
+        var head = await _sut.OrdinalHeadAsync(workflow, TestContext.Current.CancellationToken);
+        var listed = await _sut.ReadByOrdinalAsync(streams, Direction.Forwards, 1, 2, TestContext.Current.CancellationToken);
+        var none = await _sut.OrdinalHeadAsync(new VirtualStreamName(VirtualStreamKind.CategoryStreams, "orders"), TestContext.Current.CancellationToken);
+
+        // Assert: ordinal 1 is a hole the page goes past, and the head counts it; the other
+        // tenant's link is not this tenant's; each record carries the link's ordinal.
+        forwards.Select(record => (record.Position, record.Ordinal)).ShouldBe([(1, 0), (6, 2)]);
+        backwards.Select(record => record.Ordinal).ShouldBe([2]);
+        head.ShouldBe(new StreamHead(0, 2));
+        listed.Select(record => (record.Stream, record.Ordinal)).ShouldBe([("shipments-1", 1), ("orders-4", 3)]);
+        none.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task ReadByOrdinalAsync_WhenTheDataEvents_ShouldRefuseSinceTheyHaveNoOrdinals()
     {
         // Arrange
@@ -333,8 +373,13 @@ public sealed class VirtualStreamReaderTests
         {
             modelBuilder.Entity<EventRow>().HasKey(row => row.SeqId);
             modelBuilder.Entity<ProgressionRow>().HasKey(row => row.Name);
+            modelBuilder.Entity<OrdinalLink>().HasKey(row => new { row.Type, row.TenantId, row.Key, row.Ordinal });
+            modelBuilder.Entity<OrdinalLink>().Property(row => row.Type).HasConversion<byte>();
         }
     }
+
+    private static OrdinalLink Link(OrdinalLinkType type, string key, long ordinal, long position, string tenant = Tenant) =>
+        new() { Type = type, TenantId = tenant, Key = key, Ordinal = ordinal, SeqId = position };
 
     private static EventRow Row(long position, string stream, long version, string type, string tenant = Tenant, bool archived = false, long? categoryOrdinal = null, long? typeOrdinal = null) =>
         new()

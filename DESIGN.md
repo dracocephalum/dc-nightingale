@@ -471,11 +471,32 @@ patched schema as the category column and recorded in the marker row, because
 they shape the table: a store initialized without them refuses the setting
 until a backfill exists, and one initialized with them refuses to run without.
 
+A correlation, `$streams` and `$category-` have ordinals too, but not as
+columns: most events carry no correlation id and most begin no stream, so a
+column would spend eight bytes on every row for numbers few rows have. Their
+ordinals are rows of `OrdinalLink`, one for each event a correlation or a
+listing holds. The table is an extension of the events table, not an entity
+of the gateway's: what it holds could be columns of the event's row, as the
+other two ordinals are, and it sits in a table of its own, in the gateway's
+schema, only so that the rows without it cost nothing. So it is keyed as the
+store's data is, by what it describes: the type, stored as a byte, the
+tenant, the key and the ordinal, with the event's position beside them. A
+read by ordinal seeks that key in order and fetches each event by its own
+key, in the tenant's partition on a store partitioned by tenant; a unique
+index by type, tenant and position means no batch can link an event twice.
+Rows are never removed: a link whose event was archived or deleted is a
+hole the read skips, and the last ordinal of a key stays, so none is reused.
+A store whose events carry no correlation id holds two links a stream and
+nothing more.
+
 `OrdinalSequencer` is the sequencer: one per cluster, on the same lease rows the
 persistent-subscription groups use, walking the events table behind the
 high-water mark in batches and giving each event its place within its
-category and its type, each batch continuing from the last ordinal of each
-key found with one backward seek. The append path is untouched, because
+category and its type, and its links, each batch continuing from the last
+ordinal of each key found with one backward seek. A batch is read once, into
+a table variable, and both the columns and the links are made from it, so a
+row committing between two reads of the events table can never get its
+ordinals and miss its links. The append path is untouched, because
 numbering at append time would serialize every append to a category. A batch
 and the progress row, the position numbered through, are one transaction, and
 the progress row is read under an update lock, so a sequencer whose lease
@@ -491,8 +512,8 @@ reader skips and the sequencer never reuses, which is what a link whose event
 is gone does in the reference.
 
 The numbering is the caller's explicit choice per read or subscription,
-global by default, and the service refuses an ordinal read on anything but
-`$ce-` and `$et-`, and with `ORDINALS_NOT_ENABLED` on a store without the
+global by default, and the service refuses an ordinal read of `$all` and
+`$de`, and with `ORDINALS_NOT_ENABLED` on a store without the
 feature, before anything is delivered. Under ordinal numbering every number in
 the conversation is an ordinal and each event carries its ordinal beside the
 position it always carries; a consumer keeps the numbering with its checkpoint
@@ -528,8 +549,10 @@ lands in partition number `k + 2` under the store's boundaries). The store's
 column names appear only where the mirror maps them, under a property named
 `PartitionKey`, never in a name, message or document of the gateway's own as
 an ordinal. A sequencer is named for what it sequences: `OrdinalSequencer`
-numbers both ordinals in one batch, and its progress rows are named for the
-ordinals they track.
+numbers every ordinal in one batch, and its progress rows are named for the
+ordinals they track. A sequencer of another kind, for a virtual stream added
+after a store is numbered far along, would need a type on its progress rows
+and a lease of its own.
 
 ### 7. The gateway's own tables are one model, and its own schema
 
@@ -561,7 +584,18 @@ constraint: the store's tables are the store's, an event's id has no unique
 index to refer to there, and the store deletes events of a tombstoned stream
 whatever refers to them. Such a column is listed by name where the check is
 run, and anything that joins to the store's events joins on the position,
-which is their key. It names no
+which is their key. Two exceptions are stated where they apply, both on the
+ordinal links (seam 6), which extend the store's events table rather than
+hold anything of the gateway's own. The table is keyed by what it describes,
+as the store's data is, and carries no id: an id would be one more thing
+the database invents for every row, since the sequencer writes a batch of
+links in one statement no code sees row by row, on a table that grows with
+the events. Its class carries `[StoreExtension]`, and the check exempts such
+a table from the rule of one `Guid` key, and from that rule only. And its
+type is stored as a byte, not a name, because it leads the key and the index
+of every link: its enum carries `[StoredAsNumber]`, the check accepts a
+numeric column only for such an enum and only as its own width, and a test
+pins the numbers, which may never change or be reused. It names no
 provider and no column type, only lengths and whether a string is Unicode,
 so each backend generates its own migrations from the one model, with
 `dotnet ef migrations add`, into its own project: SQL Server's are in the
@@ -578,7 +612,9 @@ may name another, so the operations are moved to the host's schema as they
 run, by the backend's migrations SQL generator; the generated code is never
 edited. A model is cached per context type with its schema in it, so the
 schema is part of the cache key: one process serving two schemas would
-otherwise read the first one's tables through the second context.
+otherwise read the first one's tables through the second context. The
+mirror reads the links from the gateway's schema beside the store's, so
+both are in its key.
 
 A group's key is an id made with the group, and its tenant, stream and
 group name sit under a unique index: the names find a group, by whatever
@@ -588,9 +624,11 @@ nothing downstream of the lookup depends on how a name is spelt or compared.
 A park that arrives for a group deleted meanwhile is refused by the foreign
 key and taken for what it is: the group is gone.
 
-The backend has a second, read-only context beside it, a mirror of two
-tables the store owns: its events, with the columns the gateway adds, and
-the row its high-water mark is kept in. The reads by category, by event
+The backend has a second, read-only context beside it, a mirror of the
+tables the store owns that the gateway reads: its events, with the columns
+the gateway adds, its streams, the registry of tenants' partition keys, and
+the row its high-water mark is kept in; and, from the gateway's own schema,
+the ordinal links, which a read joins to the events. The reads by category, by event
 type and by position are LINQ over that mirror, and so is the tail's look
 for the unbroken run of positions after the mark, whose gap rule is plain
 code. A query names the columns it needs, never a whole row, because the

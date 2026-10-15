@@ -219,6 +219,44 @@ public sealed class StreamSubscriptionTests
         request().ShouldNotBeNull().Stream.ShouldBe("$all");
     }
 
+    [Fact]
+    public async Task DisposeAsync_WhenNobodyReadsWhatTheServerSent_ShouldEndAndNotWaitForTheConsumer()
+    {
+        // Arrange: the confirmation fills the one slot, and the events behind it have nowhere to
+        // go; the consumer looked at the confirmation and stopped reading.
+        var (invoker, _) = FakeStreamsCall.Read(
+        [
+            new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = "s-1", Head = 1 } },
+            new ReadResponse { Event = Recorded("orders-1", 0, 10) },
+            new ReadResponse { Event = Recorded("orders-1", 1, 11) },
+        ]);
+        await using var sut = new NightingaleClient(invoker);
+        var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, cancellationToken: TestContext.Current.CancellationToken);
+        await subscription.Confirmed;
+
+        // Act & Assert: disposal stops the pump where it waits for the slot.
+        await subscription.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_OfAReadNobodyFinished_ShouldEndAndNotWaitForTheConsumer()
+    {
+        // Arrange: the consumer read the head and stopped, with events still coming.
+        var (invoker, _) = FakeStreamsCall.Read(
+        [
+            new ReadResponse { Head = new StreamBounds { First = 0, Last = 2 } },
+            new ReadResponse { Event = Recorded("orders-1", 0, 10) },
+            new ReadResponse { Event = Recorded("orders-1", 1, 11) },
+            new ReadResponse { Event = Recorded("orders-1", 2, 12) },
+        ]);
+        await using var sut = new NightingaleClient(invoker);
+        var read = sut.ReadStreamAsync(Direction.Forwards, "orders-1", StreamPosition.Start, cancellationToken: TestContext.Current.CancellationToken);
+        await read.Head;
+
+        // Act & Assert
+        await read.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+    }
+
     private static RecordedEvent Recorded(string stream, long revision, long position) => new()
     {
         Id = Guid.NewGuid().ToString("D"),

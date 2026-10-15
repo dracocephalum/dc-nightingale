@@ -83,8 +83,16 @@ public static class ModelConventions
                     violations.Add($"{name}: table must be '{entity.ClrType.Name}' - .ToTable(\"{entity.ClrType.Name}\")");
                 }
 
+                // A table that states it extends the store's is keyed by what it describes.
                 var key = entity.FindPrimaryKey();
-                if (key is null || key.Properties.Count != 1 || key.Properties[0].Name != "Id" || GetStoreType(key.Properties[0]) != typeof(Guid))
+                if (entity.ClrType.IsDefined(typeof(StoreExtensionAttribute), false))
+                {
+                    if (key is null)
+                    {
+                        violations.Add($"{name}: an extension of the store's tables is keyed by what it describes - .HasKey(...)");
+                    }
+                }
+                else if (key is null || key.Properties.Count != 1 || key.Properties[0].Name != "Id" || GetStoreType(key.Properties[0]) != typeof(Guid))
                 {
                     violations.Add($"{name}: primary key must be a single Guid column named Id");
                 }
@@ -107,7 +115,17 @@ public static class ModelConventions
             foreach (var property in entity.GetProperties())
             {
                 var clr = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
-                if (clr.IsEnum && (GetStoreType(property) != typeof(string) || property.GetMaxLength() is null))
+
+                // An enum that states its numbers are stored may be stored by them, and by nothing
+                // wider than the numbers it is declared with.
+                if (clr.IsEnum && clr.IsDefined(typeof(StoredAsNumberAttribute), false))
+                {
+                    if (GetStoreType(property) != Enum.GetUnderlyingType(clr))
+                    {
+                        violations.Add($"{name}.{property.Name}: an enum stored as a number is stored as its underlying type - .HasConversion<{Enum.GetUnderlyingType(clr).Name}>()");
+                    }
+                }
+                else if (clr.IsEnum && (GetStoreType(property) != typeof(string) || property.GetMaxLength() is null))
                 {
                     violations.Add($"{name}.{property.Name}: enum must be a bounded string - .HasConversion<string>().HasMaxLength(64)");
                 }

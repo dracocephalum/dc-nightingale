@@ -19,13 +19,16 @@ public sealed class ReadStreamResult : IAsyncEnumerable<EventRecord>, IAsyncDisp
     private readonly Channel<EventRecord> _events = Channel.CreateBounded<EventRecord>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = true });
     private readonly TaskCompletionSource<ReadState> _state = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<StreamHead?> _head = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource _stopping;
     private readonly Task _pump;
+    private int _disposed;
 
     internal ReadStreamResult(string stream, AsyncServerStreamingCall<ReadResponse> call, CancellationToken cancellationToken)
     {
         Stream = stream;
         _call = call;
-        _pump = PumpAsync(cancellationToken);
+        _stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _pump = PumpAsync(_stopping.Token);
     }
 
     /// <summary>Gets the stream name.</summary>
@@ -54,6 +57,15 @@ public sealed class ReadStreamResult : IAsyncEnumerable<EventRecord>, IAsyncDisp
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
+        // The pump stops where it is, reading the call or waiting for the consumer to take the
+        // one slot, which a consumer that stopped reading never does; disposing the call alone
+        // ends only the first.
+        await _stopping.CancelAsync().ConfigureAwait(false);
         _call.Dispose();
         try
         {
@@ -64,6 +76,8 @@ public sealed class ReadStreamResult : IAsyncEnumerable<EventRecord>, IAsyncDisp
             // Disposal cancels the call; whatever the pump saw was already handed to the consumer
             // through the state, the head, or the channel, so there is nothing left to report here.
         }
+
+        _stopping.Dispose();
     }
 
     private async Task PumpAsync(CancellationToken cancellationToken)

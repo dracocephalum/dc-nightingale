@@ -13,8 +13,8 @@ public enum Numbering
     Global = 0,
 
     /// <summary>
-    /// Ordinals: <c>$ce-</c> and <c>$et-</c> only, on a store initialized with the feature. Refused
-    /// otherwise, before anything is delivered.
+    /// Ordinals: every virtual stream but <c>$de</c>, on a store initialized with the feature.
+    /// Refused otherwise, before anything is delivered.
     /// </summary>
     Ordinal = 1,
 }

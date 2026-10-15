@@ -13,20 +13,24 @@ namespace Dracocephalum.Nightingale.Client;
 /// subscription itself yields the events; enumerating <see cref="Messages"/> yields everything
 /// the server says, the confirmation first, then events with the caught-up and fell-behind notes
 /// between them. Enumerate one or the other, once. <see cref="Confirmed"/> completes with the
-/// first message either way. Disposal cancels the call; so does leaving the enumeration.
+/// first message either way. Disposal cancels the call, whether or not anything is still being
+/// read; leaving the enumeration does not, so a consumer disposes the subscription when it is done.
 /// </summary>
 public sealed class StreamSubscription : IAsyncEnumerable<EventRecord>, IAsyncDisposable
 {
     private readonly AsyncServerStreamingCall<ReadResponse> _call;
     private readonly Channel<SubscriptionMessage> _messages = Channel.CreateBounded<SubscriptionMessage>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = true });
     private readonly TaskCompletionSource<SubscriptionMessage.Confirmed> _confirmed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource _stopping;
     private readonly Task _pump;
+    private int _disposed;
 
     internal StreamSubscription(string stream, AsyncServerStreamingCall<ReadResponse> call, CancellationToken cancellationToken)
     {
         Stream = stream;
         _call = call;
-        _pump = PumpAsync(cancellationToken);
+        _stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _pump = PumpAsync(_stopping.Token);
     }
 
     /// <summary>Gets the stream name, or <c>$all</c>.</summary>
@@ -53,6 +57,15 @@ public sealed class StreamSubscription : IAsyncEnumerable<EventRecord>, IAsyncDi
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
+        // The pump stops where it is, reading the call or waiting for the consumer to take the
+        // one slot, which a consumer that stopped reading never does; disposing the call alone
+        // ends only the first.
+        await _stopping.CancelAsync().ConfigureAwait(false);
         _call.Dispose();
         try
         {
@@ -63,6 +76,8 @@ public sealed class StreamSubscription : IAsyncEnumerable<EventRecord>, IAsyncDi
             // Disposal cancels the call; whatever the pump saw was already handed to the consumer
             // through the confirmation or the channel, so there is nothing left to report here.
         }
+
+        _stopping.Dispose();
     }
 
     private static SubscriptionMessage? ToMessage(ReadResponse message) => message.ContentCase switch

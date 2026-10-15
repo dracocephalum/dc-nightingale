@@ -130,7 +130,7 @@ public static class ServiceCollectionExtensions
         // The mirror of the store's tables, once per connection: each is a type of its own,
         // so a reader asks for the one it means. The read-only one is always there; with the
         // read-only connection off it reaches the main one and nothing reads through it.
-        services.AddSingleton(new EventStoreSchema(options.Store.Schema));
+        services.AddSingleton(new EventStoreSchema(options.Store.Schema, options.Schema));
         services.AddDbContextFactory<EventsDbContext>(context => context.UseSqlServer(connectionString));
         services.AddDbContextFactory<ReadOnlyEventsDbContext>(context => context.UseSqlServer(readOnlyConnectionString ?? connectionString));
 

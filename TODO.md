@@ -44,8 +44,8 @@ undecided adds it here rather than mentioning it once in a conversation.
   stream's metadata, set and read back as events of `$$<stream>` and applied
   to reads of the stream, with `$de` and `$mde` beside `$all`, binary
   data beside an event's JSON or instead of it, `$bc-` by correlation and
-  `$streams` and `$category-` by each stream's first event, by position,
-  and filters on `$all` by whole categories and exact types; the samples
+  `$streams` and `$category-` by each stream's first event, by position
+  and by ordinal, and filters on `$all` by whole categories and exact types; the samples
   under `examples/` are the end-to-end
   runs. Not yet: the ordinal
   backfill, in `PENDING.md`. Close by: see `PENDING.md`.

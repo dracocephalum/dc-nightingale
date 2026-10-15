@@ -140,8 +140,8 @@ parity comes first, in the order the client exposes it:
    (`VARIANCES.md`, *An event has two bodies*); the mapping to the
    reference's one body is the adapter's, under *Bodies* below.
 3. **The small ones together**: `$bc-` by correlation id, `$streams` and
-   `$category-`, by position: done; their ordinals are *Ordinals of the
-   sparse virtual streams* below. The `Stop` action of a group's nack is a
+   `$category-`, by position, and by ordinal through links the sequencer
+   writes: done. The `Stop` action of a group's nack is a
    variance, mapped by the adapter under *Group nacks* below.
 4. **Multi-stream and conditional appends** (below), the client's newest.
 
@@ -239,8 +239,8 @@ here is re-derived:
   `$@` event per stream from the first event, its body the stream's name.
   The category rule is the gateway's, so a stream named just the category is
   in it, which a reference client sees too (`VARIANCES.md`). Their numbers
-  are positions until *Ordinals of the sparse virtual streams* below gives
-  them dense ones, the same variance as `$ce-` on a store without ordinals.
+  are the link revisions a reference client counts on a store with
+  ordinals, and positions on one without, the same variance as `$ce-` there.
 - **Group nacks.** The reference client's `Stop` is served as the consumer
   leaving: its call ends, and its events in flight go back to the group,
   not counted as a retry. The reference server skips them instead
@@ -564,36 +564,6 @@ numbering sees only what is numbered. The setting's row is written once the colu
 completes, so the server knows the store has the feature and readers see the
 ordinals arrive.
 
-## Ordinals of the sparse virtual streams
-
-`$bc-`, `$streams` and `$category-` are read by position; a reference client
-reading them through the adapter checkpoints with dense link revisions. Their
-ordinals go in a table of the gateway's own, not in columns of the events
-table: most events carry no correlation id and most events begin no stream,
-so a column would spend eight bytes on every row for numbers few rows have,
-while a table holds only the numbers that exist. `OrdinalLink (Type,
-TenantId, Key, Ordinal, SeqId)`, `Type` a `tinyint` naming correlation,
-streams or category streams, keyed `(Type, TenantId, Key, Ordinal)`, the
-read by ordinal and the seek for a key's last ordinal, with a unique
-`(Type, TenantId, SeqId)`, so a batch retried after a lost lease never links
-an event twice. Not partitioned: the store's partitions are the store's to
-manage, and every key leads with the tenant. Rows are never removed: an
-archived or deleted event is a hole the read skips, and the highest ordinal
-of a key stays, so none is reused. The sequencer fills it in the batch and
-transaction that number `$ce-` and `$et-`, the category ordinal's null still
-marking what is not numbered, so nothing ever compares the events table with
-the links; a batch of thousands of correlation ids is thousands of short
-seeks, background work that an append never waits on. A read by ordinal seeks
-the table and fetches each event by position, the same work as a read of
-`$ce-` by ordinal, an index seek and a lookup a row, naming the tenant's
-partition key on a store partitioned by tenant and the live partition on one
-partitioned by archiving. Under `Nightingale:Store:AssignOrdinals`, as the
-other ordinals. The second slice of S5.
-
-A sequencer of another kind of ordinal, for a virtual stream added after the
-store is numbered far along, would need a type on its progress rows and a
-lease of its own.
-
 ## Virtual streams in `$streams`
 
 The reference lists its link streams in `$streams`, since each has an event
@@ -627,8 +597,8 @@ Under ordinals it is cheaper still. A category's first stream is the event
 the sequencer numbers 0 in `$category-x`, so `$categories` is the links of
 that type at ordinal 0, an index on them filtered to that ordinal, and the
 numbers of `$categories` itself are one more type of link, filled in the
-same batch. With S5b in, this is the way to build it; by position is the way
-without the sequencer. Not until someone asks for it.
+same batch: the way to build it on a store with ordinals, by position the way
+on one without. Not until someone asks for it.
 
 ## Separator characters, chosen at initialization
 

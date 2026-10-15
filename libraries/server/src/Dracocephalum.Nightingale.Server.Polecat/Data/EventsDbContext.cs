@@ -42,6 +42,7 @@ internal class EventsDbContext : DbContext, ISchemaScoped
     {
         ArgumentNullException.ThrowIfNull(schema);
         Schema = schema.Name;
+        GatewaySchema = schema.GatewayName;
     }
 
     /// <summary>Gets the events.</summary>
@@ -56,8 +57,17 @@ internal class EventsDbContext : DbContext, ISchemaScoped
     /// <summary>Gets the progression rows; the high-water mark is one of them.</summary>
     public DbSet<ProgressionRow> ProgressionRows => Set<ProgressionRow>();
 
+    /// <summary>Gets the ordinals of the correlations and the listings, from the gateway's own table.</summary>
+    public DbSet<OrdinalLink> OrdinalLinks => Set<OrdinalLink>();
+
     /// <inheritdoc/>
     public string Schema { get; }
+
+    /// <summary>Gets the schema the gateway's own tables live in, the ordinal links among them.</summary>
+    public string GatewaySchema { get; }
+
+    /// <inheritdoc/>
+    public object ModelKey => (Schema, GatewaySchema);
 
     /// <inheritdoc/>
     public override int SaveChanges(bool acceptAllChangesOnSuccess) => throw CreateReadOnlyException();
@@ -136,6 +146,20 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             row.HasKey(p => p.Name);
             row.Property(p => p.Name).HasColumnName("name").HasColumnType("varchar(200)");
             row.Property(p => p.LastSeqId).HasColumnName("last_seq_id").HasColumnType("bigint");
+        });
+
+        // The gateway's table, not the store's, read beside the events it points at: the
+        // gateway's migrations create it and the sequencer fills it. Typed as those migrations
+        // type it, so the key and the tenant compare without conversion.
+        modelBuilder.Entity<OrdinalLink>(link =>
+        {
+            link.ToTable(nameof(OrdinalLink), GatewaySchema);
+            link.HasKey(l => new { l.Type, l.TenantId, l.Key, l.Ordinal });
+            link.Property(l => l.Type).HasConversion<byte>().HasColumnType("tinyint");
+            link.Property(l => l.TenantId).HasColumnType("varchar(250)");
+            link.Property(l => l.Key).HasColumnType("varchar(250)");
+            link.Property(l => l.Ordinal).HasColumnType("bigint");
+            link.Property(l => l.SeqId).HasColumnType("bigint");
         });
     }
 

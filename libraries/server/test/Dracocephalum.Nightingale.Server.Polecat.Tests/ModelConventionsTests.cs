@@ -105,8 +105,93 @@ public sealed class ModelConventionsTests
         Should.NotThrow(() => ModelConventions.CheckSets(context));
     }
 
+    [Fact]
+    public void Check_WhenAnEnumThatStatesItsNumbersAreStoredIsStoredByThem_ShouldPass()
+    {
+        // Arrange
+        using var context = Context(model =>
+        {
+            Related(model);
+            model.Entity<Ticket>().ToTable(nameof(Ticket)).Property(ticket => ticket.Priority).HasConversion<byte>();
+            model.Entity<Ticket>().Property(ticket => ticket.Status).HasConversion<string>().HasMaxLength(64);
+        });
+
+        // Act & Assert
+        Should.NotThrow(() => ModelConventions.Check(context.Model, "Order.EventId"));
+    }
+
+    [Fact]
+    public void Check_WhenAnEnumIsStoredByNumberWithoutStatingIt_ShouldSaySo()
+    {
+        // Arrange
+        using var context = Context(model =>
+        {
+            Related(model);
+            model.Entity<Ticket>().ToTable(nameof(Ticket)).Property(ticket => ticket.Priority).HasConversion<byte>();
+        });
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => ModelConventions.Check(context.Model, "Order.EventId"));
+
+        // Assert: the enum with no statement is held to the rule, the one with it is not.
+        exception.Message.ShouldContain("Ticket.Status: enum must be a bounded string");
+        exception.Message.ShouldNotContain("Ticket.Priority");
+    }
+
+    [Fact]
+    public void Check_WhenAnEnumThatStatesItsNumbersAreStoredIsStoredWider_ShouldSaySo()
+    {
+        // Arrange: a byte's numbers in an int column, wider than the enum's own type.
+        using var context = Context(model =>
+        {
+            Related(model);
+            model.Entity<Ticket>().ToTable(nameof(Ticket)).Property(ticket => ticket.Priority).HasConversion<int>();
+            model.Entity<Ticket>().Property(ticket => ticket.Status).HasConversion<string>().HasMaxLength(64);
+        });
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => ModelConventions.Check(context.Model, "Order.EventId"));
+
+        // Assert
+        exception.Message.ShouldContain("Ticket.Priority: an enum stored as a number is stored as its underlying type - .HasConversion<Byte>()");
+    }
+
+    [Fact]
+    public void Check_WhenATableStatesItExtendsTheStoresAndIsKeyedByWhatItDescribes_ShouldPass()
+    {
+        // Arrange
+        using var context = Context(model =>
+        {
+            Related(model);
+            model.Entity<Annotation>().ToTable(nameof(Annotation)).HasKey(row => new { row.SeqId, row.Note });
+        });
+
+        // Act & Assert
+        Should.NotThrow(() => ModelConventions.Check(context.Model, "Order.EventId"));
+    }
+
+    [Fact]
+    public void Check_WhenATableIsKeyedByItsColumnsWithoutStatingItExtendsTheStores_ShouldSaySo()
+    {
+        // Arrange
+        using var context = Context(model =>
+        {
+            Related(model);
+            model.Entity<Remark>().ToTable(nameof(Remark)).HasKey(row => new { row.SeqId, row.Note });
+        });
+
+        // Act
+        var exception = Should.Throw<InvalidOperationException>(() => ModelConventions.Check(context.Model, "Order.EventId"));
+
+        // Assert
+        exception.Message.ShouldContain("Remark: primary key must be a single Guid column named Id");
+    }
+
     private static Shop Context(Action<ModelBuilder> relationships) =>
         new(new DbContextOptionsBuilder<Shop>().UseSqlServer(DesignTime).Options, relationships);
+
+    private static void Related(ModelBuilder model) =>
+        model.Entity<Order>().HasOne<Customer>().WithMany().HasForeignKey(order => order.CustomerId).OnDelete(DeleteBehavior.Restrict);
 
     private sealed class Customer
     {
@@ -122,6 +207,47 @@ public sealed class ModelConventionsTests
         public Guid BillTo { get; set; }
 
         public Guid EventId { get; set; }
+    }
+
+    /// <summary>An enum whose numbers a column stores, as it states.</summary>
+    [StoredAsNumber]
+    private enum Priority : byte
+    {
+        Low = 1,
+        High = 2,
+    }
+
+    /// <summary>An enum stored by name, as the rule has it.</summary>
+    private enum Status
+    {
+        Open = 0,
+        Closed = 1,
+    }
+
+    /// <summary>A table that extends the store's, keyed by what it describes, as it states.</summary>
+    [StoreExtension]
+    private sealed class Annotation
+    {
+        public long SeqId { get; set; }
+
+        public string Note { get; set; } = string.Empty;
+    }
+
+    /// <summary>The same table, without the statement.</summary>
+    private sealed class Remark
+    {
+        public long SeqId { get; set; }
+
+        public string Note { get; set; } = string.Empty;
+    }
+
+    private sealed class Ticket
+    {
+        public Guid Id { get; set; }
+
+        public Priority Priority { get; set; }
+
+        public Status Status { get; set; }
     }
 
     /// <summary>A context whose one set has its entity's own name, as a word with no plural would.</summary>

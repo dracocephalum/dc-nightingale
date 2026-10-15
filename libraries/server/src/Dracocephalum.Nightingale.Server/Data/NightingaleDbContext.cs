@@ -31,6 +31,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
     /// <summary>Gets the ordinal sequencer's progress.</summary>
     public DbSet<OrdinalSequencingProgress> OrdinalSequencingProgress => Set<OrdinalSequencingProgress>();
 
+    /// <summary>Gets the ordinals of the virtual streams that are not columns of the events table.</summary>
+    public DbSet<OrdinalLink> OrdinalLinks => Set<OrdinalLink>();
+
     /// <summary>Gets the settings the store was initialized with.</summary>
     public DbSet<StoreProperty> StoreProperties => Set<StoreProperty>();
 
@@ -110,6 +113,25 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             // Unique with no filter: SQL Server's unique index admits one null, which is the shared
             // sequence's row, where the provider's default filter would admit any number of them.
             progress.HasIndex(row => row.TenantId).IsUnique().HasFilter(null);
+        });
+
+        modelBuilder.Entity<OrdinalLink>(link =>
+        {
+            link.ToTable(nameof(OrdinalLink));
+
+            // An extension of the store's events table, keyed as the store's data is, by what it
+            // describes, as its class states: one stream's ordinals in order, so a read and a
+            // stream's last ordinal are a seek from either end of the key, with the position in
+            // the row it lands on. Unique by event within a type too, so a batch can never link an
+            // event twice, whatever went wrong before it.
+            link.HasKey(row => new { row.Type, row.TenantId, row.Key, row.Ordinal });
+            link.HasIndex(row => new { row.Type, row.TenantId, row.SeqId }).IsUnique();
+
+            // The type by number, a byte, as its enum states: it leads the key and the index of a
+            // table that grows with the events.
+            link.Property(row => row.Type).HasConversion<byte>();
+            link.Property(row => row.TenantId).HasMaxLength(250).IsUnicode(false);
+            link.Property(row => row.Key).HasMaxLength(250).IsUnicode(false);
         });
 
         modelBuilder.Entity<Tenant>(tenant =>

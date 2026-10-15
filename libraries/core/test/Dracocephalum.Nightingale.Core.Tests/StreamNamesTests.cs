@@ -59,10 +59,10 @@ public sealed class StreamNamesTests
         // Act
         StreamNames.TryParseVirtual(stream, out var parsed).ShouldBeTrue();
 
-        // Assert: the three listings by correlation and by stream are read by position only, until they are numbered too.
+        // Assert: numbered, as the categories are, the correlations and the listings through links.
         parsed.ShouldBe(new VirtualStreamName(kind, key));
         parsed.Name.ShouldBe(stream);
-        parsed.HasOrdinals.ShouldBe(kind == VirtualStreamKind.Category);
+        parsed.HasOrdinals.ShouldBeTrue();
     }
 
     [Theory]

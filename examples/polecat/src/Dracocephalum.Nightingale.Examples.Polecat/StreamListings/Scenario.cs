@@ -10,9 +10,10 @@ namespace Dracocephalum.Nightingale.Examples.Polecat.StreamListings;
 /// The virtual streams over a workflow and over the streams themselves, against a Nightingale
 /// server, step by step: <c>$bc-</c>, every event of one correlation across the streams it
 /// touched; <c>$streams</c> and <c>$category-</c>, the first event of every stream and of a
-/// category's; a stream named just its category, which is in the category; and the exact filters
-/// on <c>$all</c>, a whole category and a type, against the prefix. The program prints the steps;
-/// the test project asserts the report.
+/// category's; a stream named just its category, which is in the category; the exact filters on
+/// <c>$all</c>, a whole category and a type, against the prefix; and the workflow and the listings
+/// by ordinal, read and followed live. The program prints the steps; the test project asserts the
+/// report.
 /// </summary>
 public static class Scenario
 {
@@ -25,6 +26,9 @@ public static class Scenario
     /// <param name="ByPrefixFilter">The streams of the events <c>$all</c> kept under the prefix filter <c>orders-</c>.</param>
     /// <param name="ByTypeFilter">The types of the events <c>$all</c> kept under the type filter <c>order_placed</c>.</param>
     /// <param name="LiveListed">The stream a subscription to <c>$streams</c> was handed once a new one began.</param>
+    /// <param name="WorkflowOrdinals">The workflow read by ordinal: each event's ordinal and stream.</param>
+    /// <param name="StreamsOrdinals">The listing of streams read by ordinal: each stream's ordinal and name.</param>
+    /// <param name="LiveCategoryOrdinal">The ordinal and stream a subscription to <c>$category-orders</c> by ordinal was handed once a new order stream began.</param>
     public sealed record Report(
         IReadOnlyList<string> Workflow,
         IReadOnlyList<string> Streams,
@@ -33,7 +37,10 @@ public static class Scenario
         IReadOnlyList<string> ByCategoryFilter,
         IReadOnlyList<string> ByPrefixFilter,
         IReadOnlyList<string> ByTypeFilter,
-        string LiveListed);
+        string LiveListed,
+        IReadOnlyList<string> WorkflowOrdinals,
+        IReadOnlyList<string> StreamsOrdinals,
+        string LiveCategoryOrdinal);
 
     /// <summary>Runs the scenario.</summary>
     /// <param name="run">The run the scenario is part of: its database, its server, and a tenant for the scenario.</param>
@@ -91,7 +98,59 @@ public static class Scenario
         await messages.DisposeAsync().ConfigureAwait(false);
         await output.WriteLineAsync($"7. Subscribed to $streams from the end, then moved payments-1 on and began refunds-1: the subscription was handed {liveListed}, and nothing for payments-1, which had begun already.").ConfigureAwait(false);
 
-        return new Report(workflow, streams, ordersStreams, ordersCategory, byCategory, byPrefix, byType, liveListed);
+        var workflowOrdinals = await ReadNumberedAsync(client, "$bc-checkout-1", expectedLast: 2, cancellationToken).ConfigureAwait(false);
+        var streamsOrdinals = await ReadNumberedAsync(client, "$streams", expectedLast: 3, cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync($"8. Read $bc-checkout-1 by ordinal: {string.Join(", ", workflowOrdinals)}; and $streams by ordinal: {string.Join(", ", streamsOrdinals)}. Dense from 0, as a KurrentDB client counts the events of a link stream.").ConfigureAwait(false);
+
+        await using var byOrdinal = client.SubscribeToStreamAsync("$category-orders", StreamPosition.End, Numbering.Ordinal, cancellationToken);
+        var numbered = byOrdinal.Messages.GetAsyncEnumerator(cancellationToken);
+        var confirmed = await byOrdinal.Confirmed.ConfigureAwait(false);
+        await client.AppendToStreamAsync("orders-2", StreamState.NoStream, [CreateEvent("order_placed")], cancellationToken).ConfigureAwait(false);
+        var liveCategoryOrdinal = string.Empty;
+        while (await numbered.MoveNextAsync().ConfigureAwait(false))
+        {
+            if (numbered.Current is SubscriptionMessage.Recorded recorded)
+            {
+                liveCategoryOrdinal = $"{recorded.Record.Ordinal}:{recorded.Record.Stream}";
+                break;
+            }
+        }
+
+        await numbered.DisposeAsync().ConfigureAwait(false);
+        await output.WriteLineAsync($"9. Subscribed to $category-orders by ordinal from the end, confirmed at ordinal {confirmed.Head}, then began orders-2: the subscription was handed {liveCategoryOrdinal}, the next number in the listing.").ConfigureAwait(false);
+
+        return new Report(workflow, streams, ordersStreams, ordersCategory, byCategory, byPrefix, byType, liveListed, workflowOrdinals, streamsOrdinals, liveCategoryOrdinal);
+    }
+
+    /// <summary>
+    /// Reads a virtual stream by ordinal, as ordinal and stream, once the sequencer, which runs
+    /// behind the store's head on its own cadence, has reached the expected last ordinal.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ReadNumberedAsync(NightingaleClient client, string stream, long expectedLast, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+        while (true)
+        {
+            // Each read is consumed to its end, so the server completes the call itself.
+            var described = new List<string>();
+            StreamHead? head;
+            await using (var read = client.ReadStreamAsync(Direction.Forwards, stream, StreamPosition.Start, numbering: Numbering.Ordinal, cancellationToken: timeout.Token))
+            {
+                head = await read.Head.ConfigureAwait(false);
+                await foreach (var record in read.WithCancellation(timeout.Token).ConfigureAwait(false))
+                {
+                    described.Add($"{record.Ordinal}:{record.Stream}");
+                }
+            }
+
+            if (head is not null && head.Last >= expectedLast)
+            {
+                return described;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), timeout.Token).ConfigureAwait(false);
+        }
     }
 
     private static async Task<IReadOnlyList<string>> ReadAsync(NightingaleClient client, string stream, Func<EventRecord, string> describe, CancellationToken cancellationToken)

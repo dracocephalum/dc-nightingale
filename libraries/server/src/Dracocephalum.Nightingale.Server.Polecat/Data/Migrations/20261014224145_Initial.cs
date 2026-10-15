@@ -31,6 +31,22 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "OrdinalLink",
+                schema: "nightingale",
+                columns: table => new
+                {
+                    Type = table.Column<byte>(type: "tinyint", nullable: false),
+                    TenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
+                    Key = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
+                    Ordinal = table.Column<long>(type: "bigint", nullable: false),
+                    SeqId = table.Column<long>(type: "bigint", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_OrdinalLink", x => new { x.Type, x.TenantId, x.Key, x.Ordinal });
+                });
+
+            migrationBuilder.CreateTable(
                 name: "OrdinalSequencingProgress",
                 schema: "nightingale",
                 columns: table => new
@@ -218,6 +234,13 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_OrdinalLink_Type_TenantId_SeqId",
+                schema: "nightingale",
+                table: "OrdinalLink",
+                columns: new[] { "Type", "TenantId", "SeqId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_OrdinalSequencingProgress_TenantId",
                 schema: "nightingale",
                 table: "OrdinalSequencingProgress",
@@ -276,6 +299,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 
             migrationBuilder.DropTable(
                 name: "Lease",
+                schema: "nightingale");
+
+            migrationBuilder.DropTable(
+                name: "OrdinalLink",
                 schema: "nightingale");
 
             migrationBuilder.DropTable(

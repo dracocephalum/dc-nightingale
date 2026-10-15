@@ -8,4 +8,7 @@ public interface ISchemaScoped
 {
     /// <summary>Gets the schema the context's tables live in.</summary>
     string Schema { get; }
+
+    /// <summary>Gets what the context's model is cached under beside its type: its schema, or every schema its model names when it reads another's tables too.</summary>
+    object ModelKey => Schema;
 }

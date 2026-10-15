@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text;
+using System.Text.Json.Nodes;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -15,6 +17,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class OrdinalTests : IAsyncLifetime
 {
+    /// <summary>The links' key, which a read seeks, as the gateway's migration names it.</summary>
+    private const string LinkReadIndex = "PK_OrdinalLink";
     private static readonly VirtualStreamName Orders = new(VirtualStreamKind.Category, "orders");
     private static readonly VirtualStreamName Placed = new(VirtualStreamKind.EventType, "order_placed");
     private readonly string _name = TestDatabases.NewName();
@@ -99,6 +103,69 @@ public sealed class OrdinalTests : IAsyncLifetime
         afterFourth.Select(record => record.Ordinal).ShouldBe([0L, 2L, 3L]);
         afterTombstone.Select(record => record.Ordinal).ShouldBe([2L, 3L]);
         bounds.ShouldBe(new StreamHead(1, 3));
+    }
+
+    [Fact]
+    public async Task Sequencer_ShouldLinkEachCorrelationAndListingDenselyAndReadThemBySeeks()
+    {
+        // Arrange: one workflow over two streams; an event of no workflow that begins a stream;
+        // and an event that does neither, which adds no link.
+        var sut = Store;
+        await sut.AppendAsync("orders-1", StreamState.NoStream, [Correlated("order_placed", "checkout-1"), Correlated("order_paid", "checkout-1")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("shipments-1", StreamState.NoStream, [Correlated("shipment_dispatched", "checkout-1")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        var last = await sut.AppendAsync("orders-1", StreamState.Any, [Event("order_shipped")], TestContext.Current.CancellationToken);
+        await NumberedAsync(last.Position);
+        var workflow = new VirtualStreamName(VirtualStreamKind.Correlation, "checkout-1");
+        var streams = new VirtualStreamName(VirtualStreamKind.Streams, string.Empty);
+        var orderStreams = new VirtualStreamName(VirtualStreamKind.CategoryStreams, "orders");
+        var before = await IndexUseAsync(LinkReadIndex);
+        var eventsBefore = await IndexUseAsync("pkey_pc_events_seq_id");
+
+        // Act
+        var byWorkflow = await sut.ReadByOrdinalAsync(workflow, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+        var workflowBounds = await sut.OrdinalHeadAsync(workflow, TestContext.Current.CancellationToken);
+        var listed = await sut.ReadByOrdinalAsync(streams, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+        var ofOrders = await sut.ReadByOrdinalAsync(orderStreams, Direction.Backwards, 1, 10, TestContext.Current.CancellationToken);
+        var after = await IndexUseAsync(LinkReadIndex);
+        var eventsAfter = await IndexUseAsync("pkey_pc_events_seq_id");
+        var links = await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM [nightingale].[OrdinalLink]");
+
+        // Assert: dense from zero per key, in position order; three in the workflow, three
+        // streams, each also in its category's listing: nine links, none for the event that did
+        // neither. Every read sought the links' key and none scanned it or the events.
+        byWorkflow.Select(record => (record.Stream, record.Ordinal)).ShouldBe([("orders-1", 0L), ("orders-1", 1L), ("shipments-1", 2L)]);
+        workflowBounds.ShouldBe(new StreamHead(0, 2));
+        listed.Select(record => (record.Stream, record.Revision, record.Ordinal)).ShouldBe([("orders-1", 0L, 0L), ("shipments-1", 0L, 1L), ("orders-2", 0L, 2L)]);
+        ofOrders.Select(record => (record.Stream, record.Ordinal)).ShouldBe([("orders-2", 1L), ("orders-1", 0L)]);
+        links.ShouldBe(9);
+        (after.Seeks - before.Seeks).ShouldBeGreaterThanOrEqualTo(5, "two for the bounds, one for each of three pages");
+        after.Scans.ShouldBe(before.Scans);
+        eventsAfter.Scans.ShouldBe(eventsBefore.Scans, "each linked event is fetched by its key, never by a scan of the table");
+    }
+
+    [Fact]
+    public async Task Sequencer_WhenAStreamIsDeletedAndItsNameUsedAgain_ShouldLeaveAHoleAndListTheNewStream()
+    {
+        // Arrange: three order streams listed 0, 1, 2; the middle one is deleted and begun again.
+        var sut = Store;
+        var orderStreams = new VirtualStreamName(VirtualStreamKind.CategoryStreams, "orders");
+        await sut.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        var third = await sut.AppendAsync("orders-3", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await NumberedAsync(third.Position);
+        await sut.DeleteAsync("orders-2", StreamState.Any, TestContext.Current.CancellationToken);
+
+        // Act
+        var again = await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await NumberedAsync(again.Position);
+        var listed = await sut.ReadByOrdinalAsync(orderStreams, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+        var bounds = await sut.OrdinalHeadAsync(orderStreams, TestContext.Current.CancellationToken);
+
+        // Assert: the deleted stream's link points at nothing and is skipped, never reused; the
+        // name begun again is a new stream, listed at the next ordinal.
+        listed.Select(record => (record.Stream, record.Ordinal)).ShouldBe([("orders-1", 0L), ("orders-3", 2L), ("orders-2", 3L)]);
+        bounds.ShouldBe(new StreamHead(0, 3));
     }
 
     [Fact]
@@ -265,6 +332,18 @@ public sealed class OrdinalTests : IAsyncLifetime
     private IStreamStore Store => _host!.Store();
 
     private static EventData Event(string type) => new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
+
+    private static EventData Correlated(string type, string correlationId) =>
+        new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"), new JsonObject { [MetadataKeys.CorrelationId] = correlationId });
+
+    /// <summary>How often an index was sought and scanned, by SQL Server's own count since the database was made.</summary>
+    private async Task<(long Seeks, long Scans)> IndexUseAsync(string index)
+    {
+        const string Sql = "SELECT ISNULL(SUM(s.{0}), 0) FROM sys.indexes i LEFT JOIN sys.dm_db_index_usage_stats s ON s.object_id = i.object_id AND s.index_id = i.index_id AND s.database_id = DB_ID() WHERE i.name = '{1}'";
+        var seeks = await TestDatabases.ScalarAsync<long>(_name, string.Format(CultureInfo.InvariantCulture, Sql, "user_seeks", index));
+        var scans = await TestDatabases.ScalarAsync<long>(_name, string.Format(CultureInfo.InvariantCulture, Sql, "user_scans", index));
+        return (seeks, scans);
+    }
 
     /// <summary>Waits for the sequencer to pass a position, which it does on the tail's cadence, and the tail to say so.</summary>
     private Task<long> NumberedAsync(long position) => NumberedAsync(_host!.Tail(), position);
