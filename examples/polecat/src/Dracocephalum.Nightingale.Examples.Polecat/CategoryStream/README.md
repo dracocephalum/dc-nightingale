@@ -27,7 +27,7 @@ Its test is `CategoryStreamTests` in the component's test project.
 
 ## Notes
 
-A virtual stream's positions are the store's global positions, sparse, and its
-head is its own last event: the category read reports bounds 1 to 4 while the
-store's head is also 4 only by coincidence of order, and after the shipments
-append the subscription's head stays where the category's last event is.
+A virtual stream's positions are its store partition's positions, sparse, and it
+ends at its own last event: the category read reports bounds 1 to 4 while the
+sequence head is also 4 only by coincidence of order, and after the shipments
+append the subscription's end stays where the category's last event is.

@@ -322,11 +322,11 @@ server wrote is ignored by an older one.
 ### 4. Positions are the store's sequence
 
 A stream revision is the store's version minus one, so revisions start at
-zero as the reference client expects. A position is the store's global
-sequence number, one signed 64-bit value. `$all` and the virtual streams are
+zero as the reference client expects. A position is a number from its store
+partition's sequence, one signed 64-bit value. `$all` and the virtual streams are
 predicates over it, so their positions are sparse: monotonic, but with other
-streams' events between. The head of a virtual stream is its own last event,
-never the global head.
+streams' events between. A virtual stream ends at its own last event, never at
+the sequence head.
 
 Sequence numbers are assigned before a transaction commits, so a forward read
 of `$all` or a subscription must stop at the store's high-water mark, which
