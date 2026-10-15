@@ -52,6 +52,11 @@ public static class Scenarios
             CredentialsAndTenants.Scenario.RunAsync,
             report => $"Done: {report.Made.Count} credentials made; the user was refused as {report.ReaderRefusal}; tenant {report.Tenant.Name} disabled, its credential refused as {report.DisabledRefusal}."),
         ExampleScenario.Create(
+            "multi-stream-append",
+            "an append to several streams in one commit: a transfer between accounts, a check on a stream not written, every conflict named",
+            MultiStreamAppend.Scenario.RunAsync,
+            report => $"Done: the transfer committed whole; refused on stale revisions for {report.StaleConflicts.Count} streams and by its check once frozen, {report.FrozenConflict}."),
+        ExampleScenario.Create(
             "persistent-subscription",
             "a group: consume with acknowledgements, retry and park, replay, resume from the checkpoint",
             PersistentSubscription.Scenario.RunAsync,
