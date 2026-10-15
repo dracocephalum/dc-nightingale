@@ -285,14 +285,10 @@ internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactor
         Add(batches, deferred);
         return batches;
 
-        static void Add(List<string> batches, StringWriter writer)
-        {
-            var batch = writer.ToString().Trim();
-            if (batch.Length > 0)
-            {
-                batches.Add(batch);
-            }
-        }
+        // The schema library ends a batch where SQL Server needs one, after a column a later
+        // statement of the same delta names, with a GO line, which is the tooling's separator and
+        // not SQL Server's; each piece is a batch of its own.
+        static void Add(List<string> batches, StringWriter writer) => batches.AddRange(SchemaBatches.SplitOnGo(writer.ToString()));
     }
 
     /// <summary>

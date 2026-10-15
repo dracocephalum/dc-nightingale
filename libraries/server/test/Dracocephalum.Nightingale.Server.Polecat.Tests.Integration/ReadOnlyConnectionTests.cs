@@ -81,8 +81,8 @@ public sealed class ReadOnlyConnectionTests(SqlServerTestDatabase database)
     public async Task ReadAllAsync_FromTheMainConnection_ShouldKeepTheMetadataAnEventWasAppendedWith()
     {
         // Arrange: a second host over the same database with the read-only connection off, so
-        // every page of $all comes from the main connection. The store's own raw-events query
-        // loses the headers; the page must not.
+        // every page of $all comes from the main connection, which must keep the metadata an
+        // event was appended with as the read-only one does.
         var name = "replica" + Guid.NewGuid().ToString("N")[..8] + "-1";
         var metadata = System.Text.Json.Nodes.JsonNode.Parse("{\"Source\":\"Checkout\",\"$correlationId\":\"c-1\"}")!.AsObject();
         var appended = await database.Store.AppendAsync(name, StreamState.NoStream, [new EventData(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"), metadata)], TestContext.Current.CancellationToken);

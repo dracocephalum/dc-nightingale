@@ -123,7 +123,7 @@
     <PackageVersion Include="Grpc.Core.Api" Version="2.83.0" />
     <PackageVersion Include="Grpc.Net.Client" Version="2.83.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.83.0" />
-    <PackageVersion Include="Polecat" Version="5.29.0" />
+    <PackageVersion Include="Polecat" Version="5.41.0" />
     <!-- An override, not a choice: Microsoft.Data.SqlClient, which the store and EF Core's
          SQL Server provider both bring, asks for an affected version even at its latest, 7.1.1, and every
          version to 9.0.20 and 10.0.12 is affected by CVE-2026-70162 and CVE-2026-84008.
