@@ -30,9 +30,10 @@ public interface IStreamStore
     /// events to a stream, or a stream's metadata set as <see cref="SetStreamMetadataAsync"/> sets
     /// it. Checks on streams not written hold at the commit or nothing is written. The events are
     /// positioned stream by stream, in the order the appends are given. Every condition that does
-    /// not hold is reported, not only the first. A retry with the same ids, every append under an
-    /// explicit revision or no stream, succeeds with the original result when the events are
-    /// already there. The request is valid by <see cref="StreamAppends.FindProblems"/>.
+    /// not hold is reported, not only the first. A retry with the same ids, every append events
+    /// under an explicit revision or no stream, succeeds with the original result when the events
+    /// are already there; a metadata set is written with new ids each time, so a request with one
+    /// is not recognised as its own retry. The request is valid by <see cref="StreamAppends.FindProblems"/>.
     /// </summary>
     /// <param name="appends">The appends, in order. Never empty; each stream written once.</param>
     /// <param name="checks">The checks on streams not written; empty for none.</param>

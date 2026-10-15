@@ -46,8 +46,12 @@ service Streams {
   // carries, and at most as many checks. Errors: STREAM_CONFLICTS, every
   // condition that failed in one answer; STREAM_DELETED, INVALID_STREAM_NAME,
   // APPEND_SIZE_EXCEEDED, INVALID_ARGUMENT, every problem with the request in
-  // its message. A retry with explicit expected revisions is safe, as for
-  // Append.
+  // its message. A retry is safe, as for Append, when every part is events
+  // under an explicit expected revision or NO_STREAM: the same events with
+  // the same ids, already there, answer with what they wrote. A metadata set
+  // is written with new ids each time, as SetStreamMetadata's is, so a
+  // request with one is not recognised as its own retry and answers with
+  // the conflict it finds.
   rpc AppendToStreams (stream AppendToStreamsRequest) returns (AppendToStreamsResponse);
 
   // Resets a stream, the reference's soft delete: it reads as not found
