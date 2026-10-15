@@ -67,27 +67,28 @@ undecided adds it here rather than mentioning it once in a conversation.
   tenant of the directory, merged in position order in process, each asked
   for the next page's worth only, with an integration test over several
   tenants. Stores partitioned by tenant refuse the wildcard already.
-- **An append that commits after its position was given up is skipped by
-  readers by position.** A position is taken when an event is inserted and
-  seen when its transaction commits, so a lower one can appear after a higher
-  one; the tail waits at a missing position for the store's stale threshold,
-  3 seconds by default, then gives it up as abandoned. An append whose
-  transaction outlasts that, held by a lock, a slow disk or a large batch,
-  commits below the mark: subscriptions and persistent groups reading `$all`
-  or a virtual stream by position have passed it and never deliver it, and
-  only a read from the start finds it. Ordinals catch it, numbered late
-  through the index over the unnumbered rows, and nothing else does. Close
-  by: a cap on an append's transaction, a tunable, enforced by the database
-  where it can be (PostgreSQL's `transaction_timeout` and
-  `statement_timeout`; on SQL Server the command timeout and the connection
-  aborted, which ends a transaction soon rather than at once), and the stale
-  threshold a tunable checked at start-up to exceed the cap by a margin, so a
-  position given up is one that can never commit; a test that holds an
-  append open past the threshold, commits it, and asserts what readers by
-  position see; a variance for what SQL Server cannot enforce. The same rule
-  lets a sequencer number by a plain range of positions and never look back,
-  which is how the Marten backend can keep ordinals without a marker column
-  on a table it cannot add columns to.
+- **Where readers read past an open transaction, an append that commits
+  after its position was given up is skipped by readers by position.** A
+  position is taken when an event is inserted and seen when its transaction
+  commits, so a lower one can appear after a higher one. Under SQL Server's
+  default locking read committed, which the store's databases use, the
+  store's gap detector and the gateway's reads wait on the open row, so the
+  mark stalls behind a slow append and nothing is given up: no event is
+  skipped, but a slow append holds every later one back. Where readers read
+  past it instead, PostgreSQL always and SQL Server with read committed
+  snapshot or on a readable secondary, the tail gives the missing position
+  up after the store's stale threshold, 3 seconds by default, and an append
+  whose transaction outlasts that commits below the mark: subscriptions and
+  persistent groups reading `$all` or a virtual stream by position have
+  passed it and never deliver it. Ordinals catch it today, through the index
+  over the unnumbered rows. Close by: giving a position up only once the
+  database's own transaction horizon shows no transaction that could hold it
+  is still open (PostgreSQL's writers in `pg_stat_activity`, SQL Server's
+  `sys.dm_tran_database_transactions`), and the same horizon settling the
+  ordinal audit, with a look-back pass as the guardrail; a test that holds
+  an append open past the threshold, commits it, and asserts what readers by
+  position see, under read committed snapshot on SQL Server and on
+  PostgreSQL.
 - **An event can be appended that no client can read back.** Neither side
   sets gRPC's message limits, so both keep the defaults: the server receives
   at most 4 MB in a message and sends any size, and the client the same the
