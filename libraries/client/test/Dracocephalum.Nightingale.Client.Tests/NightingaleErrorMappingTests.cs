@@ -122,6 +122,32 @@ public sealed class NightingaleErrorMappingTests
         exception.ShouldBeOfType<DeletionDisabledException>().Message.ShouldBe(failure.Status.Detail);
     }
 
+    [Fact]
+    public void ToException_WhenStreamsConflict_ShouldCarryEveryConflictFromTheTypedDetail()
+    {
+        // Arrange: the reason, and the conflicts beside it.
+        var info = new ErrorInfo { Domain = "nightingale", Reason = "STREAM_CONFLICTS", Metadata = { ["count"] = "2" } };
+        var conflicts = new Protocols.Grpc.V1.AppendConflicts
+        {
+            Conflicts =
+            {
+                new Protocols.Grpc.V1.AppendConflict { Index = 0, Stream = "orders-1", ExpectedRevision = 3, ActualRevision = 5 },
+                new Protocols.Grpc.V1.AppendConflict { Index = 2, Stream = "ledger-1", ExpectedRevision = StreamState.NoStream.ToInt64(), ActualRevision = 0 },
+            },
+        };
+        var failure = new Google.Rpc.Status { Code = (int)StatusCode.FailedPrecondition, Message = "failed", Details = { Any.Pack(info), Any.Pack(conflicts) } }.ToRpcException();
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        mapped.ShouldBeOfType<StreamConflictsException>().Conflicts.ShouldBe(
+        [
+            new StreamConflict(0, "orders-1", StreamState.StreamRevision(3), 5),
+            new StreamConflict(2, "ledger-1", StreamState.NoStream, 0),
+        ]);
+    }
+
     private static RpcException Failure(StatusCode code, string reason, params (string Key, string Value)[] metadata)
     {
         var info = new ErrorInfo { Domain = "nightingale", Reason = reason };

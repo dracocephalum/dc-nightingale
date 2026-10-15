@@ -3,6 +3,7 @@ using System.Globalization;
 
 using Dracocephalum.Nightingale.Protocols.Grpc;
 using Dracocephalum.Nightingale.Protocols.Grpc.V1;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Google.Rpc;
 using Grpc.Core;
@@ -32,6 +33,28 @@ public static class NightingaleErrors
             ("stream", conflict.Stream),
             ("expected", conflict.Expected.ToInt64().ToString(CultureInfo.InvariantCulture)),
             ("actual", conflict.ActualRevision.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    /// <summary>Streams of an append to several streams were not in their expected states: every one, as a typed detail beside the reason.</summary>
+    /// <param name="conflicts">The conflicts the store reported.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException StreamConflicts(StreamConflictsException conflicts)
+    {
+        ArgumentNullException.ThrowIfNull(conflicts);
+        var detail = new AppendConflicts();
+        detail.Conflicts.AddRange(conflicts.Conflicts.Select(conflict => new AppendConflict
+        {
+            Index = conflict.Index,
+            Stream = conflict.Stream,
+            ExpectedRevision = conflict.Expected.ToInt64(),
+            ActualRevision = conflict.ActualRevision,
+        }));
+        return Build(
+            StatusCode.FailedPrecondition,
+            ErrorReason.StreamConflicts,
+            conflicts.Message,
+            [detail],
+            ("count", conflicts.Conflicts.Count.ToString(CultureInfo.InvariantCulture)));
     }
 
     /// <summary>The stream was soft-deleted.</summary>
@@ -223,7 +246,11 @@ public static class NightingaleErrors
         return status is not null;
     }
 
-    private static RpcException Build(StatusCode code, ErrorReason reason, string message, params (string Key, string Value)[] metadata)
+    private static RpcException Build(StatusCode code, ErrorReason reason, string message, params (string Key, string Value)[] metadata) =>
+        Build(code, reason, message, [], metadata);
+
+    /// <summary>The status with the reason and its metadata first, then any typed details a reason carries beside them.</summary>
+    private static RpcException Build(StatusCode code, ErrorReason reason, string message, IMessage[] details, params (string Key, string Value)[] metadata)
     {
         var info = new ErrorInfo { Domain = ErrorReasons.Domain, Reason = ErrorReasons.GetName(reason) };
         foreach (var (key, value) in metadata)
@@ -232,6 +259,11 @@ public static class NightingaleErrors
         }
 
         var status = new Status { Code = (int)code, Message = message, Details = { Any.Pack(info) } };
+        foreach (var detail in details)
+        {
+            status.Details.Add(Any.Pack(detail));
+        }
+
         return status.ToRpcException();
     }
 }

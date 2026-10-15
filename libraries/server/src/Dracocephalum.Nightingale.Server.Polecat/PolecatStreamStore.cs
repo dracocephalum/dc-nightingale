@@ -479,32 +479,15 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         ArgumentNullException.ThrowIfNull(metadata);
         metadata.Validate();
         var streams = RequireStreams(stream);
-        var resets = metadata.TruncateBefore == long.MaxValue;
         for (var attempt = 1; ; attempt++)
         {
             var state = await streams.ReadMetadataStateAsync(stream, cancellationToken).ConfigureAwait(false);
-            IReadOnlyList<byte[]> bodies;
-            if (state.IsReset && state.ContinuesFrom is { } continuesFrom)
-            {
-                // Brought back, as the reference does it, in two events: the metadata as given, a
-                // reset in it written as the mark, then the same with the truncation the reset left.
-                bodies = [ResetMark.ToBody(metadata, resets ? -continuesFrom : metadata.TruncateBefore), ResetMark.ToBody(metadata, continuesFrom)];
-            }
-            else if (resets)
-            {
-                // A reset through a set keeps the other settings, as the reference's does.
-                bodies = [ResetMark.ToBody(metadata, state.StreamLast < 0 ? null : -(state.StreamLast + 1))];
-            }
-            else
-            {
-                bodies = [ResetMark.ToBody(metadata, metadata.TruncateBefore)];
-            }
 
             // A caller that expects any revision gets the one the decision was made on, so a change
             // landing in between is decided again rather than written over.
             try
             {
-                return await AppendMetadataAsync(stream, expected == StreamState.Any ? ToExpected(state.MetadataRevision) : expected, bodies, cancellationToken).ConfigureAwait(false);
+                return await AppendMetadataAsync(stream, expected == StreamState.Any ? ToExpected(state.MetadataRevision) : expected, ToMetadataBodies(state, metadata), cancellationToken).ConfigureAwait(false);
             }
             catch (RevisionConflictException) when (expected == StreamState.Any && attempt < MetadataWriteAttempts)
             {
@@ -514,16 +497,35 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     }
 
     /// <summary>
+    /// The events a set of metadata writes, decided on the stream as it was read: the metadata as
+    /// given, a reset in it written as the mark; or, on a stream that is reset, two events, as the
+    /// reference brings a stream back: the metadata as given, then the same with the truncation the
+    /// reset left. A reset through a set keeps the other settings, as the reference's does.
+    /// </summary>
+    private static IReadOnlyList<byte[]> ToMetadataBodies(PlainStreamReader.MetadataState state, StreamMetadata metadata)
+    {
+        var resets = metadata.TruncateBefore == long.MaxValue;
+        if (state.IsReset && state.ContinuesFrom is { } continuesFrom)
+        {
+            return [ResetMark.ToBody(metadata, resets ? -continuesFrom : metadata.TruncateBefore), ResetMark.ToBody(metadata, continuesFrom)];
+        }
+
+        return resets
+            ? [ResetMark.ToBody(metadata, state.StreamLast < 0 ? null : -(state.StreamLast + 1))]
+            : [ResetMark.ToBody(metadata, metadata.TruncateBefore)];
+    }
+
+    /// <summary>The metadata events of a decision, each with a new id: two sets of the same metadata are two changes.</summary>
+    private static List<EventData> ToMetadataEvents(IReadOnlyList<byte[]> bodies) =>
+        bodies.Select(body => new EventData(Guid.NewGuid(), StreamNames.MetadataEventType, body)).ToList();
+
+    /// <summary>
     /// Appends metadata events to the stream's metadata stream. A new id every time, as the
     /// reference's client gives each set: two sets of the same metadata are two changes, and a
     /// retry after a lost answer reads the metadata back.
     /// </summary>
     private Task<AppendResult> AppendMetadataAsync(string stream, StreamState expected, IReadOnlyList<byte[]> bodies, CancellationToken cancellationToken) =>
-        AppendAsync(
-            StreamNames.ToMetadataStream(stream),
-            expected,
-            bodies.Select(body => new EventData(Guid.NewGuid(), StreamNames.MetadataEventType, body)).ToList(),
-            cancellationToken);
+        AppendAsync(StreamNames.ToMetadataStream(stream), expected, ToMetadataEvents(bodies), cancellationToken);
 
     /// <summary>The expected state of a stream found at a revision: that revision, or no stream when none was found.</summary>
     private static StreamState ToExpected(long revision) => revision < 0 ? StreamState.NoStream : StreamState.StreamRevision(revision);

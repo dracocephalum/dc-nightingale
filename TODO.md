@@ -45,7 +45,9 @@ undecided adds it here rather than mentioning it once in a conversation.
   to reads of the stream, with `$de` and `$mde` beside `$all`, binary
   data beside an event's JSON or instead of it, `$bc-` by correlation and
   `$streams` and `$category-` by each stream's first event, by position
-  and by ordinal, and filters on `$all` by whole categories and exact types; the samples
+  and by ordinal, filters on `$all` by whole categories and exact types,
+  and appends to several streams in one commit, with checks on streams
+  they do not write; the samples
   under `examples/` are the end-to-end
   runs. Not yet: the ordinal
   backfill, in `PENDING.md`. Close by: see `PENDING.md`.
@@ -80,4 +82,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   registration, and a connection-string setting for what the client
   receives, which by default exceeds the server's by the most a recorded
   event adds; a test appends an event at the server's limit and reads it
-  back, by stream and by subscription.
+  back, by stream and by subscription. Another of the set: the total of an
+  append to several streams, held today to one append's count though the
+  store writes each stream as its own command (`PENDING.md`).

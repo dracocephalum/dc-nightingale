@@ -162,6 +162,29 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The last revision of each of several streams, and whether it is archived, in one statement
+    /// over the streams' key: what an append to several streams that the store refused is decided
+    /// on. A stream with no row is left out.
+    /// </summary>
+    /// <param name="streams">The stream names.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>Each stream found, by name, with its last revision and whether it is archived.</returns>
+    public async Task<IReadOnlyDictionary<string, (long Last, bool IsArchived)>> ReadRevisionsAsync(IReadOnlyCollection<string> streams, CancellationToken cancellationToken)
+    {
+        var names = streams.ToList();
+        await using var context = contexts();
+        var rows = context.StreamRows.Where(s => s.TenantId == tenantId && names.Contains(s.Id));
+        if (partitionedByTenant)
+        {
+            var key = QueryPartitionKey(context);
+            rows = rows.Where(s => s.PartitionKey == key.FirstOrDefault());
+        }
+
+        var found = await rows.Select(s => new { s.Id, s.Version, s.IsArchived }).ToListAsync(cancellationToken).ConfigureAwait(false);
+        return found.ToDictionary(row => row.Id, row => (row.Version - 1, row.IsArchived), StringComparer.Ordinal);
+    }
+
     /// <summary>The stream's row and, in the same statement, the body of the last event of its metadata stream.</summary>
     internal IQueryable<Found> FindWithMetadata(EventsDbContext context, string stream, string metastream)
     {

@@ -115,6 +115,74 @@ public sealed class NightingaleClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Appends to several streams atomically, all or nothing, each under its own expected state:
+    /// events for a stream, or a stream's metadata set. Checks name streams that are not written,
+    /// and the append commits only if each is in the state given. The events are positioned stream
+    /// by stream, in the order the appends are given.
+    /// </summary>
+    /// <param name="appends">The appends, in order; each stream written once.</param>
+    /// <param name="checks">Conditions on streams not written; none when omitted.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>What each append wrote, in the order they were given.</returns>
+    /// <exception cref="StreamConflictsException">Streams are not in the expected states, every one of them; nothing was written.</exception>
+    /// <exception cref="StreamDeletedException">A stream written was deleted; nothing was written.</exception>
+    /// <exception cref="ArgumentException">The server rejected the request as invalid, with every problem in the message.</exception>
+    public async Task<IReadOnlyList<StreamAppendResult>> AppendToStreamsAsync(IEnumerable<StreamAppend> appends, IEnumerable<StreamCheck>? checks = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(appends);
+
+        try
+        {
+            using var call = _streams.AppendToStreams(cancellationToken: cancellationToken);
+            try
+            {
+                foreach (var append in appends)
+                {
+                    switch (append)
+                    {
+                        case StreamAppend.OfEvents events:
+                            await call.RequestStream.WriteAsync(
+                                new AppendToStreamsRequest { Stream = new AppendStreamHeader { Stream = events.Stream, ExpectedRevision = events.Expected.ToInt64() } },
+                                cancellationToken).ConfigureAwait(false);
+                            foreach (var eventData in events.Events)
+                            {
+                                await call.RequestStream.WriteAsync(new AppendToStreamsRequest { Event = eventData.ToProposedEvent() }, cancellationToken).ConfigureAwait(false);
+                            }
+
+                            break;
+                        case StreamAppend.OfMetadata metadata:
+                            await call.RequestStream.WriteAsync(
+                                new AppendToStreamsRequest { Metadata = new AppendMetadata { Stream = metadata.Stream, ExpectedRevision = metadata.Expected.ToInt64(), Metadata = metadata.Metadata.ToWire() } },
+                                cancellationToken).ConfigureAwait(false);
+                            break;
+                    }
+                }
+
+                foreach (var check in checks ?? [])
+                {
+                    await call.RequestStream.WriteAsync(
+                        new AppendToStreamsRequest { Check = new AppendCheck { Stream = check.Stream, ExpectedRevision = check.Expected.ToInt64() } },
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                await call.RequestStream.CompleteAsync().ConfigureAwait(false);
+            }
+            catch (InvalidOperationException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // As for a single append: refused part way, the call ended, and the response below
+                // carries the reason.
+            }
+
+            var response = await call.ResponseAsync.ConfigureAwait(false);
+            return response.Appended.Select(appended => new StreamAppendResult(appended.Stream, appended.Revision, appended.Position)).ToList();
+        }
+        catch (RpcException exception)
+        {
+            throw NightingaleErrorMapping.ToException(exception);
+        }
+    }
+
+    /// <summary>
     /// Reads a stream. The call starts immediately; the result reports the stream's state and head
     /// before any event and streams the events after. A virtual stream can be read by ordinal, in
     /// which case <paramref name="from"/>, the head and each event's ordinal are its dense numbers;

@@ -576,6 +576,35 @@ what a few hundred small events then break. The limit is also wanted for its
 own sake: an append is held in memory whole and written in one transaction,
 and live delivery waits behind that transaction until it commits.
 
+## An append to several streams is positioned stream by stream
+
+**Reference:** the second version of its protocol has two calls. The append
+session takes one request a stream, each under its own expected revision,
+and answers a failure with the first stream that failed. Appending records
+takes records of any streams in any order, keeps that order in the log, and
+checks streams it does not write as well; its failure names every check that
+failed. A record's metadata is a map of typed values, and a record of a
+metadata stream is written as it is, a reset included.
+
+**Nightingale:** one call, `AppendToStreams`, the append session's shape
+with the checks beside it. A part is a stream's events or a stream's
+metadata set, a stream and its own metadata together included; each stream
+is written once and named by at most one condition. The events are
+positioned stream by stream, in the order the parts are given, so records of
+several streams are never interleaved. A failure names every condition that
+failed, in the order given, appends first and checks after. A reset through
+metadata, `$tb` at its largest value, is refused there, a reset being its own
+call. The events of the whole request are held to the limit of one append,
+and so are its checks.
+
+**Why:** the store positions a commit's events stream by stream, and offers
+no seam to write them in another order; only a reader of several streams at
+once could tell. Every failed condition comes from one more read on a path
+that has already failed, where the first alone would leave a caller to retry
+for each in turn. A reset writes a mark that depends on the stream's last
+revision, which inside the commit includes the commit's own events. The
+adapter maps both reference calls onto this one (`PENDING.md`).
+
 ## An event has two bodies
 
 **Reference:** one body, with a content type of `application/json` or

@@ -104,6 +104,135 @@ public sealed class StreamsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AppendToStreams_ShouldPassThePartsToTheStoreInOrderAndAnswerEachStream()
+    {
+        // Arrange
+        IReadOnlyList<StreamAppend>? appends = null;
+        IReadOnlyList<StreamCheck>? checks = null;
+        A.CallTo(() => _store.AppendToStreamsAsync(A<IReadOnlyList<StreamAppend>>._, A<IReadOnlyList<StreamCheck>>._, A<CancellationToken>._))
+            .Invokes((IReadOnlyList<StreamAppend> given, IReadOnlyList<StreamCheck> checked_, CancellationToken _) => (appends, checks) = (given, checked_))
+            .Returns([new StreamAppendResult("orders-1", 5, 41), new StreamAppendResult("$$payments-1", 0, 42), new StreamAppendResult("refunds-1", 0, 43)]);
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        using var call = client.AppendToStreams(cancellationToken: TestContext.Current.CancellationToken);
+        AppendToStreamsRequest[] parts =
+        [
+            new() { Stream = new AppendStreamHeader { Stream = "orders-1", ExpectedRevision = 3 } },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") },
+            new() { Event = Proposed(Guid.NewGuid(), "order_shipped", "{}") },
+            new() { Metadata = new AppendMetadata { Stream = "payments-1", ExpectedRevision = (long)ExpectedRevision.Any, Metadata = new Protocols.Grpc.V1.StreamMetadata { MaxCount = 5 } } },
+            new() { Stream = new AppendStreamHeader { Stream = "refunds-1", ExpectedRevision = (long)ExpectedRevision.NoStream } },
+            new() { Event = Proposed(Guid.NewGuid(), "refund_issued", "{}") },
+            new() { Check = new AppendCheck { Stream = "ledger-1", ExpectedRevision = (long)ExpectedRevision.NoStream } },
+        ];
+        foreach (var part in parts)
+        {
+            await call.RequestStream.WriteAsync(part, TestContext.Current.CancellationToken);
+        }
+
+        await call.RequestStream.CompleteAsync();
+        var response = await call.ResponseAsync;
+
+        // Assert
+        var events = appends.ShouldNotBeNull()[0].ShouldBeOfType<StreamAppend.OfEvents>();
+        (events.Stream, events.Expected).ShouldBe(("orders-1", StreamState.StreamRevision(3)));
+        events.Events.Select(e => e.Type).ShouldBe(["order_paid", "order_shipped"]);
+        var metadata = appends[1].ShouldBeOfType<StreamAppend.OfMetadata>();
+        (metadata.Stream, metadata.Expected, metadata.Metadata.MaxCount).ShouldBe(("payments-1", StreamState.Any, 5));
+        appends[2].ShouldBeOfType<StreamAppend.OfEvents>().Events.ShouldHaveSingleItem().Type.ShouldBe("refund_issued");
+        checks.ShouldNotBeNull().ShouldBe([new StreamCheck("ledger-1", StreamState.NoStream)]);
+        response.Appended.Select(appended => (appended.Stream, appended.Revision, appended.Position)).ShouldBe([("orders-1", 5L, 41L), ("$$payments-1", 0L, 42L), ("refunds-1", 0L, 43L)]);
+    }
+
+    [Fact]
+    public async Task AppendToStreams_WhenTheStoreReportsConflicts_ShouldAnswerWithEveryOneAsATypedDetail()
+    {
+        // Arrange
+        A.CallTo(() => _store.AppendToStreamsAsync(A<IReadOnlyList<StreamAppend>>._, A<IReadOnlyList<StreamCheck>>._, A<CancellationToken>._))
+            .ThrowsAsync(new StreamConflictsException([new StreamConflict(0, "orders-1", StreamState.StreamRevision(3), 5), new StreamConflict(1, "ledger-1", StreamState.NoStream, 0)]));
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendToStreamsAsync(
+            client,
+            new() { Stream = new AppendStreamHeader { Stream = "orders-1", ExpectedRevision = 3 } },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") },
+            new() { Check = new AppendCheck { Stream = "ledger-1", ExpectedRevision = (long)ExpectedRevision.NoStream } }));
+
+        // Assert
+        refused.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
+        var status = refused.GetRpcStatus().ShouldNotBeNull();
+        var info = status.GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("STREAM_CONFLICTS");
+        info.Metadata["count"].ShouldBe("2");
+        status.GetDetail<AppendConflicts>().ShouldNotBeNull().Conflicts.Select(conflict => (conflict.Index, conflict.Stream, conflict.ExpectedRevision, conflict.ActualRevision))
+            .ShouldBe([(0, "orders-1", 3L, 5L), (1, "ledger-1", (long)ExpectedRevision.NoStream, 0L)]);
+    }
+
+    [Fact]
+    public async Task AppendToStreams_WhenTheRequestBreaksRules_ShouldListEveryProblemBeforeTheStore()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act: a stream written twice, a reset through metadata, and a check that asserts nothing.
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendToStreamsAsync(
+            client,
+            new() { Stream = new AppendStreamHeader { Stream = "orders-1", ExpectedRevision = (long)ExpectedRevision.Any } },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") },
+            new() { Stream = new AppendStreamHeader { Stream = "orders-1", ExpectedRevision = (long)ExpectedRevision.Any } },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") },
+            new() { Metadata = new AppendMetadata { Stream = "orders-2", ExpectedRevision = (long)ExpectedRevision.Any, Metadata = new Protocols.Grpc.V1.StreamMetadata { TruncateBefore = long.MaxValue } } },
+            new() { Check = new AppendCheck { Stream = "ledger-1", ExpectedRevision = (long)ExpectedRevision.Any } }));
+
+        // Assert
+        refused.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        refused.Status.Detail.ShouldContain("Append 1 writes orders-1 again");
+        refused.Status.Detail.ShouldContain("a reset is its own call");
+        refused.Status.Detail.ShouldContain("Check 0 on ledger-1 expects any state");
+        A.CallTo(() => _store.AppendToStreamsAsync(A<IReadOnlyList<StreamAppend>>._, A<IReadOnlyList<StreamCheck>>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task AppendToStreams_WhenAnEventComesBeforeAnyHeader_ShouldRefuseIt()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendToStreamsAsync(client, new AppendToStreamsRequest { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") }));
+
+        // Assert
+        refused.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        refused.Status.Detail.ShouldContain("follows the header of its stream");
+    }
+
+    [Fact]
+    public async Task AppendToStreams_WithMoreEventsInAllThanOneAppendMay_ShouldRefuseThemBeforeTheStore()
+    {
+        // Arrange: three events allowed, two streams of two.
+        _serverOptions.MaxEventsPerAppend = 3;
+        var client = new Streams.StreamsClient(_channel);
+
+        // Act
+        var refused = await Should.ThrowAsync<RpcException>(() => AppendToStreamsAsync(
+            client,
+            new() { Stream = new AppendStreamHeader { Stream = "orders-1", ExpectedRevision = (long)ExpectedRevision.Any } },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") },
+            new() { Stream = new AppendStreamHeader { Stream = "orders-2", ExpectedRevision = (long)ExpectedRevision.Any } },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") },
+            new() { Event = Proposed(Guid.NewGuid(), "order_paid", "{}") }));
+
+        // Assert: refused at the fourth event, in the stream it belongs to.
+        var info = refused.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull();
+        info.Reason.ShouldBe("APPEND_SIZE_EXCEEDED");
+        info.Metadata["stream"].ShouldBe("orders-2");
+        A.CallTo(() => _store.AppendToStreamsAsync(A<IReadOnlyList<StreamAppend>>._, A<IReadOnlyList<StreamCheck>>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task Append_WithAsManyEventsAsOneAppendMay_ShouldBeStoredAndWithOneMoreRefusedBeforeTheStore()
     {
         // Arrange: the host allows three events in one append.
@@ -1271,6 +1400,27 @@ public sealed class StreamsServiceTests : IAsyncLifetime
 
     private sealed class TestOptions : NightingaleOptionsBase
     {
+    }
+
+    /// <summary>Sends the parts of an append to several streams; a refusal part way surfaces from the response.</summary>
+    private static async Task<AppendToStreamsResponse> AppendToStreamsAsync(Streams.StreamsClient client, params AppendToStreamsRequest[] parts)
+    {
+        using var call = client.AppendToStreams(cancellationToken: TestContext.Current.CancellationToken);
+        try
+        {
+            foreach (var part in parts)
+            {
+                await call.RequestStream.WriteAsync(part, TestContext.Current.CancellationToken);
+            }
+
+            await call.RequestStream.CompleteAsync();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or RpcException)
+        {
+            // The server ended the call at the part it would not take; the answer says why.
+        }
+
+        return await call.ResponseAsync;
     }
 
     private static async Task<AppendResponse> AppendOf(Streams.StreamsClient client, string stream, int count)

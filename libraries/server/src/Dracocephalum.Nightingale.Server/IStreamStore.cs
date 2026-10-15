@@ -26,6 +26,25 @@ public interface IStreamStore
     Task<AppendResult> AppendAsync(string stream, StreamState expected, IReadOnlyList<EventData> events, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Appends to several streams atomically, each under its own expected state, all or nothing:
+    /// events to a stream, or a stream's metadata set as <see cref="SetStreamMetadataAsync"/> sets
+    /// it. Checks on streams not written hold at the commit or nothing is written. The events are
+    /// positioned stream by stream, in the order the appends are given. Every condition that does
+    /// not hold is reported, not only the first. A retry with the same ids, every append events
+    /// under an explicit revision or no stream, succeeds with the original result when the events
+    /// are already there; a metadata set is written with new ids each time, so a request with one
+    /// is not recognised as its own retry. The request is valid by <see cref="StreamAppends.FindProblems"/>.
+    /// </summary>
+    /// <param name="appends">The appends, in order. Never empty; each stream written once.</param>
+    /// <param name="checks">The checks on streams not written; empty for none.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>What each append wrote, in the order they were given.</returns>
+    /// <exception cref="ArgumentException">The request breaks a rule of <see cref="StreamAppends.FindProblems"/>.</exception>
+    /// <exception cref="StreamConflictsException">Streams are not in the expected states; nothing was written.</exception>
+    /// <exception cref="StreamDeletedException">A stream written is archived; nothing was written.</exception>
+    Task<IReadOnlyList<StreamAppendResult>> AppendToStreamsAsync(IReadOnlyList<StreamAppend> appends, IReadOnlyList<StreamCheck> checks, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Reads one page of a stream, with the stream's metadata applied as the reference applies it:
     /// nothing before the later of the last revision less <c>$maxCount</c> plus one and
     /// <c>$tb</c>, which the head reports as its first revision, and nothing older than

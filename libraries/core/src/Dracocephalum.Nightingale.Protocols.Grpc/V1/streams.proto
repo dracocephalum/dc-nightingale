@@ -34,6 +34,26 @@ service Streams {
   // shared.proto.
   rpc Append (stream AppendRequest) returns (AppendResponse);
 
+  // Appends to several streams atomically: all of them, or none, each under
+  // its own expected revision, in one commit. A part is events for a stream,
+  // a header naming the stream followed by its events, or a stream's metadata
+  // set as SetStreamMetadata sets it, except that a truncate_before at its
+  // largest value, a reset, is refused. Checks name streams that are not
+  // written: the append commits only if each is, at the commit, in the state
+  // given. Each stream is written once and named by at most one condition.
+  // The events are positioned stream by stream, in the order the streams are
+  // given, a stream's own in its order. At most as many events as one Append
+  // carries, and at most as many checks. Errors: STREAM_CONFLICTS, every
+  // condition that failed in one answer; STREAM_DELETED, INVALID_STREAM_NAME,
+  // APPEND_SIZE_EXCEEDED, INVALID_ARGUMENT, every problem with the request in
+  // its message. A retry is safe, as for Append, when every part is events
+  // under an explicit expected revision or NO_STREAM: the same events with
+  // the same ids, already there, answer with what they wrote. A metadata set
+  // is written with new ids each time, as SetStreamMetadata's is, so a
+  // request with one is not recognised as its own retry and answers with
+  // the conflict it finds.
+  rpc AppendToStreams (stream AppendToStreamsRequest) returns (AppendToStreamsResponse);
+
   // Resets a stream, the reference's soft delete: it reads as not found
   // until its next append, which continues its revisions with every older
   // event hidden from its reads; $all and the virtual streams keep them. One
@@ -221,6 +241,57 @@ message AppendResponse {
   // to this stream expects `revision`.
   sint64 revision = 1;
   sint64 position = 2;
+}
+
+// One message of an append to several streams. The appends come in the
+// order they are given, numbered from 0, and the checks after them, numbered
+// on: the numbers a STREAM_CONFLICTS answer gives back. A record naming its
+// own stream, for events of several streams in one order, would be a part of
+// its own beside these.
+message AppendToStreamsRequest {
+  oneof content {
+    // Begins an append of events to a stream; its events follow.
+    AppendStreamHeader stream = 1;
+    // An event of the append begun last.
+    ProposedEvent event = 2;
+    // A stream's metadata, set.
+    AppendMetadata metadata = 3;
+    // A condition on a stream not written.
+    AppendCheck check = 4;
+  }
+}
+
+message AppendStreamHeader {
+  string stream = 1;
+  // A revision, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+}
+
+message AppendMetadata {
+  // A plain stream's name.
+  string stream = 1;
+  // A revision of the metadata stream, or one of the ExpectedRevision values.
+  sint64 expected_revision = 2;
+  StreamMetadata metadata = 3;
+}
+
+message AppendCheck {
+  string stream = 1;
+  // A revision, or NO_STREAM or STREAM_EXISTS; ANY asserts nothing.
+  sint64 expected_revision = 2;
+}
+
+message AppendToStreamsResponse {
+  // One for each append, in the order they were given.
+  repeated AppendedStream appended = 1;
+}
+
+message AppendedStream {
+  // The stream written: the stream, or for a metadata set $$<stream>.
+  string stream = 1;
+  // Revision and position of the last event written to it.
+  sint64 revision = 2;
+  sint64 position = 3;
 }
 
 message ResetRequest {
