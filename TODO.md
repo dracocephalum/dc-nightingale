@@ -67,6 +67,27 @@ undecided adds it here rather than mentioning it once in a conversation.
   tenant of the directory, merged in position order in process, each asked
   for the next page's worth only, with an integration test over several
   tenants. Stores partitioned by tenant refuse the wildcard already.
+- **An append that commits after its position was given up is skipped by
+  readers by position.** A position is taken when an event is inserted and
+  seen when its transaction commits, so a lower one can appear after a higher
+  one; the tail waits at a missing position for the store's stale threshold,
+  3 seconds by default, then gives it up as abandoned. An append whose
+  transaction outlasts that, held by a lock, a slow disk or a large batch,
+  commits below the mark: subscriptions and persistent groups reading `$all`
+  or a virtual stream by position have passed it and never deliver it, and
+  only a read from the start finds it. Ordinals catch it, numbered late
+  through the index over the unnumbered rows, and nothing else does. Close
+  by: a cap on an append's transaction, a tunable, enforced by the database
+  where it can be (PostgreSQL's `transaction_timeout` and
+  `statement_timeout`; on SQL Server the command timeout and the connection
+  aborted, which ends a transaction soon rather than at once), and the stale
+  threshold a tunable checked at start-up to exceed the cap by a margin, so a
+  position given up is one that can never commit; a test that holds an
+  append open past the threshold, commits it, and asserts what readers by
+  position see; a variance for what SQL Server cannot enforce. The same rule
+  lets a sequencer number by a plain range of positions and never look back,
+  which is how the Marten backend can keep ordinals without a marker column
+  on a table it cannot add columns to.
 - **An event can be appended that no client can read back.** Neither side
   sets gRPC's message limits, so both keep the defaults: the server receives
   at most 4 MB in a message and sends any size, and the client the same the
