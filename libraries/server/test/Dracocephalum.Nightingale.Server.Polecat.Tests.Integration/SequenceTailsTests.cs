@@ -60,7 +60,7 @@ public sealed class SequenceTailsTests(SqlServerTestDatabase database)
         }
 
         // Assert
-        tails.Strategy.ShouldNotBeNull().Kind.ShouldBe(HeadStrategyKind.TransactionHorizon);
+        tails.Strategy.ShouldNotBeNull().Kind.ShouldBe(HeadStrategyKind.PartitionHorizon);
         kept.ShouldBeGreaterThanOrEqualTo(appended.Position);
     }
 

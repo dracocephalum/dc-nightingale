@@ -1,6 +1,5 @@
 using System.Data.Common;
 using System.Globalization;
-using System.Security.Cryptography;
 
 using Dracocephalum.Nightingale.Server.Contracts;
 using Dracocephalum.Nightingale.Server.Sequencing;
@@ -43,7 +42,7 @@ public sealed class SqlServerTransactionHorizonTests(SqlServerTransactionHorizon
     {
         await using var login = await TestLogin.CreateAsync(databases.Journal);
 
-        var availability = await login.Horizon.CheckAvailabilityAsync(Cancellation);
+        var availability = await new SqlServerTransactionHorizon(login.OpenAsync).CheckAvailabilityAsync(Cancellation);
 
         availability.IsAvailable.ShouldBeFalse();
         availability.Reason.ShouldNotBeNull().ShouldContain("VIEW DATABASE STATE");
@@ -59,8 +58,9 @@ public sealed class SqlServerTransactionHorizonTests(SqlServerTransactionHorizon
         await using var insert = new SqlCommand($"INSERT INTO {ProbeTable} (id) VALUES (1)", connection, transaction);
         await insert.ExecuteNonQueryAsync(Cancellation);
 
-        var availability = await login.Horizon.CheckAvailabilityAsync(Cancellation);
-        var holder = await login.Horizon.FindHolderAsync(await login.Horizon.MarkAsync(Cancellation), Cancellation);
+        var horizon = new SqlServerTransactionHorizon(login.OpenAsync);
+        var availability = await horizon.CheckAvailabilityAsync(Cancellation);
+        var holder = await horizon.FindHolderAsync(await horizon.MarkAsync(Cancellation), Cancellation);
 
         availability.ShouldBe(HorizonAvailability.Available);
         holder.ShouldNotBeNull();
@@ -79,9 +79,12 @@ public sealed class SqlServerTransactionHorizonTests(SqlServerTransactionHorizon
         return connection;
     }
 
-    /// <summary>The journal and another database on the same server, each with the probe table, read once; dropped after the class.</summary>
+    /// <summary>The journal and another database on the same server, each with the probe table and another, read once; dropped after the class.</summary>
     public sealed class Databases : IAsyncLifetime
     {
+        /// <summary>A table beside the probe table, which a horizon by partition does not watch.</summary>
+        public const string OtherTable = "horizon_other";
+
         /// <summary>Gets the name of the journal.</summary>
         public string Journal { get; } = TestDatabases.NewName();
 
@@ -93,7 +96,7 @@ public sealed class SqlServerTransactionHorizonTests(SqlServerTransactionHorizon
             foreach (var name in new[] { Journal, Other })
             {
                 await TestDatabases.CreateEmptyAsync(name);
-                await TestDatabases.ExecuteAsync(name, $"CREATE TABLE {ProbeTable} (id int NOT NULL); SELECT COUNT(*) FROM {ProbeTable};");
+                await TestDatabases.ExecuteAsync(name, $"CREATE TABLE {ProbeTable} (id int NOT NULL); SELECT COUNT(*) FROM {ProbeTable}; CREATE TABLE {OtherTable} (id int NOT NULL); SELECT COUNT(*) FROM {OtherTable};");
             }
         }
 
@@ -101,55 +104,6 @@ public sealed class SqlServerTransactionHorizonTests(SqlServerTransactionHorizon
         {
             await TestDatabases.DropAsync(Journal);
             await TestDatabases.DropAsync(Other);
-        }
-    }
-
-    /// <summary>
-    /// A login of the journal's with no permission of its own, for as long as a test runs, and a
-    /// horizon reading as it: the server takes Windows logins only, so the horizon's connection
-    /// is opened as the tests' and impersonates the login, unpooled, so nothing else inherits it.
-    /// </summary>
-    private sealed class TestLogin : IAsyncDisposable
-    {
-        private TestLogin(string name, string journal)
-        {
-            Name = name;
-            var connectionString = new SqlConnectionStringBuilder(TestDatabases.ConnectionStringFor(journal)) { Pooling = false }.ConnectionString;
-            Horizon = new SqlServerTransactionHorizon(async cancellationToken =>
-            {
-                var connection = new SqlConnection(connectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var impersonate = new SqlCommand(string.Format(CultureInfo.InvariantCulture, "EXECUTE AS LOGIN = '{0}'", name), connection);
-                await impersonate.ExecuteNonQueryAsync(cancellationToken);
-                return connection;
-            });
-        }
-
-        public string Name { get; }
-
-        public SqlServerTransactionHorizon Horizon { get; }
-
-        public static async Task<TestLogin> CreateAsync(string journal)
-        {
-            var name = "nightingale_test_login_" + RandomNumberGenerator.GetHexString(8, lowercase: true);
-            var password = RandomNumberGenerator.GetHexString(32) + "aA1!";
-            await using (var master = new SqlConnection(TestDatabases.Master))
-            {
-                await master.OpenAsync();
-                await using var create = new SqlCommand(string.Format(CultureInfo.InvariantCulture, "CREATE LOGIN [{0}] WITH PASSWORD = N'{1}', CHECK_POLICY = OFF", name, password), master);
-                await create.ExecuteNonQueryAsync();
-            }
-
-            await TestDatabases.ExecuteAsync(journal, string.Format(CultureInfo.InvariantCulture, "CREATE USER [{0}] FOR LOGIN [{0}]", name));
-            return new TestLogin(name, journal);
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await using var master = new SqlConnection(TestDatabases.Master);
-            await master.OpenAsync();
-            await using var drop = new SqlCommand(string.Format(CultureInfo.InvariantCulture, "IF SUSER_ID('{0}') IS NOT NULL DROP LOGIN [{0}]", Name), master);
-            await drop.ExecuteNonQueryAsync();
         }
     }
 }

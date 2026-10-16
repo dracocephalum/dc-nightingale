@@ -645,31 +645,20 @@ What it buys is latency, and settings of a partition's own:
   others working.
 
 What it does not buy is isolation from the database: the partitions of one
-journal share its transaction horizon, its log, its locks and its backups, so
+journal share its log, its lock manager and its backups, so
 a failure there stalls them all whatever the number of workers. That is
 database per tenant, a journal each, under the store hierarchy. Built when one
 busy tenant delays the others, or a deployment asks for a partition's own
 settings.
 
-### A horizon per partition
+### A partition horizon on PostgreSQL
 
-The pipedream with it: a gap in one partition judged only by the transactions
-that could still fill it, those writing to that partition, so a long writer in
-another tenant's partition no longer holds this one's gap. A transaction that
-takes a position in a partition writes the stream's row in the same tenant's
-partition first, so the evidence is the locks on the partition of the events
-table and of the streams table:
-
-- on PostgreSQL each partition is a table of its own, and `pg_locks` names it
-  and is readable by every role: a partition's horizon is the in-progress
-  transaction ids of this database that hold a lock on either of its tables;
-- on SQL Server the locks are in `sys.dm_tran_locks`, by the partition's
-  storage, which needs `VIEW SERVER PERFORMANCE STATE`: the lock-based
-  refinement of the horizon, opt-in, applied per partition.
-
-A writer that has not yet written the stream's row holds no position in the
-partition, so it cannot hold a gap below the checkpoint's ceiling, the same
-argument the lock-based refinement rests on.
+SQL Server's partition horizon is built (`DESIGN.md`, seam 4). On PostgreSQL
+each partition is a table of its own, and `pg_locks` names it and is readable
+by every role: a partition's horizon is the in-progress transactions of this
+database that hold a lock on either of its tables, the events table's or the
+streams table's, the same argument, since an append writes its stream's row
+before it draws a position. Built with the Marten backend.
 
 ## Scrubs
 

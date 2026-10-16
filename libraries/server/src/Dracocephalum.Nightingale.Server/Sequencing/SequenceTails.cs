@@ -213,8 +213,9 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
 
     /// <summary>
     /// One look at every followed sequence: which moved past its head, by one read over all of
-    /// them, then each of those extended, a gap judged; then every head kept. The poller looks on
-    /// its cadence; a test looks by hand.
+    /// them; each of those extended; the gaps left judged together, under one marker for those
+    /// first seen and one question to the horizon for all; then every head kept. The poller looks
+    /// on its cadence; a test looks by hand.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>Whether a head moved and was left behind positions already seen past it: a head catching up, which calls for the next look soon.</returns>
@@ -230,17 +231,28 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
         await BeginAsync(tails, cancellationToken).ConfigureAwait(false);
         var ceilings = await strategy.Positions.ReadCeilingsAsync(tails.Select(tail => tail.Key).ToArray(), cancellationToken).ConfigureAwait(false);
         var catchingUp = false;
+        var gapped = new List<Tail>();
         foreach (var tail in tails)
         {
             if (ceilings.TryGetValue(tail.Key, out var ceiling) && ceiling > tail.Head)
             {
-                catchingUp |= await ExtendAsync(tail, ceiling, strategy, cancellationToken).ConfigureAwait(false);
+                var extension = await ExtendAsync(tail, ceiling, strategy, cancellationToken).ConfigureAwait(false);
+                catchingUp |= extension == Extension.FullWindow;
+                if (extension == Extension.Gapped)
+                {
+                    gapped.Add(tail);
+                }
             }
             else
             {
                 // Nothing past the head: whatever gap held it has filled or was given up.
                 tail.Checkpoint = null;
             }
+        }
+
+        if (gapped.Count > 0)
+        {
+            catchingUp |= await JudgeAsync(gapped, ceilings, strategy, cancellationToken).ConfigureAwait(false);
         }
 
         await KeepAsync(tails, cancellationToken).ConfigureAwait(false);
@@ -344,71 +356,94 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
         return tail.Head;
     }
 
-    /// <summary>
-    /// Extends a sequence's head through the positions that follow it one by one, and past a gap
-    /// once the checkpoint over it is final.
-    /// </summary>
+    /// <summary>Extends a sequence's head through the positions that follow it one by one, up to the first gap.</summary>
     /// <param name="tail">The tail.</param>
     /// <param name="ceiling">The highest position of the sequence seen at the start of this look, before any marker is taken.</param>
     /// <param name="strategy">The strategy.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>Whether the head was left behind positions seen past it: a gap follows it, or the window was full.</returns>
-    private async Task<bool> ExtendAsync(Tail tail, long ceiling, HeadStrategy strategy, CancellationToken cancellationToken)
+    /// <returns>How far the head came: to the ceiling, through a full window, or to a gap left to judge.</returns>
+    private async Task<Extension> ExtendAsync(Tail tail, long ceiling, HeadStrategy strategy, CancellationToken cancellationToken)
     {
-        var head = tail.Head;
-        var following = await strategy.Positions.ReadFollowingAsync(tail.Key, head, RefreshWindow, cancellationToken).ConfigureAwait(false);
-        var reached = ContiguousPrefix.Extend(head, following);
+        var following = await strategy.Positions.ReadFollowingAsync(tail.Key, tail.Head, RefreshWindow, cancellationToken).ConfigureAwait(false);
+        var reached = ContiguousPrefix.Extend(tail.Head, following);
+
+        // What was reached needs no judgement, so it is published first: a horizon that cannot be
+        // asked holds a gap, never the run of committed positions before it.
+        Publish(tail, reached);
         if (following.Count == RefreshWindow && reached == following[^1])
         {
             // A full window without a gap: a head catching up, with no gap to judge yet.
             tail.Checkpoint = null;
-            Publish(tail, reached);
-            return true;
+            return Extension.FullWindow;
         }
 
         if (reached >= ceiling)
         {
             tail.Checkpoint = null;
-            Publish(tail, reached);
-            return false;
+            return Extension.CaughtUp;
         }
 
-        // A gap after what was reached, below the ceiling. What was reached needs no judgement, so
-        // it is published first: a horizon that cannot be asked holds the gap, never the run of
-        // committed positions before it. The checkpoint over the gap is taken the first time it is
-        // seen, at the ceiling read before its marker, and judged at every look: at once, where the
-        // horizon needs no age.
-        Publish(tail, reached);
-        tail.Checkpoint ??=await HorizonCheckpoint.TakeAsync(strategy.Horizon, ceiling, _timeProvider, cancellationToken).ConfigureAwait(false);
-        var checkpoint = tail.Checkpoint;
-        var judgement = await checkpoint.JudgeAsync(cancellationToken).ConfigureAwait(false);
-        if (judgement.IsFinal)
+        return Extension.Gapped;
+    }
+
+    /// <summary>
+    /// Judges the gaps a look left, and moves past those that are final. A checkpoint over a gap
+    /// is taken the first time it is seen, at the ceiling read before its marker, one marker for
+    /// every gap first seen in the look, and judged at every look: at once, where the horizon
+    /// needs no age.
+    /// </summary>
+    /// <returns>Whether a head is left behind positions seen past it: a gap still held, or another past the ceiling.</returns>
+    private async Task<bool> JudgeAsync(IReadOnlyList<Tail> gapped, IReadOnlyDictionary<SequenceKey, long> ceilings, HeadStrategy strategy, CancellationToken cancellationToken)
+    {
+        var unmarked = gapped.Where(tail => tail.Checkpoint is null).ToDictionary(tail => tail.Key, tail => ceilings[tail.Key]);
+        if (unmarked.Count > 0)
         {
-            // Every position up to the ceiling is final: those seen are committed, the missing
-            // ones never will be. The head moves to the ceiling, whatever number of gaps lay below
-            // it, and extends from there.
-            tail.Checkpoint = null;
-            if (checkpoint.Ceiling > reached)
+            var taken = await HorizonCheckpoint.TakeAsync(strategy.Horizon, unmarked, _timeProvider, cancellationToken).ConfigureAwait(false);
+            foreach (var tail in gapped.Where(tail => tail.Checkpoint is null))
             {
-                LogGaveUp(tail.Key.TenantId, reached, checkpoint.Ceiling, strategy.Kind);
-                following = await strategy.Positions.ReadFollowingAsync(tail.Key, checkpoint.Ceiling, RefreshWindow, cancellationToken).ConfigureAwait(false);
-                reached = ContiguousPrefix.Extend(checkpoint.Ceiling, following);
+                tail.Checkpoint = taken[tail.Key];
+            }
+        }
+
+        var behind = false;
+        var judgements = await HorizonCheckpoint.JudgeAsync(strategy.Horizon, gapped.ToDictionary(tail => tail.Key, tail => tail.Checkpoint!), cancellationToken).ConfigureAwait(false);
+        foreach (var tail in gapped)
+        {
+            var checkpoint = tail.Checkpoint!;
+            var judgement = judgements[tail.Key];
+            if (judgement.IsFinal)
+            {
+                // Every position up to the ceiling is final: those seen are committed, the missing
+                // ones never will be. The head moves to the ceiling, whatever number of gaps lay
+                // below it, and extends from there; a gap past the ceiling is judged at the next look.
+                tail.Checkpoint = null;
+                if (checkpoint.Ceiling > tail.Head)
+                {
+                    LogGaveUp(tail.Key.TenantId, tail.Head, checkpoint.Ceiling, strategy.Kind);
+                    var following = await strategy.Positions.ReadFollowingAsync(tail.Key, checkpoint.Ceiling, RefreshWindow, cancellationToken).ConfigureAwait(false);
+                    Publish(tail, ContiguousPrefix.Extend(checkpoint.Ceiling, following));
+                    behind |= following.Count > 0 && following[^1] > tail.Head;
+                }
+                else
+                {
+                    // The gap the checkpoint was taken over has filled; the one this look found
+                    // lies past its ceiling, and gets a checkpoint of its own at the next look.
+                    behind = true;
+                }
+            }
+            else if (judgement.Holder is { } holder && !tail.Warned && checkpoint.GetAge() >= HoldWarning)
+            {
+                tail.Warned = true;
+                LogHeld(tail.Key.TenantId, tail.Head, checkpoint.GetAge(), holder.SessionId, holder.LoginName, holder.StartedAt);
             }
 
-            Publish(tail, reached);
-            return following.Count > 0 && following[^1] > reached;
+            // Held, or not yet old enough: judged again at the fast interval, since the transaction
+            // holding a gap is most often an append a moment from its commit, and a reader on
+            // another instance than the writer waits on that judgement.
+            behind |= !judgement.IsFinal;
         }
 
-        if (judgement.Holder is { } holder && !tail.Warned && checkpoint.GetAge() >= HoldWarning)
-        {
-            tail.Warned = true;
-            LogHeld(tail.Key.TenantId, reached, checkpoint.GetAge(), holder.SessionId, holder.LoginName, holder.StartedAt);
-        }
-
-        // Held, or not yet old enough: judged again at the fast interval, since the transaction
-        // holding a gap is most often an append a moment from its commit, and a reader on another
-        // instance than the writer waits on that judgement.
-        return true;
+        return behind;
     }
 
     /// <summary>A tail for a sequence followed from now on, its numbering stopped when every sequence's is.</summary>
@@ -455,6 +490,19 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Sequence of tenant {TenantId}: the head has waited at {Reached} for {Age} on an open transaction that may still commit a missing position: session {SessionId}, login {LoginName}, begun {StartedAt}. Nothing past the head is delivered until it ends.")]
     private partial void LogHeld(string? tenantId, long reached, TimeSpan age, int? sessionId, string? loginName, DateTimeOffset? startedAt);
+
+    /// <summary>How far one extension brought a head.</summary>
+    private enum Extension
+    {
+        /// <summary>To the ceiling read at the start of the look.</summary>
+        CaughtUp,
+
+        /// <summary>Through a full window without a gap: more follows.</summary>
+        FullWindow,
+
+        /// <summary>To a gap below the ceiling, left to judge.</summary>
+        Gapped,
+    }
 
     /// <summary>One sequence's tail: its followed head and numbering, and the poller's checkpoint over the gap holding it.</summary>
     private sealed class Tail(SequenceTails owner, SequenceKey key) : IStoreTail

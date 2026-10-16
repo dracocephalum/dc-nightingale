@@ -25,8 +25,9 @@ public sealed class StaleThresholdHorizon(TimeSpan threshold) : ITransactionHori
     public ValueTask<HorizonMarker> MarkAsync(CancellationToken cancellationToken) => ValueTask.FromResult(default(HorizonMarker));
 
     /// <summary>Finds no holder: without evidence of open transactions, the wait is all there is.</summary>
-    /// <param name="marker">The marker.</param>
+    /// <param name="markers">The markers.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns><see langword="null"/>.</returns>
-    public ValueTask<HorizonHolder?> FindHolderAsync(HorizonMarker marker, CancellationToken cancellationToken) => ValueTask.FromResult<HorizonHolder?>(null);
+    /// <returns>No holder.</returns>
+    public ValueTask<IReadOnlyDictionary<SequenceKey, HorizonHolder>> FindHoldersAsync(IReadOnlyDictionary<SequenceKey, HorizonMarker> markers, CancellationToken cancellationToken) =>
+        ValueTask.FromResult<IReadOnlyDictionary<SequenceKey, HorizonHolder>>(new Dictionary<SequenceKey, HorizonHolder>());
 }

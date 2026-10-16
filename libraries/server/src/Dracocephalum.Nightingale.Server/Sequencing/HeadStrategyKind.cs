@@ -4,8 +4,17 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 public enum HeadStrategyKind
 {
     /// <summary>
+    /// The transaction horizon of each store partition: a missing position is given up once no
+    /// transaction that could still commit it is open in its partition, and never while one is. A
+    /// transaction open elsewhere in the database, in another partition or on tables that are not
+    /// the store's, holds no head back.
+    /// </summary>
+    PartitionHorizon,
+
+    /// <summary>
     /// The database's transaction horizon: a missing position is given up once no transaction that
-    /// could still commit it is open, and never while one is. No position is skipped that commits later.
+    /// could still commit it is open, and never while one is. No position is skipped that commits
+    /// later; any transaction open in the database since before a gap holds every head.
     /// </summary>
     TransactionHorizon,
 

@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 
 using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Sequencing;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Shouldly;
@@ -96,6 +97,43 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         pastTheGap.Position.ShouldBe(3, "the refused append's number is gone");
         acmeHead.ShouldBe(1);
         defaultHead.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Tails_WhileAnotherTenantsTransactionStaysOpen_ShouldGiveAGapUpByTheirOwnPartitionsHorizon()
+    {
+        // Arrange: a transaction holds acme's partition open, as an append between its stream's
+        // row and its commit; then a refused append leaves a gap in the default tenant's sequence.
+        // The whole database's horizon would hold the default tenant's head until acme's
+        // transaction ended; its own partition's does not. The held stream's id sorts after acme's
+        // committed one: the store's check of an expected revision takes key-range locks in every
+        // tenant's partition and would wait on a held row next to its key (UPSTREAM.md).
+        // Both tenants append before it opens: a tenant's first append splits the tables'
+        // partition functions, which waits on every open transaction on them.
+        var stores = Stores;
+        var acme = await CreateTenantAsync("acme");
+        await stores.GetStreams(acme).AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var defaults = stores.GetStreams(TenantScope.Default);
+        await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await using var connection = new SqlConnection(TestDatabases.ConnectionStringFor(_name));
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        await using (var hold = new SqlCommand("INSERT INTO dbo.pc_streams (tenant_id, id, tenant_ordinal, version) SELECT tenant_id, 'zz-held-1', ordinal, 1 FROM dbo.pc_tenant_partitions WHERE tenant_id = @tenant", connection, transaction))
+        {
+            hold.Parameters.AddWithValue("@tenant", acme.StoreTenantId);
+            (await hold.ExecuteNonQueryAsync(TestContext.Current.CancellationToken)).ShouldBe(1);
+        }
+
+        await Should.ThrowAsync<ValueTooLongException>(async () => await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [new EventData(Guid.NewGuid(), new string('x', 501), "{}"u8.ToArray())], TestContext.Current.CancellationToken));
+        var pastTheGap = await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [Event()], TestContext.Current.CancellationToken);
+
+        // Act: well inside the store's threshold, which the best effort would wait out.
+        var head = await ReachAsync(stores.GetTail(TenantScope.Default), pastTheGap.Position, TimeSpan.FromSeconds(2.5));
+
+        // Assert
+        _host!.Services.GetRequiredService<SequenceTails>().Strategy.ShouldNotBeNull().Kind.ShouldBe(HeadStrategyKind.PartitionHorizon);
+        head.ShouldBe(pastTheGap.Position);
+        connection.State.ShouldBe(System.Data.ConnectionState.Open, "acme's transaction is still open");
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Text;
 
+using Dracocephalum.Nightingale.Server.Contracts;
 using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.Data.SqlClient;
 using Shouldly;
@@ -7,9 +8,10 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 
 /// <summary>
-/// What the transaction horizon's minimum age of zero rests on: the store writes an append's
-/// stream row before it takes a position, so the append's transaction is a writer the horizon
-/// sees before it holds a position nobody can see. Pinned against the store as it ships, so a
+/// What the horizons' minimum age of zero rests on: the store writes an append's stream row before
+/// it takes a position, so the append's transaction is a writer the horizon sees, holding the
+/// row's lock in its partition, before it holds a position nobody can see. Pinned against the
+/// store as it ships, so a
 /// version that reorders its statements fails here rather than leaving a head that can pass an
 /// append still to commit (<c>docs/rules/store-upgrades.md</c>). The append is stopped between its
 /// two writes by a session that holds the events table under an exclusive lock and writes nothing,

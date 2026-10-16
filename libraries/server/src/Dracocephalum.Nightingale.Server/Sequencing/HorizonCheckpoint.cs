@@ -11,13 +11,11 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// </summary>
 public sealed class HorizonCheckpoint
 {
-    private readonly ITransactionHorizon _horizon;
     private readonly TimeProvider _timeProvider;
     private readonly long _takenAt;
 
-    private HorizonCheckpoint(ITransactionHorizon horizon, TimeProvider timeProvider, long ceiling, HorizonMarker marker, long takenAt)
+    private HorizonCheckpoint(TimeProvider timeProvider, long ceiling, HorizonMarker marker, long takenAt)
     {
-        _horizon = horizon;
         _timeProvider = timeProvider;
         _takenAt = takenAt;
         Ceiling = ceiling;
@@ -31,41 +29,67 @@ public sealed class HorizonCheckpoint
     public HorizonMarker Marker { get; }
 
     /// <summary>
-    /// Takes a checkpoint at a ceiling the caller has just read. The marker is taken here, after
-    /// the read, never before it: a marker older than the ceiling could pass while the transaction
-    /// that took a position below the ceiling is still open.
+    /// Takes a checkpoint at each ceiling the caller has read, under one marker. The marker is
+    /// taken here, after the reads, never before them: a marker older than a ceiling could pass
+    /// while the transaction that took a position below it is still open.
     /// </summary>
-    /// <param name="horizon">The horizon of the journal the ceiling was read from.</param>
-    /// <param name="ceiling">The highest position seen.</param>
+    /// <param name="horizon">The horizon of the journal the ceilings were read from.</param>
+    /// <param name="ceilings">The highest position seen of each sequence.</param>
     /// <param name="timeProvider">The clock the minimum age runs on.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The checkpoint.</returns>
-    public static async ValueTask<HorizonCheckpoint> TakeAsync(ITransactionHorizon horizon, long ceiling, TimeProvider timeProvider, CancellationToken cancellationToken)
+    /// <returns>The checkpoint of each sequence.</returns>
+    public static async ValueTask<IReadOnlyDictionary<SequenceKey, HorizonCheckpoint>> TakeAsync(ITransactionHorizon horizon, IReadOnlyDictionary<SequenceKey, long> ceilings, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(horizon);
+        ArgumentNullException.ThrowIfNull(ceilings);
         ArgumentNullException.ThrowIfNull(timeProvider);
         var marker = await horizon.MarkAsync(cancellationToken).ConfigureAwait(false);
-        return new HorizonCheckpoint(horizon, timeProvider, ceiling, marker, timeProvider.GetTimestamp());
+        var takenAt = timeProvider.GetTimestamp();
+        return ceilings.ToDictionary(pair => pair.Key, pair => new HorizonCheckpoint(timeProvider, pair.Value, marker, takenAt));
+    }
+
+    /// <summary>
+    /// Judges whether every position up to each checkpoint's ceiling is final: a checkpoint younger
+    /// than the horizon's minimum age is not, and the rest are asked of the horizon together, in
+    /// one call, which is not made when none is old enough.
+    /// </summary>
+    /// <param name="horizon">The horizon that issued the checkpoints' markers.</param>
+    /// <param name="checkpoints">The checkpoint over each sequence's gap.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The judgement of each sequence, with the transaction holding it back when one does.</returns>
+    public static async ValueTask<IReadOnlyDictionary<SequenceKey, CheckpointJudgement>> JudgeAsync(ITransactionHorizon horizon, IReadOnlyDictionary<SequenceKey, HorizonCheckpoint> checkpoints, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(horizon);
+        ArgumentNullException.ThrowIfNull(checkpoints);
+        var judgements = new Dictionary<SequenceKey, CheckpointJudgement>(checkpoints.Count);
+        var markers = new Dictionary<SequenceKey, HorizonMarker>(checkpoints.Count);
+        foreach (var (sequence, checkpoint) in checkpoints)
+        {
+            if (checkpoint.GetAge() < horizon.MinimumAge)
+            {
+                judgements[sequence] = CheckpointJudgement.TooYoung;
+            }
+            else
+            {
+                markers[sequence] = checkpoint.Marker;
+            }
+        }
+
+        if (markers.Count == 0)
+        {
+            return judgements;
+        }
+
+        var holders = await horizon.FindHoldersAsync(markers, cancellationToken).ConfigureAwait(false);
+        foreach (var sequence in markers.Keys)
+        {
+            judgements[sequence] = holders.TryGetValue(sequence, out var holder) ? CheckpointJudgement.HeldBy(holder) : CheckpointJudgement.Final;
+        }
+
+        return judgements;
     }
 
     /// <summary>Gets how long ago the checkpoint was taken.</summary>
     /// <returns>The age.</returns>
     public TimeSpan GetAge() => _timeProvider.GetElapsedTime(_takenAt);
-
-    /// <summary>
-    /// Judges whether every position up to the ceiling is final: not before the minimum age, and
-    /// then by asking the horizon, once a call.
-    /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The judgement, with the transaction holding the horizon back when one does.</returns>
-    public async ValueTask<CheckpointJudgement> JudgeAsync(CancellationToken cancellationToken)
-    {
-        if (GetAge() < _horizon.MinimumAge)
-        {
-            return CheckpointJudgement.TooYoung;
-        }
-
-        var holder = await _horizon.FindHolderAsync(Marker, cancellationToken).ConfigureAwait(false);
-        return holder is null ? CheckpointJudgement.Final : CheckpointJudgement.HeldBy(holder);
-    }
 }
