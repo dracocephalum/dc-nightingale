@@ -172,11 +172,16 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var mark = await context.ProgressionRows.AsNoTracking()
-            .Where(row => row.Name == EventsDbContext.HighWaterMark)
-            .Select(row => (long?)row.LastSeqId)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false) ?? 0;
+        // The head of the sequence the read is in: the shared one's, or under a sequence per tenant
+        // the tenant's; a read of every tenant there has no one sequence, and no mark.
+        var sequence = partitionedByTenant ? tenantId : null;
+        var mark = partitionedByTenant && tenantId is null
+            ? 0
+            : await context.SequenceHeads.AsNoTracking()
+                .Where(row => row.TenantId == sequence)
+                .Select(row => (long?)row.Position)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false) ?? 0;
         var bound = Math.Min(mark, head);
         if (from > (direction == Direction.Forwards ? bound : mark))
         {

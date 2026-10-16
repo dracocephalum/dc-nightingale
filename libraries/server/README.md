@@ -25,9 +25,12 @@ to the statuses the contract promises. A host calls two extension methods:
 own.
 
 Its `Sequencing` namespace holds what every backend supplies or shares for
-its sequences, the transaction horizon first: the port a backend implements
-over its database, and the checkpoint the tail and the ordinal audit judge
-by it. `test/Dracocephalum.Nightingale.Server.Contracts` holds those ports'
+its sequences: `SequenceTails`, the one poller of a process that keeps a
+sequence head per sequence and the gateway's `SequenceHead` rows; the ports a
+backend implements, the transaction horizon over its database and the reads
+of its events table, which together are its head strategy; and the
+checkpoint the tails judge a gap by.
+`test/Dracocephalum.Nightingale.Server.Contracts` holds those ports'
 contracts as abstract tests, a library and not a test project: a backend's
 integration project derives a class from each and supplies its database,
 and the contract's tests run there.
@@ -52,8 +55,8 @@ missing. The PostgreSQL column is the planned Marten backend's
 
 | Tier | SQL Server (Polecat) | PostgreSQL (Marten, planned) |
 |---|---|---|
-| **Core**: appends, reads and subscriptions, groups, metadata, appends to several streams, the virtual streams by position | SQL Server 2025 or later, for its native `json` type; a UTF-8 collation, `Latin1_General_100_BIN2_UTF8` by default; any edition, Express for development only | PostgreSQL 13 or later, Marten's own floor |
-| **Ordinals**: the virtual streams by number | nothing more under the default locking read committed; under read committed snapshot, as Azure SQL Database runs by default, or on a readable secondary, `VIEW DATABASE STATE` for the gateway's login (`PENDING.md`, *The ordinal audit*) | the gateway's role must see the sessions that write events: its own, or `pg_read_all_stats` when other roles write; a database-level `transaction_timeout` (17 or later) is recommended, not required |
+| **Core**: appends, reads and subscriptions, groups, metadata, appends to several streams, the virtual streams by position | SQL Server 2025 or later, for its native `json` type; a UTF-8 collation, `Latin1_General_100_BIN2_UTF8` by default; any edition, Express for development only. `VIEW DATABASE STATE` for the gateway's login is recommended, not required: with it the sequence heads are kept by the transaction horizon, which never skips an append that commits late and gives a rolled-back one up at once; without it by the best-effort strategy, a 3-second wait over reads that wait on an open append's row, chosen at start with a warning (`DESIGN.md`, seam 4) | PostgreSQL 13 or later, Marten's own floor |
+| **Ordinals**: the virtual streams by number | nothing more: the sequencer numbers up to the sequence head, so ordinals are as exact as the head | nothing more: the transaction horizon reads what every role may (`PENDING.md`, *Ordinals as links*) |
 | **Read replicas** | an availability group with a readable secondary, an Enterprise feature, or Azure | a streaming replica |
 | **Partitioning** by tenant or by archived stream | table partitioning, in every edition since 2016 SP1 | declarative partitioning |
 | **Online index builds** (`PENDING.md`) | Enterprise, or Azure | `CREATE INDEX CONCURRENTLY` |
@@ -117,7 +120,7 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:TailPollingInterval` | `00:00:01` | how long the tail rests between looks at the store once it has caught up, which is how far behind an append made through another instance a subscriber on this one can be; an append made through this instance wakes its own tail at once. One small query per look per instance, whatever the number of subscriptions, so `00:00:00.250` buys a quarter of a second across instances for four queries a second. While a look moved the head and left it short of what is already committed, the tail looks again after a quarter of a second, or after this interval when it is shorter |
 | `Nightingale:MaxEventsPerAppend` | `150` | the most events one append may carry; one more is refused with `APPEND_SIZE_EXCEEDED` before anything is written, and the caller sends several appends. At most 190, which is what the store takes in one write on SQL Server; more is refused at startup |
 | `Nightingale:Schema` | `nightingale` | the schema the gateway keeps its own tables and its migrations history in; it may be the event store's schema |
-| `Nightingale:UseReadOnlyConnection` | `true` | open a second, read-only connection and serve from it the pages of `$all` and of the virtual streams that lie at or below its own high-water mark; exact, and where there is no readable secondary it reaches the same server |
+| `Nightingale:UseReadOnlyConnection` | `true` | open a second, read-only connection and serve from it the pages of `$all` and of the virtual streams that lie at or below the sequence head it holds; exact, and where there is no readable secondary it reaches the same server |
 | `Nightingale:ReadOnlyConnectionStringName` | none | which entry under `ConnectionStrings` the read-only connection uses, exactly as written; unset, the main string with `ApplicationIntent=ReadOnly`, which a listener with read-only routing sends to a secondary |
 | `Nightingale:ReadStreamsFromReadOnlyConnection` | `false` | serve bounded reads of plain streams from the read-only connection too; they are then eventually consistent, and an append made on a read that was behind is refused with a revision conflict |
 | `Nightingale:Deletion:Allowed` | `None` | how far a stream may be taken away: `None` refuses `Archive` and `Delete`, `Archive` allows archiving, a stream's events leaving every read and its appends refused with the rows kept, and `Delete` allows that and deleting, a stream and its events removed for good and the name free again. `Reset`, the reference client's delete, is allowed at every level: it writes one metadata event and removes nothing. A value that is not one of the three refuses to start |
@@ -136,7 +139,7 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:Store:Schema` | `dbo` | the schema the event store's tables live in |
 | `Nightingale:Store:Collation` | `Latin1_General_100_BIN2_UTF8` | the collation the database is created with, and the one a database provisioned by hand must have. It must be a UTF-8 collation: any other is refused, because names in another script would collide. The default is binary, so names that differ in case are different names; a case-insensitive UTF-8 collation makes them one, on reads exactly and on live delivery as near as the server can match in process (`VARIANCES.md`, *Names are compared by the database*) |
 | `Nightingale:Store:IgnoreCollationCompatibility` | `false` | work with a collation that is not UTF-8, for a database that already has one or a server older than SQL Server 2019. The host's own choice and consequence: a character of a name outside the collation's code page is stored as a question mark, so two such names can become one. Not recorded with the store; the server logs a warning at every start |
-| `Nightingale:Store:Partitioning` | `None` | `Tenant` partitions the events table by tenant, each with its own sequence and its own high-water mark, which the server polls itself for every tenant it serves, and the wildcard tenant is then refused; `ArchivedStream` partitions it by the archived flag, so deleted streams' events sit apart; one mode, because a table has one partition scheme |
+| `Nightingale:Store:Partitioning` | `None` | `Tenant` partitions the events table by tenant, each with its own sequence and its own sequence head, which the server keeps for every tenant it serves, and the wildcard tenant is then refused; `ArchivedStream` partitions it by the archived flag, so deleted streams' events sit apart; one mode, because a table has one partition scheme |
 
 The settings under `Nightingale:Store` are fixed when the store is
 initialized and checked on every later start: the server refuses to start

@@ -1,6 +1,7 @@
 using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
+using Dracocephalum.Nightingale.Server.Sequencing;
 using JasperFx;
 using JasperFx.Events;
 using JasperFx.MultiTenancy;
@@ -68,8 +69,8 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// The store is configured with string stream identity, conjoined tenancy with the default
     /// tenant, the partitioning the settings ask for, the metadata columns the contract maps, and
-    /// its own schema management off; the initializer applies the schema instead, and the tailer
-    /// starts after it, once the progression table it writes to exists.
+    /// its own schema management off; the initializer applies the schema instead, and the tails
+    /// start after it, once the gateway's table they keep their heads in exists.
     /// </summary>
     private static IServiceCollection Register(IServiceCollection services, string connectionString, NightingaleOptions options, string? readOnlyConnectionString)
     {
@@ -102,28 +103,20 @@ public static class ServiceCollectionExtensions
 
         services.AddNightingaleOptions(options);
 
-        // The signal every append pulses, which whichever tail the host runs waits on: the store's
-        // high-water agent takes it as the daemon's wake-up, the per-tenant poller in place of its
+        // The signal every append pulses, which the tails' poller waits on in place of its
         // interval. The slow polling time is the host's setting; the fast one is the store's own
         // unless the setting is shorter still, and is what the numbering follower reads on too.
         var slowInterval = options.TailPollingInterval;
-        var fastInterval = slowInterval < PolecatTenantTails.FastInterval ? slowInterval : PolecatTenantTails.FastInterval;
+        var fastInterval = slowInterval < SequenceTails.FastInterval ? slowInterval : SequenceTails.FastInterval;
         services.AddSingleton(provider => new AppendSignal(provider.GetService<TimeProvider>() ?? TimeProvider.System));
 
         // How names are compared, as the initializer learns it from the database's collation.
         services.AddSingleton<NameComparison>();
-        services.AddPolecat(provider =>
+        services.AddPolecat(_ =>
         {
             var store = new StoreOptions();
             Configure(store, connectionString, options);
             store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals), connectionString);
-            store.Projections.Wakeup = provider.GetRequiredService<AppendSignal>();
-            store.Projections.SlowPollingTime = slowInterval;
-            if (fastInterval < store.Projections.FastPollingTime)
-            {
-                store.Projections.FastPollingTime = fastInterval;
-            }
-
             return store;
         }).UseLightweightSessions();
 
@@ -136,25 +129,25 @@ public static class ServiceCollectionExtensions
 
         // One stream store, one group store and one tail per tenant, made as tenants are served;
         // the default tenant's stream store and tail are also those of a host that resolves no
-        // tenant. The tail is the store's own agent followed once while the sequence is shared,
-        // and a poll of every served tenant's mark under a sequence per tenant.
+        // tenant. The tails are the gateway's own, one poller for the process: the one tail of
+        // the shared sequence, or a tail per served tenant under a sequence per tenant, their
+        // strategy chosen once, when they start, by whether the login may read the horizon.
         var partitionedByTenant = options.Store.Partitioning == PartitioningMode.Tenant;
-        if (partitionedByTenant)
+        services.AddSingleton(provider =>
         {
-            services.AddSingleton(provider => new PolecatTenantTails(
-                new EventRowPositions(provider.GetRequiredService<IDbContextFactory<EventsDbContext>>()),
+            var events = provider.GetRequiredService<IDbContextFactory<EventsDbContext>>();
+            var loggers = provider.GetRequiredService<ILoggerFactory>();
+            var horizon = SqlServerTransactionHorizon.Over(connectionString);
+            return new SequenceTails(
+                cancellationToken => SqlServerHeadStrategy.SelectAsync(horizon, events, loggers.CreateLogger<SequenceTails>(), cancellationToken),
+                provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
                 provider.GetRequiredService<AppendSignal>(),
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,
-                provider.GetService<ILogger<PolecatTenantTails>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PolecatTenantTails>.Instance,
+                loggers.CreateLogger<SequenceTails>(),
                 fastInterval,
-                slowInterval));
-            services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatTenantTails>().For(JasperFx.StorageConstants.DefaultTenantId));
-        }
-        else
-        {
-            services.AddSingleton(provider => new PolecatStoreTail(provider.GetRequiredService<IDocumentStore>(), provider.GetRequiredService<IDbContextFactory<EventsDbContext>>(), provider.GetRequiredService<AppendSignal>(), provider.GetRequiredService<ILoggerFactory>(), options.TailQuietWait));
-            services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<PolecatStoreTail>());
-        }
+                slowInterval);
+        });
+        services.AddSingleton<IStoreTail>(provider => provider.GetRequiredService<SequenceTails>().For(partitionedByTenant ? new SequenceKey(JasperFx.StorageConstants.DefaultTenantId) : SequenceKey.Shared));
 
         services.AddSingleton(provider => new PolecatTenantStores(
             provider.GetRequiredService<IDocumentStore>(),
@@ -168,7 +161,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
             !partitionedByTenant,
             partitionedByTenant
-                ? provider.GetRequiredService<PolecatTenantTails>().For
+                ? tenantId => provider.GetRequiredService<SequenceTails>().For(new SequenceKey(tenantId))
                 : _ => provider.GetRequiredService<IStoreTail>(),
             provider.GetRequiredService<AppendSignal>(),
             provider.GetRequiredService<NameComparison>(),
@@ -197,14 +190,7 @@ public static class ServiceCollectionExtensions
 
         // After the initializer, so the first refresh reads tables that are there.
         services.AddHostedService<TenantRefresher>();
-        if (partitionedByTenant)
-        {
-            services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatTenantTails>());
-        }
-        else
-        {
-            services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<PolecatStoreTail>());
-        }
+        services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<SequenceTails>());
 
         if (options.Store.AssignOrdinals)
         {
@@ -212,8 +198,8 @@ public static class ServiceCollectionExtensions
             // registry is the server's, but a host that registers only the backend still numbers.
             services.TryAddSingleton<SubscriptionGroupRegistry>();
             services.AddSingleton<INumberedSequences>(provider => partitionedByTenant
-                ? new TenantSequences(provider.GetRequiredService<PolecatTenantTails>(), provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>())
-                : new SharedSequence(provider.GetRequiredService<IStoreTail>(), provider.GetRequiredService<PolecatStoreTail>().Numbering));
+                ? new TenantSequences(provider.GetRequiredService<SequenceTails>(), provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>())
+                : new SharedSequence(provider.GetRequiredService<IStoreTail>(), provider.GetRequiredService<SequenceTails>().NumberingOf(SequenceKey.Shared)));
             services.AddSingleton<IHostedService>(provider => new OrdinalSequencer(
                 provider.GetRequiredService<ISubscriptionGroupStore>(),
                 provider.GetRequiredService<INumberedSequences>(),

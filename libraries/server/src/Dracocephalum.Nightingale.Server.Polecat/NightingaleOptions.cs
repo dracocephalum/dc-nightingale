@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 
+using Dracocephalum.Nightingale.Server.Sequencing;
+
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
@@ -70,35 +72,24 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public bool FastBoot { get; set; }
 
     /// <summary>
-    /// Gets or sets how long the tail waits on the store's tracker for the head to move before
-    /// it reads the mark and waits again. The tracker ends a wait that runs this long with a
-    /// timeout; on a store nobody appends to, that is every time. Not a setting a host has a
-    /// reason to change, so it is not bound from configuration: it is here so that a test can
-    /// make a quiet store's minute pass in a fraction of a second, with the real tracker and
-    /// its real timeout.
-    /// </summary>
-    internal TimeSpan TailQuietWait { get; set; } = TimeSpan.FromMinutes(1);
-
-    /// <summary>
-    /// Gets or sets how long the tail rests between looks at the store once it has caught up,
+    /// Gets or sets how long the tails rest between looks at the store once they have caught up,
     /// which is how far behind an append made through another instance a subscriber on this one
-    /// can be: an append made through this instance wakes its own tail at once, the others find
+    /// can be: an append made through this instance wakes its own tails at once, the others find
     /// it at their next look. A second, the store's own slow polling time, unless the host says
     /// otherwise; a look is one small query per instance, whatever the number of subscriptions,
     /// so a host that wants a quarter of a second across instances pays four such queries a
-    /// second for it. While a look moved the head and left it short of positions already
-    /// committed past it, the tail looks again after the store's fast polling time, a quarter
-    /// of a second, or after this interval when it is shorter. Whichever tail the host runs
-    /// keeps this rule: the store's agent over a shared sequence, the server's own poller under
-    /// a sequence per tenant.
+    /// second for it. While a look left a head short of positions already seen past it, a head
+    /// catching up or a gap waiting on its checkpoint, the tails look again after the store's fast
+    /// polling time, a quarter of a second, or after this interval when it is shorter. The rule is the same for the
+    /// shared sequence and for a sequence per tenant.
     /// </summary>
-    public TimeSpan TailPollingInterval { get; set; } = PolecatTenantTails.SlowInterval;
+    public TimeSpan TailPollingInterval { get; set; } = SequenceTails.SlowInterval;
 
     /// <summary>
     /// Gets or sets how long the ordinal sequencer's lease lasts without renewal, after which another
     /// instance takes over the numbering. The holder renews, and a bystander asks again, at a
-    /// third of it. Not bound from configuration, like <see cref="TailQuietWait"/>: it is here
-    /// so that a test of one instance taking over from another does not wait out half a minute.
+    /// third of it. Not bound from configuration: it is here so that a test of one instance
+    /// taking over from another does not wait out half a minute.
     /// </summary>
     internal TimeSpan OrdinalSequencerLeaseDuration { get; set; } = OrdinalSequencer.LeaseDuration;
 

@@ -107,7 +107,7 @@ says stop and in fact skips would lose events in the name of stopping.
 
 **Nightingale:** a single signed 64-bit number, the store's global sequence.
 The client type keeps the name `Position` but holds one value. The head of
-`$all` is the high-water mark, the position up to which every event is
+`$all` is the sequence head, the position up to which every event is
 committed; 0 means no events yet.
 
 **Why:** the store has one sequence; a pair would carry the same number twice.
@@ -356,19 +356,21 @@ reference's tombstone to it.
 
 **Why:** the store's hard delete leaves no marker behind.
 
-## Forward reads of `$all` stop at the high-water mark
+## Forward reads of `$all` stop at the sequence head
 
 **Reference:** a read of `$all` sees an event the moment its append returns.
 
 **Nightingale:** sequence numbers are assigned before a transaction commits, so
 a lower number can become visible after a higher one. Every forward read and
 subscription over `$all` and the virtual streams is therefore bounded by the
-store's high-water mark: the position up to which every number is committed.
-A bounded read, and a subscription from the end, bring the mark up to date
+sequence head: the position up to which every number is committed or given
+up. A bounded read, and a subscription from the end, bring the head up to date
 first, so an append that has returned is in what they see, with one exception:
-while a lower number's transaction is still open, the mark stops before it and
-every higher event waits, until that transaction commits or the poller gives
-the gap up as abandoned after the store's threshold. A subscription's live
+while a lower number's transaction is still open, the head stops before it and
+every higher event waits, until that transaction commits, or rolls back and the
+poller gives the gap up: at its next look where the login may read the
+database's transaction horizon, after the store's threshold of 3 seconds where
+it may not. A subscription's live
 phase follows the poller: an append made through the same instance wakes it,
 so the event is delivered within milliseconds; one made through another
 instance is found at that instance's next look, at most
@@ -378,7 +380,7 @@ that wants less sets the interval shorter and pays a small query per interval
 per instance, whatever the number of subscriptions. Per-stream reads are
 unaffected: versions are dense under the stream lock.
 
-**Why:** reading past the high-water mark can skip an event forever.
+**Why:** reading past the sequence head can skip an event forever.
 
 ## Reading from a replica is the host's choice, not the call's
 
@@ -388,7 +390,7 @@ be served by a follower says so; a read from a follower may lag.
 **Nightingale:** there is no leader to prefer, and a client sets nothing. The
 host has a read-only connection, on by default, and what is served from it by
 default is exact: a page of `$all` or of a virtual stream is taken from it
-only as far as its own high-water mark reaches, and completed from the main
+only as far as the sequence head it holds reaches, and completed from the main
 connection, so a client cannot tell the difference. Only when the host sets
 `Nightingale:ReadStreamsFromReadOnlyConnection` does a bounded read of a
 plain stream lag as a follower read does, and then for every client of that
@@ -718,5 +720,5 @@ tenant it was authorized for, and the wildcard spans tenants on reads of
 `$all` and the virtual streams by position (`DESIGN.md`, seam 9). Partitioning
 the events table by tenant is an initialization choice,
 `Nightingale:Store:Partitioning` set to `Tenant`; under it each tenant numbers
-its events from its own sequence, so positions, the high-water mark and the
+its events from its own sequence, so positions, the sequence head and the
 ordinals are per tenant, and the wildcard read across tenants is refused.

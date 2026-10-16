@@ -5,8 +5,9 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// Positions are taken in order, so every position up to the ceiling was taken before the marker,
 /// by a transaction already writing; once the horizon has passed the marker, and the marker is
 /// older than the horizon's minimum age, every one of them is final: a position seen is committed,
-/// a missing one never will be. The tail moves its head to the ceiling then; the ordinal audit
-/// settles the range below it. Nothing is kept per position: one checkpoint covers the range.
+/// a missing one never will be. The tail moves its head to the ceiling then, and the sequencer,
+/// which numbers up to the head, numbers the range in order. Nothing is kept per position: one
+/// checkpoint covers the range.
 /// </summary>
 public sealed class HorizonCheckpoint
 {

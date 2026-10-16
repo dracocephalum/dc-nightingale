@@ -61,6 +61,21 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "SequenceHead",
+                schema: "nightingale",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    TenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: true),
+                    Position = table.Column<long>(type: "bigint", nullable: false),
+                    CheckedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_SequenceHead", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "StoreProperty",
                 schema: "nightingale",
                 columns: table => new
@@ -248,6 +263,13 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_SequenceHead_TenantId",
+                schema: "nightingale",
+                table: "SequenceHead",
+                column: "TenantId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_StoreProperty_Name",
                 schema: "nightingale",
                 table: "StoreProperty",
@@ -307,6 +329,10 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 
             migrationBuilder.DropTable(
                 name: "OrdinalSequencingProgress",
+                schema: "nightingale");
+
+            migrationBuilder.DropTable(
+                name: "SequenceHead",
                 schema: "nightingale");
 
             migrationBuilder.DropTable(

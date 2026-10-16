@@ -30,9 +30,9 @@ public sealed class EventsDbContextTests
         var partitioned = await DeclareTablesAsync(options => options.Store.Partitioning = PartitioningMode.Tenant);
         using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo"));
 
-        // Act & Assert: the gateway's links are the next test's.
-        var entities = context.Model.GetEntityTypes().Where(entity => entity.ClrType != typeof(OrdinalLink)).ToList();
-        entities.Count.ShouldBe(4);
+        // Act & Assert: the gateway's own tables are the next test's.
+        var entities = context.Model.GetEntityTypes().Where(entity => entity.ClrType != typeof(OrdinalLink) && entity.ClrType != typeof(SequenceHead)).ToList();
+        entities.Count.ShouldBe(3);
         foreach (var entity in entities)
         {
             var plain = declared.SingleOrDefault(candidate => candidate.Identifier.Name == entity.GetTableName());
@@ -55,18 +55,20 @@ public sealed class EventsDbContextTests
         }
     }
 
-    [Fact]
-    public void Model_ShouldMapTheOrdinalLinksAsTheGatewaysOwnModelDeclaresThem()
+    [Theory]
+    [InlineData(typeof(OrdinalLink))]
+    [InlineData(typeof(SequenceHead))]
+    public void Model_ShouldMapTheGatewaysTablesAsItsOwnModelDeclaresThem(Type table)
     {
-        // Arrange: the links are the gateway's table, created by its migrations in its schema; the
-        // mirror reads them beside the events, so it is held to that model, in whatever schema
-        // the host names.
+        // Arrange: the links and the heads are the gateway's tables, created by its migrations in
+        // its schema; the mirror reads them beside the events, so it is held to that model, in
+        // whatever schema the host names.
         using var mirror = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseSqlServer(DesignTime).Options, new EventStoreSchema("dbo", "gateway"));
         var builder = new DbContextOptionsBuilder<NightingaleDbContext>();
         NightingaleDbContextFactory.Configure(builder, DesignTime, "gateway");
         using var gateway = new NightingaleDbContext(builder.Options, new NightingaleSchema("gateway"));
-        var mapped = mirror.Model.FindEntityType(typeof(OrdinalLink)).ShouldNotBeNull();
-        var declared = gateway.Model.FindEntityType(typeof(OrdinalLink)).ShouldNotBeNull();
+        var mapped = mirror.Model.FindEntityType(table).ShouldNotBeNull();
+        var declared = gateway.Model.FindEntityType(table).ShouldNotBeNull();
 
         // Act & Assert
         mapped.GetTableName().ShouldBe(declared.GetTableName());
@@ -75,10 +77,10 @@ public sealed class EventsDbContextTests
         mapped.FindPrimaryKey()!.Properties.Select(property => property.GetColumnName()).ShouldBe(declared.FindPrimaryKey()!.Properties.Select(property => property.GetColumnName()));
         foreach (var property in mapped.GetProperties())
         {
-            var other = declared.FindProperty(property.Name).ShouldNotBeNull($"OrdinalLink.{property.Name} is mapped but the gateway declares no such column");
+            var other = declared.FindProperty(property.Name).ShouldNotBeNull($"{table.Name}.{property.Name} is mapped but the gateway declares no such column");
             property.GetColumnName().ShouldBe(other.GetColumnName());
-            property.GetColumnType().ShouldBe(other.GetColumnType(), $"OrdinalLink.{property.Name}: the type differs");
-            property.IsNullable.ShouldBe(other.IsNullable, $"OrdinalLink.{property.Name}: the nullability differs");
+            property.GetColumnType().ShouldBe(other.GetColumnType(), $"{table.Name}.{property.Name}: the type differs");
+            property.IsNullable.ShouldBe(other.IsNullable, $"{table.Name}.{property.Name}: the nullability differs");
         }
     }
 
@@ -159,7 +161,7 @@ public sealed class EventsDbContextTests
     {
         // Arrange: the mirror reads a table the store owns; a write through it is always a mistake.
         using var context = new EventsDbContext(new DbContextOptionsBuilder<EventsDbContext>().UseInMemoryDatabase("mirror-" + Guid.NewGuid().ToString("N")).Options, new EventStoreSchema("dbo"));
-        context.ProgressionRows.Add(new ProgressionRow { Name = EventsDbContext.HighWaterMark, LastSeqId = 1 });
+        context.SequenceHeads.Add(new SequenceHead { Id = Guid.NewGuid(), Position = 1 });
 
         // Act & Assert
         Should.Throw<InvalidOperationException>(() => context.SaveChanges());
@@ -189,7 +191,7 @@ public sealed class EventsDbContextTests
         // Act
         var byCategory = context.EventRows.Where(row => row.TenantId == tenant && row.Category == key).Select(row => row.SeqId).ToQueryString();
         var byType = context.EventRows.Where(row => row.TenantId == tenant && row.Type == key).Select(row => row.SeqId).ToQueryString();
-        var mark = context.ProgressionRows.Where(row => row.Name == EventsDbContext.HighWaterMark).Select(row => row.LastSeqId).ToQueryString();
+        var mark = context.SequenceHeads.Where(row => row.TenantId == tenant).Select(row => row.Position).ToQueryString();
         var reader = new PlainStreamReader(() => context, tenant, partitionedByTenant: false, NullLogger.Instance);
         var stream = reader.FindWithMetadata(context, "orders-1", "$$orders-1").ToQueryString();
         var page = reader.QueryRows(context, "orders-1").Select(row => row.SeqId).ToQueryString();

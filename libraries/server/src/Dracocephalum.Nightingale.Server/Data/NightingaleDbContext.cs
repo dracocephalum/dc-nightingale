@@ -5,7 +5,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 
 /// <summary>
 /// The gateway's own tables as one model: persistent-subscription groups, their parked events
-/// and outbox, the leases, the progress of the gateway's background processes, and the settings
+/// and outbox, the leases, the sequence heads and the progress of the gateway's background processes, and the settings
 /// the store was initialized with. The context owns these tables. It names no provider and no
 /// column type, so each backend generates its own migrations from this one model, in its own
 /// project, for its own database; the tables are created and changed by those migrations and by
@@ -30,6 +30,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
 
     /// <summary>Gets the ordinal sequencer's progress.</summary>
     public DbSet<OrdinalSequencingProgress> OrdinalSequencingProgress => Set<OrdinalSequencingProgress>();
+
+    /// <summary>Gets the sequence heads the tails keep.</summary>
+    public DbSet<SequenceHead> SequenceHeads => Set<SequenceHead>();
 
     /// <summary>Gets the ordinals of the virtual streams that are not columns of the events table.</summary>
     public DbSet<OrdinalLink> OrdinalLinks => Set<OrdinalLink>();
@@ -113,6 +116,21 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             // Unique with no filter: SQL Server's unique index admits one null, which is the shared
             // sequence's row, where the provider's default filter would admit any number of them.
             progress.HasIndex(row => row.TenantId).IsUnique().HasFilter(null);
+        });
+
+        modelBuilder.Entity<SequenceHead>(head =>
+        {
+            head.ToTable(nameof(SequenceHead));
+            head.HasKey(row => row.Id);
+            head.Property(row => row.TenantId).HasMaxLength(250).IsUnicode(false);
+
+            // Raised by every instance and lowered by none: the position is the row's concurrency
+            // token, so a write over one another instance has raised since it was read is refused
+            // and taken again from what is there.
+            head.Property(row => row.Position).IsConcurrencyToken();
+
+            // Unique with no filter, as the sequencer's progress: one null, the shared sequence's.
+            head.HasIndex(row => row.TenantId).IsUnique().HasFilter(null);
         });
 
         modelBuilder.Entity<OrdinalLink>(link =>

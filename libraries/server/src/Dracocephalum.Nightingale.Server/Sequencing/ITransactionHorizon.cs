@@ -5,8 +5,9 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// still open that has written to it. Positions are taken in order and only by a transaction that
 /// is writing, so once the horizon has passed a moment, every position taken before that moment is
 /// final: committed and visible, or never to be. The tail gives a missing position up by it, and
-/// the ordinal audit settles a range by it; neither waits on a clock. A backend implements it for
-/// its database with one small query, and reports whether that query is allowed at all.
+/// waits on no clock to do so. A backend implements it for its database with one small query, and
+/// reports whether that query is allowed at all; <see cref="StaleThresholdHorizon"/> stands in
+/// where it is not.
 /// </summary>
 public interface ITransactionHorizon
 {

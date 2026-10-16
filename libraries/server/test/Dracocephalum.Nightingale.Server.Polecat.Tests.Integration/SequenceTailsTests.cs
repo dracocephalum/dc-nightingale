@@ -1,54 +1,24 @@
 using System.Text;
 
+using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Sequencing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 
 /// <summary>
-/// The tailer follows the store's high-water mark, and <c>$all</c> reads page in position order
-/// within it. The shared database has other tests' events in it, so assertions are relative to
-/// what this test appends.
+/// The tails follow the shared sequence's head by the transaction horizon, which the test login
+/// may read, keep it in the gateway's table, and <c>$all</c> reads page in position order within
+/// it. The shared database has other tests' events in it, so assertions are relative to what this
+/// test appends.
 /// </summary>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
-public sealed class PolecatStoreTailTests(SqlServerTestDatabase database)
+public sealed class SequenceTailsTests(SqlServerTestDatabase database)
 {
     private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
-
-    [Fact]
-    public async Task Head_AfterTheStoreWasQuietLongerThanTheTrackersWait_ShouldStillFollowWhatIsAppended()
-    {
-        // Arrange: a server of its own whose tail gives the store's tracker a fifth of a second
-        // per wait where a server gives it a minute, then left alone for seven of those waits.
-        // Each ends in the tracker's own timeout, as a quiet minute does. Nothing else of the
-        // server's timing is touched: the tracker's agent polls on its own cadence, slower than
-        // this wait, so the timeouts here also fall between its polls, which a minute never
-        // does and which only makes the case harder.
-        var name = TestDatabases.NewName();
-        try
-        {
-            using var host = await TestDatabases.StartProvisionedHostAsync(name, options => options.TailQuietWait = TimeSpan.FromMilliseconds(200));
-            var tail = host.Services.GetRequiredService<IStoreTail>();
-            await Task.Delay(TimeSpan.FromMilliseconds(1400), TestContext.Current.CancellationToken);
-
-            // Act: a tail that had stopped following would fail this wait with its cause.
-            var appended = await host.Store().AppendAsync(NewStream(), StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-            var head = tail.Head;
-            while (head < appended.Position)
-            {
-                head = await tail.WaitForAdvanceAsync(head, TestContext.Current.CancellationToken);
-            }
-
-            // Assert
-            head.ShouldBeGreaterThanOrEqualTo(appended.Position);
-            await host.StopAsync(TestContext.Current.CancellationToken);
-        }
-        finally
-        {
-            await TestDatabases.DropAsync(name);
-        }
-    }
 
     [Fact]
     public async Task Head_AfterAnAppend_ShouldReachTheAppendedPositionWithinThePollingInterval()
@@ -70,6 +40,28 @@ public sealed class PolecatStoreTailTests(SqlServerTestDatabase database)
         // Assert
         appended.Position.ShouldBeGreaterThan(before);
         head.ShouldBeGreaterThanOrEqualTo(appended.Position);
+    }
+
+    [Fact]
+    public async Task Head_ShouldBeKeptByTheTransactionHorizonAndWrittenToTheGatewaysTable()
+    {
+        // Arrange
+        var tails = database.Services.GetRequiredService<SequenceTails>();
+        var contexts = database.Services.GetRequiredService<IDbContextFactory<NightingaleDbContext>>();
+        var appended = await database.Store.AppendAsync(NewStream(), StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+
+        // Act: the row is written at the look after the one that reached the append, or at it.
+        var kept = 0L;
+        for (var attempt = 0; attempt < 100 && kept < appended.Position; attempt++)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            await using var context = await contexts.CreateDbContextAsync(TestContext.Current.CancellationToken);
+            kept = await context.SequenceHeads.Where(row => row.TenantId == null).Select(row => row.Position).SingleOrDefaultAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Assert
+        tails.Strategy.ShouldNotBeNull().Kind.ShouldBe(HeadStrategyKind.TransactionHorizon);
+        kept.ShouldBeGreaterThanOrEqualTo(appended.Position);
     }
 
     [Fact]

@@ -35,8 +35,8 @@ Its test is `CategoryOrdinalsTests` in the component's test project.
 ## Notes
 
 Ordinals are assigned after commit by one sequencer per cluster, behind the
-store's high-water mark, so a read by ordinal made right after an append may
-not see the event yet; the sample waits for the bounds to reach what it
+sequence head, so a read by ordinal made right after an append may not see
+the event yet; the sample waits for the bounds to reach what it
 expects, which is what a consumer that needs the number would do. Ordinal
 numbering is the caller's explicit choice per read or subscription and is
 refused on a store initialized without it.

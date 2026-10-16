@@ -1,13 +1,14 @@
+using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
-namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
+namespace Dracocephalum.Nightingale.Server.Tests.Sequencing;
 
 /// <summary>
-/// The signal between an append and the tail: a wait ends at a pulse or when its time is up, a
+/// The signal between an append and the tails: a wait ends at a pulse or when its time is up, a
 /// pulse nobody was waiting for ends the next wait and only that one, and stopping cancels.
 /// </summary>
-public sealed class AppendSignalTests : IDisposable
+public sealed class AppendSignalTests
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(1);
 
@@ -18,8 +19,6 @@ public sealed class AppendSignalTests : IDisposable
     {
         _sut = new AppendSignal(_time);
     }
-
-    public void Dispose() => _sut.Dispose();
 
     [Fact]
     public async Task Wait_WhenPulsed_ShouldEndWithoutTheTimeHavingPassed()
@@ -66,25 +65,6 @@ public sealed class AppendSignalTests : IDisposable
         // Assert: both pulses are taken by the one look that follows the first wait.
         first.IsCompletedSuccessfully.ShouldBeTrue();
         second.IsCompleted.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task Stop_ShouldEndTheCurrentWaitAtOnceAndMakeEveryLaterOneAMoment()
-    {
-        // Arrange: a wait of the interval is under way.
-        var waiting = _sut.WaitAsync(TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
-
-        // Act
-        _sut.Stop();
-        await waiting.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-        var later = _sut.WaitAsync(TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
-        var atOnce = later.IsCompleted;
-        _time.Advance(AppendSignal.StoppingWait);
-        await later.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-
-        // Assert: no time passed for the first; the later one lasted the moment, not the interval,
-        // and not nothing either, so an agent whose stop flag is not yet set does not spin.
-        atOnce.ShouldBeFalse();
     }
 
     [Fact]

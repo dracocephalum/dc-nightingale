@@ -1,6 +1,7 @@
+using Dracocephalum.Nightingale.Server.Sequencing;
 using Shouldly;
 
-namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
+namespace Dracocephalum.Nightingale.Server.Tests.Sequencing;
 
 public sealed class ContiguousPrefixTests
 {

@@ -1,3 +1,5 @@
+using Dracocephalum.Nightingale.Server.Sequencing;
+
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 
 /// <summary>A tail a test moves by hand, over the backend's own followed marks: waiters wake exactly as they do on the real one.</summary>

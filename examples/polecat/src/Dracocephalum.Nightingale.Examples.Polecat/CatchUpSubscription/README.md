@@ -34,7 +34,7 @@ Its test is `CatchUpSubscriptionTests` in the component's test project.
 
 ## Notes
 
-Live delivery waits on the server's tailer. An append made through the same
-server instance wakes it, so the event arrives as soon as the mark is read;
-one made through another instance is found at the tailer's next poll of the
-store's high-water mark, a quarter of a second while events flow.
+Live delivery waits on the server's tails. An append made through the same
+server instance wakes them, so the event arrives as soon as the head is read;
+one made through another instance is found at the tails' next look at the
+sequence head, a quarter of a second while events flow.
