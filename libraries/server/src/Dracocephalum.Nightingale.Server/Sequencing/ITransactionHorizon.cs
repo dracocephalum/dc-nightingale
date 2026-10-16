@@ -2,12 +2,14 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
 /// A journal's transaction horizon: the point before which the database reports no transaction
-/// still open that has written to it. Positions are taken in order and only by a transaction that
-/// is writing, so once the horizon has passed a moment, every position taken before that moment is
-/// final: committed and visible, or never to be. The tail gives a missing position up by it, and
-/// waits on no clock to do so. A backend implements it for its database with one small query, and
-/// reports whether that query is allowed at all; <see cref="StaleThresholdHorizon"/> stands in
-/// where it is not.
+/// still open that could have taken a position of a sequence. Positions are taken in order and
+/// only by a transaction that is writing, so once the horizon has passed a moment, every position
+/// taken before that moment is final: committed and visible, or never to be. The tail gives a
+/// missing position up by it, and waits on no clock to do so. A backend implements it for its
+/// database with a small query, and reports whether that query is allowed at all;
+/// <see cref="StaleThresholdHorizon"/> stands in where it is not. A horizon over the whole
+/// database answers the same for every sequence; one by store partition answers each sequence by
+/// the writers of its own partition.
 /// </summary>
 public interface ITransactionHorizon
 {
@@ -29,13 +31,15 @@ public interface ITransactionHorizon
     ValueTask<HorizonMarker> MarkAsync(CancellationToken cancellationToken);
 
     /// <summary>
-    /// Finds the oldest transaction still open that has written to the database since before a
-    /// marker: the one the horizon waits on. None means the horizon has passed the marker. A start
-    /// the database reports in a form that cannot be read counts as before the marker, so the
-    /// answer errs towards waiting.
+    /// Finds, for each sequence asked about, the oldest transaction still open since before its
+    /// marker that could hold one of its positions: the one the horizon waits on. A sequence with
+    /// none is absent: the horizon has passed its marker. One call answers every sequence a look
+    /// holds, so a look costs the database one question, however many gaps it judges. A start the
+    /// database reports in a form that cannot be read counts as before the marker, so the answer
+    /// errs towards waiting.
     /// </summary>
-    /// <param name="marker">A marker this horizon issued.</param>
+    /// <param name="markers">The marker to judge each sequence by, markers this horizon issued.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The transaction holding the horizon back, or <see langword="null"/> when it has passed the marker.</returns>
-    ValueTask<HorizonHolder?> FindHolderAsync(HorizonMarker marker, CancellationToken cancellationToken);
+    /// <returns>The transaction holding each held sequence back.</returns>
+    ValueTask<IReadOnlyDictionary<SequenceKey, HorizonHolder>> FindHoldersAsync(IReadOnlyDictionary<SequenceKey, HorizonMarker> markers, CancellationToken cancellationToken);
 }

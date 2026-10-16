@@ -68,7 +68,7 @@ public sealed class SnapshotReadTests : IAsyncLifetime
         var after = await ReachAsync(tail, above.Position);
 
         // Assert
-        Host.Services.GetRequiredService<SequenceTails>().Strategy.ShouldNotBeNull().Kind.ShouldBe(HeadStrategyKind.TransactionHorizon);
+        Host.Services.GetRequiredService<SequenceTails>().Strategy.ShouldNotBeNull().Kind.ShouldBe(HeadStrategyKind.PartitionHorizon);
         whileOpen.ShouldBeLessThan(held.Position, "the open append is a gap the head must not pass");
         after.ShouldBeGreaterThanOrEqualTo(above.Position);
     }

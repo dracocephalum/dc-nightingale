@@ -68,11 +68,11 @@ undecided adds it here rather than mentioning it once in a conversation.
   for the next page's worth only, with an integration test over several
   tenants. Stores partitioned by tenant refuse the wildcard already.
 - **A client cannot see which strategy keeps the sequence heads.** The tails
-  choose the transaction horizon or the best-effort strategy once, at start,
-  and say so only in the server's log, with a warning naming the grant when
-  they fall back. Close by: a field for it in the server features response,
-  beside `SupportsOrdinals`, filled from `SequenceTails.Strategy`, with a test
-  of each value.
+  choose the partition horizon, the transaction horizon or the best-effort
+  strategy once, at start, and say so only in the server's log, naming the
+  grant at each step down. Close by: a field for it in the server features
+  response, beside `SupportsOrdinals`, filled from `SequenceTails.Strategy`,
+  with a test of each value.
 - **An event can be appended that no client can read back.** Neither side
   sets gRPC's message limits, so both keep the defaults: the server receives
   at most 4 MB in a message and sends any size, and the client the same the

@@ -109,3 +109,21 @@ no counterpart for a client to expect.
 
 **Worth doing if:** an application needs consistency across streams that
 expected revisions on each cannot give.
+
+## Two stores partitioned by tenant in one database
+
+Two stores in one database, each in a schema of its own, both partitioned by
+tenant. Each store's tables are partitioned by a partition function and
+scheme, and SQL Server keeps those per database, not per schema; the schema
+library names them by the table alone, `pf_pc_events_tenant_ordinal`, so the
+second store's schema reuses the first's names, and applying it fails:
+measured, *the partition scheme is currently being used to partition one or
+more tables*. Two stores side by side are fine while at most one is
+partitioned, and their heads never hold each other under the partition
+horizon, which watches each store's own tables.
+
+**Why not:** the names are the schema library's (`UPSTREAM.md`), and a store
+the gateway renamed would no longer be the store's own.
+
+**Worth doing if:** the schema library puts the schema in the names; until
+then, a database for each such store.

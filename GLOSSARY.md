@@ -94,7 +94,8 @@ How the tenancy modes fill the levels:
 | **Marker** | A moment on a journal's own clock, taken to be judged by its horizon later. | |
 | **Horizon checkpoint** | The highest position seen at a look, with a marker taken after it. Every position up to it is final once the horizon has passed the marker and the marker is older than the minimum age. | |
 | **Minimum age** | How old a marker must be before its horizon is asked: the moment, on a database where it exists, between a transaction taking a position and the database seeing it write. Zero on SQL Server. | |
-| **Head strategy** | How a journal's tails judge a gap, chosen once when they start: the transaction horizon, or, where the login may not read it, best effort, a wait of the store's stale threshold over reads that wait on an open row. | |
+| **Partition horizon** | A store partition's transaction horizon: the transactions open since before a marker that could still commit one of its positions, those holding a lock in its part of the events or streams table. On SQL Server from the database's writers and its locks. | not the transaction horizon, which any writer in the journal holds |
+| **Head strategy** | How a journal's tails judge a gap, chosen once when they start, the first the login may read: the partition horizon, the transaction horizon, or best effort, a wait of the store's stale threshold over reads that wait on an open row. | |
 | **Scrub** | A re-check of a range for events without ordinals: the guardrail, the daily scrub, and the manual one (`PENDING.md`, *Scrubs*); for where the head can be wrong, and opt-in. | |
 
 ## Scope and policy

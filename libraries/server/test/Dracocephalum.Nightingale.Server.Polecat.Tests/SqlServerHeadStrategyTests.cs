@@ -8,12 +8,14 @@ using Shouldly;
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
 
 /// <summary>
-/// The choice of strategy over a horizon stood in: the transaction horizon when the login may
-/// read it, the best-effort strategy with the store's own threshold when it may not.
+/// The choice of strategy over horizons stood in: the horizon of each store partition when the
+/// login may read it, else the transaction horizon of the database, else the best-effort strategy
+/// with the store's own threshold.
 /// </summary>
 public sealed class SqlServerHeadStrategyTests
 {
-    private readonly ITransactionHorizon _horizon = A.Fake<ITransactionHorizon>();
+    private readonly ITransactionHorizon _partitions = A.Fake<ITransactionHorizon>();
+    private readonly ITransactionHorizon _transactions = A.Fake<ITransactionHorizon>();
     private readonly IDbContextFactory<EventsDbContext> _events = new NoContexts();
 
     [Fact]
@@ -25,32 +27,52 @@ public sealed class SqlServerHeadStrategyTests
     }
 
     [Fact]
-    public async Task Select_WhenTheHorizonAnswers_ShouldChooseTheTransactionHorizon()
+    public async Task Select_WhenThePartitionHorizonAnswers_ShouldChooseItWithoutAskingTheOther()
     {
         // Arrange
-        A.CallTo(() => _horizon.CheckAvailabilityAsync(A<CancellationToken>._)).Returns(HorizonAvailability.Available);
+        A.CallTo(() => _partitions.CheckAvailabilityAsync(A<CancellationToken>._)).Returns(HorizonAvailability.Available);
 
         // Act
-        var strategy = await SqlServerHeadStrategy.SelectAsync(_horizon, _events, NullLogger.Instance, TestContext.Current.CancellationToken);
+        var strategy = await SelectAsync();
 
         // Assert
-        strategy.Kind.ShouldBe(HeadStrategyKind.TransactionHorizon);
-        strategy.Horizon.ShouldBeSameAs(_horizon);
+        strategy.Kind.ShouldBe(HeadStrategyKind.PartitionHorizon);
+        strategy.Horizon.ShouldBeSameAs(_partitions);
+        A.CallTo(() => _transactions.CheckAvailabilityAsync(A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
-    public async Task Select_WhenTheHorizonDoesNotAnswer_ShouldChooseTheBestEffortStrategyWithTheStoresThreshold()
+    public async Task Select_WhenOnlyTheTransactionHorizonAnswers_ShouldChooseIt()
     {
         // Arrange
-        A.CallTo(() => _horizon.CheckAvailabilityAsync(A<CancellationToken>._)).Returns(HorizonAvailability.Unavailable("No VIEW DATABASE STATE."));
+        A.CallTo(() => _partitions.CheckAvailabilityAsync(A<CancellationToken>._)).Returns(HorizonAvailability.Unavailable("No VIEW SERVER PERFORMANCE STATE."));
+        A.CallTo(() => _transactions.CheckAvailabilityAsync(A<CancellationToken>._)).Returns(HorizonAvailability.Available);
 
         // Act
-        var strategy = await SqlServerHeadStrategy.SelectAsync(_horizon, _events, NullLogger.Instance, TestContext.Current.CancellationToken);
+        var strategy = await SelectAsync();
+
+        // Assert
+        strategy.Kind.ShouldBe(HeadStrategyKind.TransactionHorizon);
+        strategy.Horizon.ShouldBeSameAs(_transactions);
+    }
+
+    [Fact]
+    public async Task Select_WhenNoHorizonAnswers_ShouldChooseTheBestEffortStrategyWithTheStoresThreshold()
+    {
+        // Arrange
+        A.CallTo(() => _partitions.CheckAvailabilityAsync(A<CancellationToken>._)).Returns(HorizonAvailability.Unavailable("No VIEW SERVER PERFORMANCE STATE."));
+        A.CallTo(() => _transactions.CheckAvailabilityAsync(A<CancellationToken>._)).Returns(HorizonAvailability.Unavailable("No VIEW DATABASE STATE."));
+
+        // Act
+        var strategy = await SelectAsync();
 
         // Assert
         strategy.Kind.ShouldBe(HeadStrategyKind.BestEffort);
         strategy.Horizon.ShouldBeOfType<StaleThresholdHorizon>().MinimumAge.ShouldBe(StaleThresholdHorizon.DefaultThreshold);
     }
+
+    private ValueTask<HeadStrategy> SelectAsync() =>
+        SqlServerHeadStrategy.SelectAsync(_partitions, _transactions, _events, NullLogger.Instance, TestContext.Current.CancellationToken);
 
     /// <summary>A factory the choice hands on and never calls.</summary>
     private sealed class NoContexts : IDbContextFactory<EventsDbContext>

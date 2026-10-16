@@ -347,15 +347,29 @@ before the marker is open, it waits, however long, and names the transaction
 in a warning after half a minute. A rolled-back append is given up at the next
 look rather than after a threshold. How the checkpoint is judged is the
 `HeadStrategy`, chosen once when the tails start and kept for the life of the
-process: on SQL Server the transaction horizon, `DBCC OPENTRAN`, when the login
-has `VIEW DATABASE STATE`, and otherwise the best-effort strategy, a horizon
-that has always passed with the store's 3 seconds as its minimum age, over
-reads that take the events table `WITH (READCOMMITTEDLOCK)`, so they wait on an
-open append's row even under read committed snapshot and the wait never starts
-for it; only a position whose row is not yet in the table when the wait ends
-can be skipped. Neither is required: the fallback is the store's own rule made
-safer, the warning names the grant, and a grant takes effect at the next
-start. The head is kept in the gateway's `SequenceHead` table, a row per
+process, the first the login may read. On SQL Server, first the horizon of each
+store partition, when the login has `VIEW SERVER PERFORMANCE STATE`: a gap is
+held only by a transaction that has written to the database since before the
+marker and holds a lock in the gap's partition of the events or streams table.
+An append writes its stream's row, in its tenant's partition, before it draws a
+position, and keeps the lock to its end, so nothing that could still fill the
+gap is missed, and a transaction in another tenant's partition, or on tables
+that are not the store's, holds nothing. It asks in two stages: the
+database's writers, one cheap read, which settle most gaps, since the writer
+is most often the append a moment from its commit; then the locks, a walk of
+the server's lock manager, only for a marker older than a second while a writer
+older than it is open, one read for every gap held. Next the transaction
+horizon of the whole database, `DBCC OPENTRAN`, with that permission or
+`VIEW DATABASE STATE`, where any open writer holds every head. Otherwise the
+best-effort strategy, a horizon that has always passed with the store's 3
+seconds as its minimum age, over reads that take the events table
+`WITH (READCOMMITTEDLOCK)`, so they wait on an open append's row even under
+read committed snapshot and the wait never starts for it; only a position whose
+row is not yet in the table when the wait ends can be skipped. A look marks
+once for every gap it first sees, and asks the horizon once for every gap it
+holds. None is required: each step down is logged with the grant that would
+avoid it, the last is the store's own rule made safer, and a grant takes effect
+at the next start. The head is kept in the gateway's `SequenceHead` table, a row per
 sequence raised by every instance and lowered by none, its position the row's
 concurrency token: a tail begins there rather than at the start of the table,
 a reader of a replica takes it as the bound of what the replica holds, and the

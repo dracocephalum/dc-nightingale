@@ -131,15 +131,16 @@ public static class ServiceCollectionExtensions
         // the default tenant's stream store and tail are also those of a host that resolves no
         // tenant. The tails are the gateway's own, one poller for the process: the one tail of
         // the shared sequence, or a tail per served tenant under a sequence per tenant, their
-        // strategy chosen once, when they start, by whether the login may read the horizon.
+        // strategy chosen once, when they start, by which horizon the login may read.
         var partitionedByTenant = options.Store.Partitioning == PartitioningMode.Tenant;
         services.AddSingleton(provider =>
         {
             var events = provider.GetRequiredService<IDbContextFactory<EventsDbContext>>();
             var loggers = provider.GetRequiredService<ILoggerFactory>();
-            var horizon = SqlServerTransactionHorizon.Over(connectionString);
+            var partitions = SqlServerPartitionHorizon.OverStore(connectionString, options.Store.Schema, partitionedByTenant);
+            var transactions = SqlServerTransactionHorizon.Over(connectionString);
             return new SequenceTails(
-                cancellationToken => SqlServerHeadStrategy.SelectAsync(horizon, events, loggers.CreateLogger<SequenceTails>(), cancellationToken),
+                cancellationToken => SqlServerHeadStrategy.SelectAsync(partitions, transactions, events, loggers.CreateLogger<SequenceTails>(), cancellationToken),
                 provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>(),
                 provider.GetRequiredService<AppendSignal>(),
                 provider.GetService<TimeProvider>() ?? TimeProvider.System,

@@ -83,6 +83,27 @@ public sealed class SequenceTailsTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Look_WithAGapInEachSequence_ShouldMarkOnceAndAskTheHorizonOnceForBoth()
+    {
+        // Arrange
+        _positions.Append(A, 1, 3);
+        _positions.Append(B, 1, 2, 4);
+        _horizon.Hold();
+        Sut.For(A);
+        Sut.For(B);
+
+        // Act
+        await Sut.LookAsync(TestContext.Current.CancellationToken);
+        await Sut.LookAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the checkpoints are taken once, under one marker, and judged together at each look.
+        _horizon.Marks.ShouldBe(1);
+        _horizon.Asks.ShouldBe(2);
+        Sut.For(A).Head.ShouldBe(1);
+        Sut.For(B).Head.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task Look_WhenNoSequenceIsFollowedOrNoneMoved_ShouldReadNothingMore()
     {
         // Arrange
@@ -449,8 +470,11 @@ public sealed class SequenceTailsTests : IAsyncDisposable
         private HorizonHolder? _holder;
         private Exception? _failure;
         private int _marks;
+        private int _asks;
 
         public int Marks => Volatile.Read(ref _marks);
+
+        public int Asks => Volatile.Read(ref _asks);
 
         public TimeSpan MinimumAge => TimeSpan.Zero;
 
@@ -464,7 +488,13 @@ public sealed class SequenceTailsTests : IAsyncDisposable
 
         public ValueTask<HorizonMarker> MarkAsync(CancellationToken cancellationToken) => ValueTask.FromResult(new HorizonMarker(Interlocked.Increment(ref _marks)));
 
-        public ValueTask<HorizonHolder?> FindHolderAsync(HorizonMarker marker, CancellationToken cancellationToken) => _failure is { } failure ? ValueTask.FromException<HorizonHolder?>(failure) : ValueTask.FromResult(_holder);
+        public ValueTask<IReadOnlyDictionary<SequenceKey, HorizonHolder>> FindHoldersAsync(IReadOnlyDictionary<SequenceKey, HorizonMarker> markers, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _asks);
+            return _failure is { } failure
+                ? ValueTask.FromException<IReadOnlyDictionary<SequenceKey, HorizonHolder>>(failure)
+                : ValueTask.FromResult<IReadOnlyDictionary<SequenceKey, HorizonHolder>>(_holder is { } holder ? markers.Keys.ToDictionary(key => key, _ => holder) : []);
+        }
     }
 
     /// <summary>The kept heads, in memory: raised, never lowered, as the table keeps them.</summary>
