@@ -356,10 +356,13 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
             return false;
         }
 
-        // A gap after what was reached, below the ceiling. The checkpoint over it is taken the
-        // first time it is seen, at the ceiling read before its marker, and judged at every look:
-        // at once, where the horizon needs no age.
-        tail.Checkpoint ??= await HorizonCheckpoint.TakeAsync(strategy.Horizon, ceiling, _timeProvider, cancellationToken).ConfigureAwait(false);
+        // A gap after what was reached, below the ceiling. What was reached needs no judgement, so
+        // it is published first: a horizon that cannot be asked holds the gap, never the run of
+        // committed positions before it. The checkpoint over the gap is taken the first time it is
+        // seen, at the ceiling read before its marker, and judged at every look: at once, where the
+        // horizon needs no age.
+        Publish(tail, reached);
+        tail.Checkpoint ??=await HorizonCheckpoint.TakeAsync(strategy.Horizon, ceiling, _timeProvider, cancellationToken).ConfigureAwait(false);
         var checkpoint = tail.Checkpoint;
         var judgement = await checkpoint.JudgeAsync(cancellationToken).ConfigureAwait(false);
         if (judgement.IsFinal)
@@ -388,7 +391,6 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
         // Held, or not yet old enough: judged again at the fast interval, since the transaction
         // holding a gap is most often an append a moment from its commit, and a reader on another
         // instance than the writer waits on that judgement.
-        Publish(tail, reached);
         return true;
     }
 
