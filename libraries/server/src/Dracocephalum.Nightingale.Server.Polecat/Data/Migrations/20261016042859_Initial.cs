@@ -37,7 +37,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 {
                     Type = table.Column<byte>(type: "tinyint", nullable: false),
                     TenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
-                    Key = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: false),
+                    Key = table.Column<string>(type: "varchar(500)", unicode: false, maxLength: 500, nullable: false),
                     Ordinal = table.Column<long>(type: "bigint", nullable: false),
                     SeqId = table.Column<long>(type: "bigint", nullable: false)
                 },

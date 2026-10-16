@@ -60,7 +60,7 @@ minute. It stalls rather than skip an event that may still commit. The PostgreSQ
 | Tier | SQL Server (Polecat) | PostgreSQL (Marten, planned) |
 |---|---|---|
 | **Core**: appends, reads and subscriptions, groups, metadata, appends to several streams, the virtual streams by position | SQL Server 2025 or later, for its native `json` type; a UTF-8 collation, `Latin1_General_100_BIN2_UTF8` by default; any edition, Express for development only. `VIEW DATABASE STATE` for the gateway's login is recommended, not required: with it the sequence heads are kept by the transaction horizon, which never skips an append that commits late and gives a rolled-back one up at once; without it by the best-effort strategy, a 3-second wait over reads that wait on an open append's row, chosen at start with a warning (`DESIGN.md`, seam 4) | PostgreSQL 13 or later, Marten's own floor |
-| **Ordinals**: the virtual streams by number | nothing more: the sequencer numbers up to the sequence head, so ordinals are as exact as the head | nothing more: the transaction horizon reads what every role may (`PENDING.md`, *Ordinals as links*) |
+| **Ordinals**: the virtual streams by number | nothing more: the sequencer numbers up to the sequence head, so ordinals are as exact as the head | nothing more: the transaction horizon reads what every role may (`PENDING.md`, *The PostgreSQL horizon*) |
 | **Read replicas** | an availability group with a readable secondary, an Enterprise feature, or Azure | a streaming replica |
 | **Partitioning** by tenant or by archived stream | table partitioning, in every edition since 2016 SP1 | declarative partitioning |
 | **Online index builds** (`PENDING.md`) | Enterprise, or Azure | `CREATE INDEX CONCURRENTLY` |

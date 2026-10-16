@@ -73,7 +73,7 @@ public sealed class SchemaExportTests
     }
 
     [Fact]
-    public async Task ExportAsync_WithOrdinals_ShouldWriteTheOrdinalColumnsTheirIndexesAndTheProgressTable()
+    public async Task ExportAsync_WithOrdinals_ShouldWriteTheLinksAndTheProgressTableAndNoColumnOnTheEventsTable()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -89,10 +89,9 @@ public sealed class SchemaExportTests
             // Assert
             var script = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
             script.ShouldSatisfyAllConditions(
-                text => text.ShouldContain("category_ordinal"),
-                text => text.ShouldContain("type_ordinal"),
-                text => text.ShouldContain("ix_pc_events_category_ordinal"),
-                text => text.ShouldContain("ix_pc_events_type_ordinal"),
+                text => text.ShouldNotContain("category_ordinal"),
+                text => text.ShouldNotContain("type_ordinal"),
+                text => text.ShouldContain("CREATE TABLE [nightingale].[OrdinalLink]"),
                 text => text.ShouldContain("CREATE TABLE [nightingale].[OrdinalSequencingProgress]"));
         }
         finally

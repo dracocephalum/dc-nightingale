@@ -75,7 +75,7 @@ How the tenancy modes fill the levels:
 | **`$all`** | The order of positions of one store partition, read whole or for one tenant. | not every event of the system |
 | **Virtual stream** | A stream with no events of its own, a predicate over `$all` within one tenant: `$ce-`, `$et-`, `$bc-`, `$streams`, `$category-`, `$de`, `$mde`. | |
 | **Category** | A stream name up to its first hyphen after at least one character, otherwise the whole name; never empty. | |
-| **Link** | A row of `OrdinalLink`: an event's ordinal in a virtual stream whose ordinals are not columns of the events table. | |
+| **Link** | A row of `OrdinalLink`: an event's ordinal in one virtual stream. Every ordinal is one; an event's type link is the witness that it is numbered. | |
 | **Last revision**, **last event** | Where a stream ends: a stream at its last revision, a virtual stream at its last event, or its last ordinal under ordinal numbering. | never a stream's "head" |
 
 ## Sequencing

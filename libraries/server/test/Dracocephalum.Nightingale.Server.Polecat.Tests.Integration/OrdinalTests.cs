@@ -31,7 +31,7 @@ public sealed class OrdinalTests : IAsyncLifetime
             options.Store.AssignOrdinals = true;
             options.Deletion.Allowed = DeletionLevel.Delete;
 
-            // A short lease, so the sequencer's quiet-store pass, on renewal, comes within a second.
+            // A short lease, so a takeover by another instance comes within a few seconds.
             options.OrdinalSequencerLeaseDuration = TimeSpan.FromSeconds(3);
 
             // A tail that looks only when an append here wakes it, never on its own, so that a
@@ -101,13 +101,13 @@ public sealed class OrdinalTests : IAsyncLifetime
         var afterTombstone = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
         var bounds = await sut.OrdinalHeadAsync(Orders, TestContext.Current.CancellationToken);
 
-        // Assert: the deleted event's ordinal is skipped, not reassigned; the bounds still count the
-        // archived hole, because its row keeps its number, and no longer the tombstoned one, whose
-        // row is gone.
+        // Assert: the deleted event's ordinal is skipped, not reassigned; the bounds still count
+        // both holes, the archived one and the tombstoned one, because a link outlives its event,
+        // as a link event does in the reference.
         withHole.Select(record => record.Ordinal).ShouldBe([0L, 2L]);
         afterFourth.Select(record => record.Ordinal).ShouldBe([0L, 2L, 3L]);
         afterTombstone.Select(record => record.Ordinal).ShouldBe([2L, 3L]);
-        bounds.ShouldBe(new StreamHead(1, 3));
+        bounds.ShouldBe(new StreamHead(0, 3));
     }
 
     [Fact]
@@ -137,13 +137,13 @@ public sealed class OrdinalTests : IAsyncLifetime
         var links = await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM [nightingale].[OrdinalLink]");
 
         // Assert: dense from zero per key, in position order; three in the workflow, three
-        // streams, each also in its category's listing: nine links, none for the event that did
-        // neither. Every read sought the links' key and none scanned it or the events.
+        // streams, each also in its category's listing, and a type link and a category link for
+        // each of the five events: nineteen links. Every read sought the links' key and none scanned it or the events.
         byWorkflow.Select(record => (record.Stream, record.Ordinal)).ShouldBe([("orders-1", 0L), ("orders-1", 1L), ("shipments-1", 2L)]);
         workflowBounds.ShouldBe(new StreamHead(0, 2));
         listed.Select(record => (record.Stream, record.Revision, record.Ordinal)).ShouldBe([("orders-1", 0L, 0L), ("shipments-1", 0L, 1L), ("orders-2", 0L, 2L)]);
         ofOrders.Select(record => (record.Stream, record.Ordinal)).ShouldBe([("orders-2", 1L), ("orders-1", 0L)]);
-        links.ShouldBe(9);
+        links.ShouldBe(19);
         (after.Seeks - before.Seeks).ShouldBeGreaterThanOrEqualTo(5, "two for the bounds, one for each of three pages");
         after.Scans.ShouldBe(before.Scans);
         eventsAfter.Scans.ShouldBe(eventsBefore.Scans, "each linked event is fetched by its key, never by a scan of the table");
@@ -191,7 +191,6 @@ public sealed class OrdinalTests : IAsyncLifetime
 
         // Assert
         (await TestDatabases.ScalarAsync<string>(_name, "SELECT [Value] FROM nightingale.StoreProperty WHERE [Name] = 'AssignOrdinals'")).ShouldBe("true");
-        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name IN ('ix_pc_events_category_ordinal', 'ix_pc_events_type_ordinal')")).ShouldBe(2);
         refused.Message.ShouldContain("initialized with ordinals");
     }
 
@@ -304,34 +303,27 @@ public sealed class OrdinalTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Sequencer_WhenAnEventCommitsAfterTheTailGaveItsPositionUp_ShouldNumberItWithTheNextOrdinalWithoutWaitingForAnAppend()
+    public async Task Sequencer_ShouldLinkEveryEventIntoItsTypeAndItsCategoryPastAGapGivenUp()
     {
         // Arrange: an append the database refuses inside the insert, an event type longer than its
-        // column, takes position 2 and never commits it; the next append lands at 3, the tail
-        // gives the gap up after the store's threshold, and the sequencer numbers past it.
+        // column, takes position 2 and never commits it; the next append lands at 3.
         var sut = Store;
         await sut.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
         await Should.ThrowAsync<ValueTooLongException>(async () => await sut.AppendAsync("orders-1", StreamState.StreamRevision(0), [new EventData(Guid.NewGuid(), new string('x', 501), "{}"u8.ToArray())], TestContext.Current.CancellationToken));
-        var pastTheGap = await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        var pastTheGap = await sut.AppendAsync("shipments-1", StreamState.NoStream, [Event("shipment_sent"), Event("shipment_sent")], TestContext.Current.CancellationToken);
+
+        // Act
         await NumberedAsync(pastTheGap.Position);
-        var before = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
+        var typeLinks = await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.OrdinalLink WHERE [Type] = 1");
+        var categoryLinks = await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.OrdinalLink WHERE [Type] = 2");
+        var shipments = await sut.ReadByOrdinalAsync(new VirtualStreamName(VirtualStreamKind.EventType, "shipment_sent"), Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
 
-        // Act: the gap's transaction commits after all, played by a row at its position; nothing
-        // else is appended, so no head moves, and the sequencer finds it on its quiet pass.
-        await TestDatabases.ExecuteAsync(_name, "SET IDENTITY_INSERT dbo.pc_events ON; INSERT INTO dbo.pc_events (seq_id, id, stream_id, version, data, type) SELECT 2, NEWID(), 'orders-1', 2, data, type FROM dbo.pc_events WHERE seq_id = 1; SET IDENTITY_INSERT dbo.pc_events OFF;");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        var after = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, timeout.Token);
-        while (after.Count < 3)
-        {
-            await Task.Delay(100, timeout.Token);
-            after = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, timeout.Token);
-        }
-
-        // Assert: numbered late, with the next ordinal of its category, never left out.
-        pastTheGap.Position.ShouldBe(3, "the refused append's number is gone");
-        before.Select(record => (record.Position, record.Ordinal)).ShouldBe([(1L, (long?)0), (3L, 1)]);
-        after.Select(record => (record.Position, record.Ordinal)).ShouldBe([(1L, (long?)0), (3L, 1), (2L, 2)]);
+        // Assert: one type link and one category link an event, the type's the witness that it is
+        // numbered, and nothing for the position given up.
+        pastTheGap.Position.ShouldBe(4, "the refused append's number is gone");
+        typeLinks.ShouldBe(3);
+        categoryLinks.ShouldBe(3);
+        shipments.Select(record => (record.Position, record.Ordinal)).ShouldBe([(3L, (long?)0), (4L, 1)]);
     }
 
     private IStreamStore Store => _host!.Store();

@@ -55,12 +55,6 @@ internal sealed class EventRow
     /// <summary>Gets or sets the category: the stream name up to its first hyphen, computed by the database.</summary>
     public required string Category { get; set; }
 
-    /// <summary>Gets or sets the event's place in its category stream, once the sequencer has numbered it.</summary>
-    public long? CategoryOrdinal { get; set; }
-
-    /// <summary>Gets or sets the event's place in its event-type stream, once the sequencer has numbered it.</summary>
-    public long? TypeOrdinal { get; set; }
-
     /// <summary>
     /// Gets or sets the tenant's partition key, on a store partitioned by tenant only: the value
     /// of the store's partitioning column, which it calls <c>tenant_ordinal</c> and which is no
