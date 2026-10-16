@@ -15,7 +15,9 @@ store changes it. This is the order to run them in, and what no test can do.
    names the store's behaviour or reaches past its public surface. A fix can
    come from anyone; when one has, remove the workaround and its row.
 3. **Bump the version** in `Directory.Packages.props`. `dotnet nuget why`
-   shows the JasperFx and Weasel versions it brings. Run the licence check of
+   shows the JasperFx and Weasel versions it brings, and whether a version
+   the repository overrides, each with its reason beside it there, is still
+   asked for below its fix; drop the override when none is. Run the licence check of
    [`agentics/rules/dependencies.md`](../../agentics/rules/dependencies.md).
 4. **Build, then the unit tests.** A changed approved schema
    (`Approved/store-schema.sql`) is a review, not a re-approval: read the
