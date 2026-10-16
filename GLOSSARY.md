@@ -88,13 +88,13 @@ How the tenancy modes fill the levels:
 | **Numbered** | How far the sequencer has given ordinals through a sequence. | |
 | **Gap** | A position missing below a later one: its transaction is still open, rolled back, or a number the sequence lost. | |
 | **Given up** | A gap the tail stops waiting for, so the sequence head moves past it. | |
-| **Late commit** | A transaction committing below a position the sequence head or the sequencer already passed; possible only where readers read past an open transaction. | |
-| **Transaction horizon** | A journal's point before which the database reports no transaction still open that has written to it: on SQL Server the oldest open transaction, from `DBCC OPENTRAN`; on PostgreSQL the writing sessions in `pg_stat_activity`. Once it passes a marker, nothing more can appear among the positions taken before the marker. | never stored: a question put to the database |
+| **Late commit** | A transaction committing below a position the sequence head or the sequencer already passed; possible only where readers read past an open transaction and the head gives a gap up by a wait rather than by the horizon. | |
+| **Transaction horizon** | A journal's point before which the database reports no transaction still open that has written to it: on SQL Server the oldest open transaction, from `DBCC OPENTRAN`; on PostgreSQL the transactions of the database still in progress, from its snapshot. Once it passes a marker, nothing more can appear among the positions taken before the marker. | never stored: a question put to the database |
 | **Marker** | A moment on a journal's own clock, taken to be judged by its horizon later. | |
 | **Horizon checkpoint** | The highest position seen at a look, with a marker taken after it. Every position up to it is final once the horizon has passed the marker and the marker is older than the minimum age. | |
 | **Minimum age** | How old a marker must be before its horizon is asked: the moment, on a database where it exists, between a transaction taking a position and the database seeing it write. Zero on SQL Server. | |
-| **Settled** | A range of positions final for numbering: a horizon checkpoint over it has been judged final. | |
-| **Scrub** | A re-check of a range for events without ordinals: the guardrail, the daily scrub, and the manual one (`PENDING.md`, *The ordinal audit*). | |
+| **Head strategy** | How a journal's tails judge a gap, chosen once when they start: the transaction horizon, or, where the login may not read it, best effort, a wait of the store's stale threshold over reads that wait on an open row. | |
+| **Scrub** | A re-check of a range for events without ordinals: the guardrail, the daily scrub, and the manual one (`PENDING.md`, *Scrubs*); for where the head can be wrong, and opt-in. | |
 
 ## Scope and policy
 

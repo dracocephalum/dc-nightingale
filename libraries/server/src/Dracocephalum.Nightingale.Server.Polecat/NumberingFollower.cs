@@ -1,4 +1,5 @@
 using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.Extensions.Logging;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
@@ -20,7 +21,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 internal sealed partial class NumberingFollower(INumberedSequences sequences, IOrdinalSequencingProgressReader progress, TimeProvider timeProvider, ILogger<NumberingFollower> logger, TimeSpan? interval = null)
 {
     /// <summary>How long the follower waits between reads while a sequence is behind: the tails' fast interval, the sequencer's own cadence.</summary>
-    public static readonly TimeSpan Interval = PolecatTenantTails.FastInterval;
+    public static readonly TimeSpan Interval = SequenceTails.FastInterval;
 
     private readonly TimeSpan _interval = interval ?? Interval;
 

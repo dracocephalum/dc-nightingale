@@ -1,12 +1,12 @@
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
 /// A head as it is followed: the highest mark published so far, the waits on it, and the failure
-/// that ends every wait when whatever follows the store has stopped following. Every tail of this
-/// backend publishes into one of these, the one tail of a shared sequence and each tenant's tail
-/// under a sequence per tenant, so the waiting is written once.
+/// that ends every wait when whatever follows the store has stopped following. Every tail
+/// publishes into one of these, the sequence head of a tail and how far the sequencer has
+/// numbered it, so the waiting is written once for every backend.
 /// </summary>
-internal sealed class FollowedHead
+public sealed class FollowedHead
 {
     private readonly Lock _gate = new();
     private TaskCompletionSource _advanced = new(TaskCreationOptions.RunContinuationsAsynchronously);

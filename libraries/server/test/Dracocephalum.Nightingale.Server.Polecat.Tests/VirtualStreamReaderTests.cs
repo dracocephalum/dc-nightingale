@@ -42,7 +42,7 @@ public sealed class VirtualStreamReaderTests
             Row(6, "orders-4", 1, "order_placed", categoryOrdinal: 3, typeOrdinal: 2),
             Row(7, "orders-4", 2, "order_paid", categoryOrdinal: 4),
             Row(8, "orders-4", 3, "order_shipped"));
-        context.Set<ProgressionRow>().Add(new ProgressionRow { Name = EventsDbContext.HighWaterMark, LastSeqId = 6 });
+        context.Set<SequenceHead>().AddRange(new SequenceHead { Id = Guid.NewGuid(), Position = 6 }, new SequenceHead { Id = Guid.NewGuid(), TenantId = Tenant, Position = 2 });
         context.SaveChanges();
     }
 
@@ -266,6 +266,23 @@ public sealed class VirtualStreamReaderTests
     }
 
     [Fact]
+    public async Task ReadBelowMarkAsync_UnderASequencePerTenant_ShouldTakeTheTenantsOwnHeadAsTheMark()
+    {
+        // Arrange: the shared row says 6, the tenant's own 2; a read of every tenant has neither.
+        var tenant = new VirtualStreamReader(() => new EventsDbContext(_options, Schema), Tenant, partitionedByTenant: true);
+        var everyTenant = new VirtualStreamReader(() => new EventsDbContext(_options, Schema), null, partitionedByTenant: true);
+
+        // Act
+        var (mark, page) = await tenant.ReadBelowMarkAsync(Orders, Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+        var (none, _) = await everyTenant.ReadBelowMarkAsync(null, Direction.Forwards, 1, 100, 10, TestContext.Current.CancellationToken);
+
+        // Assert
+        mark.ShouldBe(2);
+        page.Select(record => record.Position).ShouldBe([1]);
+        none.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task ReadBelowMarkAsync_WhenTheMarkWasNeverWritten_ShouldAnswerNothing()
     {
         // Arrange
@@ -372,7 +389,7 @@ public sealed class VirtualStreamReaderTests
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<EventRow>().HasKey(row => row.SeqId);
-            modelBuilder.Entity<ProgressionRow>().HasKey(row => row.Name);
+            modelBuilder.Entity<SequenceHead>().HasKey(row => row.Id);
             modelBuilder.Entity<OrdinalLink>().HasKey(row => new { row.Type, row.TenantId, row.Key, row.Ordinal });
             modelBuilder.Entity<OrdinalLink>().Property(row => row.Type).HasConversion<byte>();
         }

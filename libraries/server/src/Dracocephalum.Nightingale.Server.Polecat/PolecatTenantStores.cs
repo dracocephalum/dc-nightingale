@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using Dracocephalum.Nightingale.Server.Auth;
 using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
+using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Polecat;

@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 
 using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
+using Dracocephalum.Nightingale.Server.Sequencing;
 using JasperFx.Events;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;

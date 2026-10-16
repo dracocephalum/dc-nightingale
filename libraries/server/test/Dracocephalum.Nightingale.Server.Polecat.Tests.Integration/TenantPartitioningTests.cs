@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 
 using Dracocephalum.Nightingale.Server.Auth;
+using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Shouldly;
@@ -89,7 +90,7 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         var pastTheGap = await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [Event()], TestContext.Current.CancellationToken);
         var theirs = await acmes.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
         var acmeHead = await ReachAsync(stores.GetTail(acme), theirs.Position, TimeSpan.FromSeconds(5));
-        var defaultHead = await ReachAsync(stores.GetTail(TenantScope.Default), pastTheGap.Position, PolecatTenantTails.StaleAfter + TimeSpan.FromSeconds(10));
+        var defaultHead = await ReachAsync(stores.GetTail(TenantScope.Default), pastTheGap.Position, StaleThresholdHorizon.DefaultThreshold + TimeSpan.FromSeconds(10));
 
         // Assert
         pastTheGap.Position.ShouldBe(3, "the refused append's number is gone");

@@ -163,6 +163,32 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     b.ToTable("OrdinalSequencingProgress", "nightingale");
                 });
 
+            modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.SequenceHead", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CheckedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long>("Position")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TenantId")
+                        .HasMaxLength(250)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(250)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique();
+
+                    b.ToTable("SequenceHead", "nightingale");
+                });
+
             modelBuilder.Entity("Dracocephalum.Nightingale.Server.Data.StoreProperty", b =>
                 {
                     b.Property<Guid>("Id")

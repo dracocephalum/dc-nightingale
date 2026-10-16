@@ -1,4 +1,4 @@
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
 /// Finds how far the committed events reach without a gap. Sequence numbers are assigned before

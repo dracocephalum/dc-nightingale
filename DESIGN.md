@@ -30,7 +30,7 @@ twenty terabytes, about a hundred services connected over gRPC.
 | `core` | two assemblies: `Core`, the domain types both sides share — positions, expected states, event data and records, exceptions — with no wire package at all; and `Protocols.Grpc`, the gRPC contract (`V1/*.proto`) and the conversions between its messages and the domain types | any store; `Core` knows no transport, `Protocols.Grpc` knows only its own |
 | `client` | `NightingaleClient` over the generated stub, opened from one connection string in the reference client's shape that lists the instances and carries every setting, and the mapping from wire failure reasons to the shared exceptions | the server's internals |
 | `server` | the application core — the port a backend implements, `IStreamStore`, the tail every subscription waits on, `IStoreTail`, the subscription runtime, `Authorizer` deciding on a principal, and the credential and tenant managers — and, in its `Grpc` namespace, the one transport over it: the service implementations, the interceptor and the status mapping | any particular store; the core knows no transport |
-| `server` (Polecat backend) | `PolecatStreamStore`, the tailer over the store's high-water agent, the sequencer that assigns ordinals, the schema additions, the initializer that owns the database, and the default host | the wire |
+| `server` (Polecat backend) | `PolecatStreamStore`, the SQL Server reads and horizon the server's tails keep the sequence heads by, the sequencer that assigns ordinals, the schema additions, the initializer that owns the database, and the default host | the wire |
 
 The port is deliberately small: append with an expected state, read a bounded
 slice. Everything the contract adds, paging, the head-first read order, error
@@ -40,8 +40,7 @@ mapping, lives in the service above it, once, for every backend.
 
 Every seam below follows one rule about who does what. The store does the
 heavy lifting, and the write side above all: an append's version check, the
-global sequence, the high-water mark below which nothing is still
-committing, partitions, tenants, archiving and deleting. Those are the parts
+global sequence, partitions, tenants, archiving and deleting. Those are the parts
 that are hard to get right under concurrency, and the store has already got
 them right; the gateway calls them and does not rebuild them. Where the store
 cannot serve something on par with the reference, which so far has always
@@ -329,40 +328,60 @@ streams' events between. A virtual stream ends at its own last event, never at
 the sequence head.
 
 Sequence numbers are assigned before a transaction commits, so a forward read
-of `$all` or a subscription must stop at the store's high-water mark, which
-advances by polling; per-stream reads are unaffected because versions are
-dense under the stream lock. `PolecatStoreTail` is that mark as the process
-follows it: it runs the store's own high-water agent and nothing else of the
-daemon, and every subscription waits on it rather than polling. The agent
-polls on the store's cadence, but an append made through this process does
-not wait for it: every stream store pulses `AppendSignal` once its append has
-committed, and the tail waits on that signal between looks, the store's agent
-through the wake-up its daemon settings take and `PolecatTenantTails` in
-place of its interval. Only the appending instance is woken; the others find
-the event at their next look, and both tails look on the store's rule: again
-after its fast polling time, a quarter of a second, while a look moved the
-head and left it short of what is already committed, a head catching up; after
-`Nightingale:TailPollingInterval` otherwise, a second by default, whether the
-head has caught up or a gap holds it. So a subscriber on another instance than
+of `$all` or a subscription must stop at the sequence head, which advances by
+polling; per-stream reads are unaffected because versions are dense under the
+stream lock. The head is the gateway's own, for every store partition and
+every backend: `SequenceTails`, in the server's `Sequencing` namespace, one
+poller per process, keeps a head per sequence, the shared one or each served
+tenant's, and every subscription waits on it rather than polling. The store's
+own high-water agent is not run: its rule gives a gap up after 3 seconds,
+whatever holds it, and where readers read past an open transaction an append
+open longer than that commits below a mark that has passed it, never to be
+delivered by position. The gateway's rule is a `HorizonCheckpoint`: when a gap
+is first seen, the highest position seen at that look and a marker of the
+journal's transaction horizon taken after it; once the horizon has passed the
+marker, every position up to that ceiling is final, those seen committed and
+the missing ones never to be, so the head moves to the ceiling at once, the
+whole span with it, and extends from there; while a transaction that began
+before the marker is open, it waits, however long, and names the transaction
+in a warning after half a minute. A rolled-back append is given up at the next
+look rather than after a threshold. How the checkpoint is judged is the
+`HeadStrategy`, chosen once when the tails start and kept for the life of the
+process: on SQL Server the transaction horizon, `DBCC OPENTRAN`, when the login
+has `VIEW DATABASE STATE`, and otherwise the best-effort strategy, a horizon
+that has always passed with the store's 3 seconds as its minimum age, over
+reads that take the events table `WITH (READCOMMITTEDLOCK)`, so they wait on an
+open append's row even under read committed snapshot and the wait never starts
+for it; only a position whose row is not yet in the table when the wait ends
+can be skipped. Neither is required: the fallback is the store's own rule made
+safer, the warning names the grant, and a grant takes effect at the next
+start. The head is kept in the gateway's `SequenceHead` table, a row per
+sequence raised by every instance and lowered by none, its position the row's
+concurrency token: a tail begins there rather than at the start of the table,
+a reader of a replica takes it as the bound of what the replica holds, and the
+time checked moves at every look, so a head that has caught up is told from one
+nobody keeps. An append made through this process does not wait for the poll:
+every stream store pulses `AppendSignal` once its append has committed, and the
+poller waits on that signal between looks. Only the appending instance is
+woken; the others find the event at their next look, again after the store's
+fast polling time, a quarter of a second, while a look left a head short of
+what is already seen past it, a head catching up or a gap waiting on its
+checkpoint, most often an append a moment from its commit; after
+`Nightingale:TailPollingInterval` once every head has caught up, a second by
+default. So a subscriber on another instance than
 the writer is at most that interval behind, measured at a median of half of it
 on a quiet store and the whole of it while events flow, since every look then
 catches up; the setting buys it down, a quarter of a second for four small
 queries a second per instance, and a signal across instances, Service Broker
 or query notifications on SQL Server, was not worth its machinery for a
-quarter of a second that a setting already gives. Under tenant
-partitioning there is no global sequence, each tenant has its own and its own
-mark, so the wildcard read across tenants is refused there and the tail is per
-tenant: `ITenantStores` hands a scope its tail beside its stores, the one tail
-while the sequence is shared and the tenant's own under a sequence per tenant.
-The store's daemon keeps a mark per tenant too, but only for tenants its
-projections are assigned, of which the gateway has none, and its detector is
-internal (`UPSTREAM.md`); so `PolecatTenantTails` polls the marks itself, in
-the store's terms: one read per interval finds which served tenants moved,
-each is extended through its committed prefix, and a gap that has held a mark
-for the store's stale threshold is given up to the last position appended
-before it, as the store's agent does. The queries are a port of their own,
-`ITenantEventPositions`, so the poller's rules are tested against positions
-written by hand.
+quarter of a second that a setting already gives. Under tenant partitioning
+there is no global sequence, each tenant has its own and its own head, so the
+wildcard read across tenants is refused there and the tail is per tenant:
+`ITenantStores` hands a scope its tail beside its stores, the one tail while the
+sequence is shared and the tenant's own under a sequence per tenant. One read
+per look finds which followed sequences moved, and only those are read. A
+backend supplies the reads, `ISequencePositions`, and the horizon; the rules
+are tested in the server against positions and a horizon written by hand.
 
 ### 5. A group runs in one place, on a lease
 
@@ -424,9 +443,8 @@ as they are. A message stays on the outbox while it is in flight, so a wake
 in the meantime never delivers it twice. The outbox row has a due time, so a
 retry with a delay is the same row with a later one.
 
-`IStoreTail` is the seam for liveness. One tailer per process runs the store's
-own high-water agent, the part of its async daemon that finds that mark, and
-publishes every advance; each subscription waits on it instead of polling the
+`IStoreTail` is the seam for liveness. One poller per process, `SequenceTails`,
+keeps the sequence heads and publishes every advance; each subscription waits on it instead of polling the
 store, so a thousand subscribers cost the store one poll per interval. A
 subscription confirms with the head, catches up in pages, says so, then
 delivers whatever each advance brings, through `StreamRouter`, one per
@@ -650,12 +668,14 @@ key and taken for what it is: the group is gone.
 
 The backend has a second, read-only context beside it, a mirror of the
 tables the store owns that the gateway reads: its events, with the columns
-the gateway adds, its streams, the registry of tenants' partition keys, and
-the row its high-water mark is kept in; and, from the gateway's own schema,
-the ordinal links, which a read joins to the events. The reads by category, by event
-type and by position are LINQ over that mirror, and so is the tail's look
-for the unbroken run of positions after the mark, whose gap rule is plain
-code. A query names the columns it needs, never a whole row, because the
+the gateway adds, its streams, and the registry of tenants' partition keys;
+and, from the gateway's own schema, the ordinal links, which a read joins to
+the events, and the sequence heads, which bound a read of a replica. The reads
+by category, by event type and by position are LINQ over that mirror, and so
+is the tails' look
+for the unbroken run of positions after a head, whose gap rule is plain
+code; the best-effort strategy's locking reads are the same LINQ composed
+over the table taken with a hint. A query names the columns it needs, never a whole row, because the
 ordinal columns exist only on a store initialized with ordinals; and the
 mirror declares the store's column types exactly, since a name sent as
 Unicode to a column that is not makes the database convert the column and
@@ -692,9 +712,10 @@ the backend's.
 
 A secondary applies the log after the primary commits, under synchronous
 commit too, so it holds a prefix of the events. Reading it bounded by the
-primary's high-water mark would skip, silently and inside a subscription,
-whatever it has not applied yet. The mark is replicated with the events, and
-it is written after the events it covers, so everything at or below the mark
+primary's sequence head would skip, silently and inside a subscription,
+whatever it has not applied yet. The head, kept in the gateway's table, is the
+mark: it is replicated with the events, and it is written after the events it
+covers, so everything at or below the mark
 *as the secondary reports it* is on that secondary. A page of `$all` or of a
 virtual stream by position is therefore asked of the read-only connection
 together with its mark, in one round trip so both come from the same server:

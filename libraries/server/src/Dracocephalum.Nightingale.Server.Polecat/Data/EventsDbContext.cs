@@ -6,8 +6,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data;
 
 /// <summary>
 /// A read-only mirror of the tables the store owns: its events, with the columns the gateway
-/// adds to them, its streams, the row its high-water mark is kept in, and, partitioned by tenant,
-/// the registry of each tenant's partition key. The store creates and
+/// adds to them, its streams, and, partitioned by tenant, the registry of each tenant's partition
+/// key; and of the two gateway tables read beside them, the ordinal links and the sequence heads.
+/// The store creates and
 /// migrates them; this context only reads, and refuses to save, so the gateway's reads of a
 /// stream, by category, by event type and by position are LINQ a unit test can run on the
 /// in-memory provider. The column
@@ -20,9 +21,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data;
 /// </summary>
 internal class EventsDbContext : DbContext, ISchemaScoped
 {
-    /// <summary>The name of the progression row that holds the high-water mark.</summary>
-    public const string HighWaterMark = "HighWaterMark";
-
     /// <summary>The store's partitioning column on a store partitioned by tenant: the tenant's partition key, which the store calls an ordinal and the gateway does not.</summary>
     public const string TenantPartitionColumn = "tenant_ordinal";
 
@@ -54,11 +52,11 @@ internal class EventsDbContext : DbContext, ISchemaScoped
     /// <summary>Gets the tenants' partition keys, on a store partitioned by tenant only.</summary>
     public DbSet<TenantPartitionRow> TenantPartitionRows => Set<TenantPartitionRow>();
 
-    /// <summary>Gets the progression rows; the high-water mark is one of them.</summary>
-    public DbSet<ProgressionRow> ProgressionRows => Set<ProgressionRow>();
-
     /// <summary>Gets the ordinals of the correlations and the listings, from the gateway's own table.</summary>
     public DbSet<OrdinalLink> OrdinalLinks => Set<OrdinalLink>();
+
+    /// <summary>Gets the sequence heads, from the gateway's own table.</summary>
+    public DbSet<SequenceHead> SequenceHeads => Set<SequenceHead>();
 
     /// <inheritdoc/>
     public string Schema { get; }
@@ -140,14 +138,6 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             row.Property(p => p.PartitionKey).HasColumnName("ordinal").HasColumnType("int");
         });
 
-        modelBuilder.Entity<ProgressionRow>(row =>
-        {
-            row.ToTable("pc_event_progression");
-            row.HasKey(p => p.Name);
-            row.Property(p => p.Name).HasColumnName("name").HasColumnType("varchar(200)");
-            row.Property(p => p.LastSeqId).HasColumnName("last_seq_id").HasColumnType("bigint");
-        });
-
         // The gateway's table, not the store's, read beside the events it points at: the
         // gateway's migrations create it and the sequencer fills it. Typed as those migrations
         // type it, so the key and the tenant compare without conversion.
@@ -160,6 +150,17 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             link.Property(l => l.Key).HasColumnType("varchar(250)");
             link.Property(l => l.Ordinal).HasColumnType("bigint");
             link.Property(l => l.SeqId).HasColumnType("bigint");
+        });
+
+        // The gateway's table the tails keep their heads in, read on the read-only connection as
+        // the bound of what the replica holds, since a head is written after the events it covers.
+        modelBuilder.Entity<SequenceHead>(head =>
+        {
+            head.ToTable(nameof(SequenceHead), GatewaySchema);
+            head.HasKey(h => h.Id);
+            head.Property(h => h.TenantId).HasColumnType("varchar(250)");
+            head.Property(h => h.Position).HasColumnType("bigint");
+            head.Property(h => h.CheckedAt).HasColumnType("datetimeoffset");
         });
     }
 
