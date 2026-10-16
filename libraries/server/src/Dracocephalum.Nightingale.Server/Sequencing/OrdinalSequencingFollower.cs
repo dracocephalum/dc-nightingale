@@ -1,8 +1,7 @@
 using Dracocephalum.Nightingale.Server.Data;
-using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.Extensions.Logging;
 
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
 /// Keeps the numbering of the sequences this process follows current while another instance
@@ -18,7 +17,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 /// <param name="interval">How long the follower waits between reads while a sequence is behind; <see cref="Interval"/> when not given.</param>
-internal sealed partial class NumberingFollower(INumberedSequences sequences, IOrdinalSequencingProgressReader progress, TimeProvider timeProvider, ILogger<NumberingFollower> logger, TimeSpan? interval = null)
+internal sealed partial class OrdinalSequencingFollower(INumberedSequences sequences, IOrdinalSequencingProgressReader progress, TimeProvider timeProvider, ILogger<OrdinalSequencingFollower> logger, TimeSpan? interval = null)
 {
     /// <summary>How long the follower waits between reads while a sequence is behind: the tails' fast interval, the sequencer's own cadence.</summary>
     public static readonly TimeSpan Interval = SequenceTails.FastInterval;

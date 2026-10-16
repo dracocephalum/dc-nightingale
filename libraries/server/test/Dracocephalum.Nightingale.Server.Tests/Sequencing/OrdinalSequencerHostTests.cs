@@ -1,15 +1,16 @@
+using Dracocephalum.Nightingale.Server.Sequencing;
 using FakeItEasy;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
-namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
+namespace Dracocephalum.Nightingale.Server.Tests.Sequencing;
 
 /// <summary>
 /// The sequencer's loop around its lease, with no database: what it does when asking for the
 /// lease fails. Numbering itself needs the events table and is the integration tests'.
 /// </summary>
-public sealed class OrdinalSequencerTests
+public sealed class OrdinalSequencerHostTests
 {
     [Theory]
     [InlineData(typeof(OperationCanceledException))]
@@ -23,7 +24,7 @@ public sealed class OrdinalSequencerTests
         var asked = 0;
         var askedTwice = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var askedOnce = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        A.CallTo(() => leases.AcquireLeaseAsync(OrdinalSequencer.LeaseName, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._))
+        A.CallTo(() => leases.AcquireLeaseAsync(OrdinalSequencing.LeaseName, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._))
             .ReturnsLazily(_ =>
             {
                 if (Interlocked.Increment(ref asked) == 1)
@@ -37,8 +38,8 @@ public sealed class OrdinalSequencerTests
             });
         var tail = new FollowedTail();
         var sequences = new SharedSequence(tail, tail.Numbering);
-        var follower = new NumberingFollower(sequences, new FakeOrdinalSequencingProgressReader(), time, NullLogger<NumberingFollower>.Instance);
-        using var sut = new OrdinalSequencer(leases, sequences, follower, new SubscriptionGroupRegistry(), "Server=example;Database=nightingale", "dbo", "nightingale", time, NullLogger<OrdinalSequencer>.Instance);
+        var follower = new OrdinalSequencingFollower(sequences, new FakeOrdinalSequencingProgressReader(), time, NullLogger<OrdinalSequencingFollower>.Instance);
+        using var sut = new OrdinalSequencerHost(leases, sequences, follower, new SubscriptionGroupRegistry(), A.Fake<IOrdinalSequencer>(), time, NullLogger<OrdinalSequencerHost>.Instance);
 
         // Act: the loop waits out the interval after the failure, then asks again.
         await sut.StartAsync(TestContext.Current.CancellationToken);
@@ -55,6 +56,6 @@ public sealed class OrdinalSequencerTests
         // Assert: the loop is still running after the failure; it did not end with it.
         beforeTheInterval.ShouldBeFalse();
         asked.ShouldBeGreaterThanOrEqualTo(2);
-        sut.RenewInterval.ShouldBe(OrdinalSequencer.LeaseDuration / 3);
+        sut.RenewInterval.ShouldBe(OrdinalSequencing.LeaseDuration / 3);
     }
 }

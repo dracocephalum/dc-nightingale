@@ -1,4 +1,4 @@
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
 /// The sequences the sequencer numbers and the way it waits for any of them to move: the one

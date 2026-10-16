@@ -91,7 +91,7 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     /// third of it. Not bound from configuration: it is here so that a test of one instance
     /// taking over from another does not wait out half a minute.
     /// </summary>
-    internal TimeSpan OrdinalSequencerLeaseDuration { get; set; } = OrdinalSequencer.LeaseDuration;
+    internal TimeSpan OrdinalSequencerLeaseDuration { get; set; } = OrdinalSequencing.LeaseDuration;
 
     /// <summary>
     /// Gets or sets a value indicating whether the server opens a second, read-only connection and

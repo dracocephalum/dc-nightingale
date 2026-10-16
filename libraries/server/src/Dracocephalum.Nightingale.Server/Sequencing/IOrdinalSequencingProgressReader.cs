@@ -1,6 +1,6 @@
 using Dracocephalum.Nightingale.Server.Data;
 
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>Reads the ordinal sequencer's progress rows: how far each sequence is numbered, as committed.</summary>
 internal interface IOrdinalSequencingProgressReader

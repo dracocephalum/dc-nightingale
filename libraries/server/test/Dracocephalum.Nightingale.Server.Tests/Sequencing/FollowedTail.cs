@@ -1,8 +1,8 @@
 using Dracocephalum.Nightingale.Server.Sequencing;
 
-namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
+namespace Dracocephalum.Nightingale.Server.Tests.Sequencing;
 
-/// <summary>A tail a test moves by hand, over the backend's own followed marks: waiters wake exactly as they do on the real one.</summary>
+/// <summary>A tail a test moves by hand, over followed heads: waiters wake exactly as they do on the real one.</summary>
 internal sealed class FollowedTail : IStoreTail
 {
     public FollowedHead Followed { get; } = new();
