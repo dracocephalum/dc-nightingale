@@ -621,6 +621,56 @@ Everything below it may go, and the stream's first ordinal then moves up, as
 the reference's does after a scavenge. An archived event keeps its row, so
 its link stays. Not until a store's links are worth the space.
 
+## Workers per store partition
+
+A journal runs one head detector, the tails' poller, and one ordinal
+sequencer, each serving every store partition in it: the shared sequence, or
+each tenant's under partitioning by tenant. The partition is already the unit
+of everything they keep, a head, a checkpoint, a progress row and a fault each,
+so running a worker per partition is a step rather than a redesign: a lease per
+partition (`ordinals:<tenant>`), a host per partition, and looks that do not
+wait on one another.
+
+What it buys is latency, and settings of a partition's own:
+
+- a look blocked behind one tenant's open append, under locking reads, no
+  longer delays another tenant's head; a long batch for one tenant no longer
+  delays another's numbering; and leases per partition spread the numbering
+  across instances;
+- each partition may have its own polling interval, batch size and lease
+  duration, and its own sequencer switch, so a lazy tenant runs slowly
+  without slowing the others;
+- one database can serve several tenants cheaply where a deployment, a
+  development environment above all, wants one tenant's mess to leave the
+  others working.
+
+What it does not buy is isolation from the database: the partitions of one
+journal share its transaction horizon, its log, its locks and its backups, so
+a failure there stalls them all whatever the number of workers. That is
+database per tenant, a journal each, under the store hierarchy. Built when one
+busy tenant delays the others, or a deployment asks for a partition's own
+settings.
+
+### A horizon per partition
+
+The pipedream with it: a gap in one partition judged only by the transactions
+that could still fill it, those writing to that partition, so a long writer in
+another tenant's partition no longer holds this one's gap. A transaction that
+takes a position in a partition writes the stream's row in the same tenant's
+partition first, so the evidence is the locks on the partition of the events
+table and of the streams table:
+
+- on PostgreSQL each partition is a table of its own, and `pg_locks` names it
+  and is readable by every role: a partition's horizon is the in-progress
+  transaction ids of this database that hold a lock on either of its tables;
+- on SQL Server the locks are in `sys.dm_tran_locks`, by the partition's
+  storage, which needs `VIEW SERVER PERFORMANCE STATE`: the lock-based
+  refinement of the horizon, opt-in, applied per partition.
+
+A writer that has not yet written the stream's row holds no position in the
+partition, so it cannot hold a gap below the checkpoint's ceiling, the same
+argument the lock-based refinement rests on.
+
 ## Scrubs
 
 A re-check of a range for events without a type link, an anti-join of the
