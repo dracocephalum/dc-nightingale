@@ -112,6 +112,7 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             progress.ToTable(nameof(OrdinalSequencingProgress));
             progress.HasKey(row => row.Id);
             progress.Property(row => row.TenantId).HasMaxLength(250).IsUnicode(false);
+            progress.Property(row => row.Fault).HasMaxLength(1000);
 
             // Unique with no filter: SQL Server's unique index admits one null, which is the shared
             // sequence's row, where the provider's default filter would admit any number of them.

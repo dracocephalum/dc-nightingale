@@ -84,6 +84,22 @@ public sealed class NightingaleErrorMappingTests
     }
 
     [Fact]
+    public void ToException_WhenTheSequencerIsDisabledOrFaulted_ShouldSayWhichAndWhy()
+    {
+        // Arrange
+        var disabled = Failure(StatusCode.FailedPrecondition, "SEQUENCER_DISABLED");
+        var faulted = Failure(StatusCode.Unavailable, "SEQUENCER_FAULTED", ("cause", "the batch timed out"));
+
+        // Act
+        var whenDisabled = NightingaleErrorMapping.ToException(disabled);
+        var whenFaulted = NightingaleErrorMapping.ToException(faulted);
+
+        // Assert: one base type, so a caller that only cares that numbering stopped catches one.
+        whenDisabled.ShouldBeOfType<OrdinalSequencerDisabledException>().ShouldBeAssignableTo<OrdinalSequencerException>();
+        whenFaulted.ShouldBeOfType<OrdinalSequencerFaultedException>().Cause.ShouldBe("the batch timed out");
+    }
+
+    [Fact]
     public void ToException_WhenReasonIsUnknown_ShouldReturnTheOriginal()
     {
         // Arrange

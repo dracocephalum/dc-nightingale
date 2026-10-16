@@ -19,12 +19,23 @@ public sealed class ServerFeaturesService(ITenantStores stores, NightingaleOptio
         ?? "unknown";
 
     /// <inheritdoc/>
-    public override Task<PingResponse> Ping(PingRequest request, ServerCallContext context) =>
-        Task.FromResult(new PingResponse
+    public override Task<PingResponse> Ping(PingRequest request, ServerCallContext context)
+    {
+        var ordinals = stores.GetStreams(Auth.TenantScope.Default).OrdinalsEnabled;
+        return Task.FromResult(new PingResponse
         {
             Version = Version,
-            SupportsOrdinals = stores.GetStreams(Auth.TenantScope.Default).OrdinalsEnabled,
+            SupportsOrdinals = ordinals,
             AuthenticationRequired = options?.Auth.Enabled ?? false,
             SupportsAllTenants = stores.SupportsAllTenants,
+            OrdinalSequencer = ordinals ? ToState(stores.GetTail(Auth.TenantScope.Default).NumberingStopped) : OrdinalSequencerState.Unspecified,
         });
+    }
+
+    private static OrdinalSequencerState ToState(OrdinalSequencerException? stopped) => stopped switch
+    {
+        null => OrdinalSequencerState.Running,
+        OrdinalSequencerDisabledException => OrdinalSequencerState.Disabled,
+        _ => OrdinalSequencerState.Faulted,
+    };
 }

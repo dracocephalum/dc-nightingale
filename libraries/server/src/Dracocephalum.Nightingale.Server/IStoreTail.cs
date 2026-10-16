@@ -24,6 +24,13 @@ public interface IStoreTail
     ValueTask<long> WaitForNumberedAsync(long through, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Gets why nothing is being numbered, while the ordinal sequencer is disabled or faulted for
+    /// this sequence; <see langword="null"/> while it numbers, and on a store without ordinals. A
+    /// wait on the numbering ends with it meanwhile, and a read by ordinal is refused with it.
+    /// </summary>
+    OrdinalSequencerException? NumberingStopped { get; }
+
+    /// <summary>
     /// Gets the high-water mark: the position up to which every event is committed. 0 when the
     /// store has no events yet. Never the highest sequence number in the table, because a number
     /// is taken before its transaction commits and a lower one can become visible after a higher.

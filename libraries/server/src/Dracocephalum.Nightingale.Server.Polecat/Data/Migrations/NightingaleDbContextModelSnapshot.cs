@@ -147,6 +147,13 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Fault")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("FaultedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<long>("Position")
                         .HasColumnType("bigint");
 

@@ -47,6 +47,8 @@ internal static class NightingaleErrorMapping
             ErrorReason.GroupUpdated => new GroupUpdatedException(stream, GetText(info, "group")),
             ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, GetText(info, "group")),
             ErrorReason.OrdinalsNotEnabled => new OrdinalsNotEnabledException(stream),
+            ErrorReason.SequencerDisabled => new OrdinalSequencerDisabledException(),
+            ErrorReason.SequencerFaulted => new OrdinalSequencerFaultedException(GetText(info, "cause")),
             ErrorReason.AuthenticationFailed => new AuthenticationFailedException(exception.Status.Detail),
             ErrorReason.AccessDenied => Enum.TryParse<CredentialRole>(GetText(info, "required"), true, out var required) ? new AccessDeniedException(exception.Status.Detail, required) : new AccessDeniedException(exception.Status.Detail),
             ErrorReason.TenantNotFound => new TenantNotFoundException(Guid.TryParse(GetText(info, "tenant"), out var missing) ? missing : null),

@@ -95,6 +95,13 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             throw NightingaleErrors.OrdinalsNotEnabled(stream);
         }
 
+        // Nothing numbered meanwhile: refused with the reason rather than served what was numbered
+        // before, or left waiting for what will not come.
+        if (ordinal && tail.NumberingStopped is { } stopped && NightingaleErrors.TryTranslate(stopped, out var refused))
+        {
+            throw refused;
+        }
+
         var direction = request.Direction == ReadDirection.Backwards ? Direction.Backwards : Direction.Forwards;
         if (request.FromCase == ReadRequest.FromOneofCase.Position && request.Position < 0)
         {
@@ -139,7 +146,16 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                 }
                 else if (ordinal)
                 {
-                    await SubscribeOrdinal(store, tail, virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await SubscribeOrdinal(store, tail, virtualStream, request, responseStream, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OrdinalSequencerException stoppedLater) when (NightingaleErrors.TryTranslate(stoppedLater, out var status))
+                    {
+                        // The sequencer stopped while the subscription waited on it: the call
+                        // ends with the reason, a fault to retry after a back-off.
+                        throw status;
+                    }
                 }
                 else if (isVirtual)
                 {

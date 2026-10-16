@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
 {
     [DbContext(typeof(NightingaleDbContext))]
-    [Migration("20261016042859_Initial")]
+    [Migration("20261016063114_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -149,6 +149,13 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Fault")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("FaultedAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<long>("Position")
                         .HasColumnType("bigint");

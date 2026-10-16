@@ -981,6 +981,31 @@ public sealed class StreamsServiceTests : IAsyncLifetime
         exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("ORDINALS_NOT_ENABLED");
     }
 
+    [Fact]
+    public async Task Read_ByOrdinal_WhileTheSequencerIsDisabledOrFaulted_ShouldRefuseWithItsReasonBeforeTouchingTheStore()
+    {
+        // Arrange
+        A.CallTo(() => _store.OrdinalsEnabled).Returns(true);
+        var client = new Streams.StreamsClient(_channel);
+        var read = new ReadRequest { Stream = "$ce-orders", Start = new(), Count = 1, Numbering = Protocols.Grpc.V1.Numbering.Ordinal };
+        var subscribe = new ReadRequest { Stream = "$ce-orders", Start = new(), Subscription = new SubscriptionOptions(), Numbering = Protocols.Grpc.V1.Numbering.Ordinal };
+
+        // Act
+        _tail.NumberingStopped = new OrdinalSequencerDisabledException();
+        var disabled = await Should.ThrowAsync<RpcException>(() => ReadAll(client, read));
+        _tail.NumberingStopped = new OrdinalSequencerFaultedException("the batch timed out");
+        var faulted = await Should.ThrowAsync<RpcException>(() => ReadAll(client, subscribe));
+
+        // Assert: disabled is not worth a retry, faulted is, after a back-off.
+        disabled.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
+        disabled.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("SEQUENCER_DISABLED");
+        faulted.StatusCode.ShouldBe(StatusCode.Unavailable);
+        var info = faulted.GetRpcStatus()?.GetDetail<ErrorInfo>();
+        info?.Reason.ShouldBe("SEQUENCER_FAULTED");
+        info?.Metadata["cause"].ShouldBe("the batch timed out");
+        A.CallTo(() => _store.ReadByOrdinalAsync(A<VirtualStreamName>._, A<Direction>._, A<long>._, A<int>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
     [Theory]
     [InlineData("orders-1")]
     [InlineData("$all")]

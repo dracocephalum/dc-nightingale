@@ -14,9 +14,10 @@ internal sealed class FakeOrdinalSequencingProgressReader : IOrdinalSequencingPr
 
     public IReadOnlyCollection<string?>? LastAskedFor { get; private set; }
 
-    public FakeOrdinalSequencingProgressReader Holding(string? tenantId, long position)
+    public FakeOrdinalSequencingProgressReader Holding(string? tenantId, long position, string? fault = null)
     {
-        _rows.Add(new OrdinalSequencingProgress { Id = Guid.NewGuid(), TenantId = tenantId, Position = position });
+        _rows.RemoveAll(row => row.TenantId == tenantId);
+        _rows.Add(new OrdinalSequencingProgress { Id = Guid.NewGuid(), TenantId = tenantId, Position = position, Fault = fault });
         return this;
     }
 

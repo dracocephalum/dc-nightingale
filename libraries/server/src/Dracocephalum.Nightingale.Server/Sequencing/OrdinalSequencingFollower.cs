@@ -8,7 +8,8 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// numbers them: the one poller of the process for the sequencer's progress, in place of a poll
 /// per subscription. It waits on the heads, as the sequencer does, and only while a followed
 /// sequence's head is past its numbering does it read the progress rows, once per interval, and
-/// publish what they say; a sequence numbered up to its head is waited on again, so a quiet
+/// publish what they say, the position and whether the numbering instance has recorded the
+/// sequence as faulted; a sequence numbered up to its head is waited on again, so a quiet
 /// store costs nothing. The instance that numbers publishes its own progress as it commits and
 /// does not run this. A read that fails is logged and taken again at the next interval.
 /// </summary>
@@ -80,9 +81,22 @@ internal sealed partial class OrdinalSequencingFollower(INumberedSequences seque
 
         foreach (var sequence in behind)
         {
-            if (rows.FirstOrDefault(row => string.Equals(row.TenantId, sequence.TenantId, StringComparison.Ordinal)) is { } row)
+            if (rows.FirstOrDefault(row => string.Equals(row.TenantId, sequence.TenantId, StringComparison.Ordinal)) is not { } row)
             {
-                sequence.Numbering.Publish(row.Position);
+                continue;
+            }
+
+            sequence.Numbering.Publish(row.Position);
+
+            // The fault the numbering instance recorded, and its end, as this instance's answer
+            // too; a disabled sequencer's stop is this instance's own and is left as it is.
+            if (row.Fault is { } fault && sequence.Numbering.Stopped is null)
+            {
+                sequence.Numbering.Stop(new OrdinalSequencerFaultedException(fault));
+            }
+            else if (row.Fault is null && sequence.Numbering.Stopped is OrdinalSequencerFaultedException)
+            {
+                sequence.Numbering.Resume();
             }
         }
     }

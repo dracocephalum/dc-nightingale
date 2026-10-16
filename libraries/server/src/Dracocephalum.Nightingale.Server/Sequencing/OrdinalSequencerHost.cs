@@ -25,6 +25,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// <param name="follower">Keeps the numbering current while another instance holds the lease.</param>
 /// <param name="registry">The instance id the lease is taken under.</param>
 /// <param name="sequencer">Sequences a batch, in the backend's own statement.</param>
+/// <param name="faults">Where a sequence is recorded as faulted, and as numbering again, for every instance.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="logger">The logger.</param>
 /// <param name="leaseDuration">How long the lease lasts without renewal; <see cref="OrdinalSequencing.LeaseDuration"/> when not given. The renewal follows from it.</param>
@@ -34,13 +35,19 @@ internal sealed partial class OrdinalSequencerHost(
     OrdinalSequencingFollower follower,
     SubscriptionGroupRegistry registry,
     IOrdinalSequencer sequencer,
+    IOrdinalSequencingFaults faults,
     TimeProvider timeProvider,
     ILogger<OrdinalSequencerHost> logger,
     TimeSpan? leaseDuration = null) : IHostedService, IDisposable
 {
     private readonly TimeSpan _leaseDuration = leaseDuration ?? OrdinalSequencing.LeaseDuration;
 
+    /// <summary>How many batches of a sequence fail in a row before its numbering is stopped as faulted.</summary>
+    public const int FaultAfter = 3;
+
     private readonly CancellationTokenSource _stopping = new();
+    private readonly Dictionary<SequenceKey, int> _failures = [];
+    private readonly HashSet<SequenceKey> _faulted = [];
     private Task? _loop;
 
     /// <summary>
@@ -95,6 +102,13 @@ internal sealed partial class OrdinalSequencerHost(
                     {
                         holding = true;
                         LogTookOver(owner);
+
+                        // What an earlier holder recorded as faulted is cleared by this one as it
+                        // numbers it again.
+                        foreach (var tenantId in await faults.ReadFaultedAsync(stopping).ConfigureAwait(false))
+                        {
+                            _faulted.Add(new SequenceKey(tenantId));
+                        }
                     }
 
                     // The count is read before the heads are, so a head that moves during the pass
@@ -158,41 +172,122 @@ internal sealed partial class OrdinalSequencerHost(
         }
     }
 
-    /// <summary>Numbers every sequence in batches until each has reached its head, renewing the lease along the way.</summary>
-    /// <returns>Whether every sequence was caught up; false when the lease was lost.</returns>
+    /// <summary>
+    /// Numbers every sequence in batches until each has reached its head, renewing the lease along
+    /// the way. A sequence whose batch fails is left for the next pass while the others go on; once
+    /// it has failed <see cref="FaultAfter"/> times in a row its numbering is stopped with the fault,
+    /// here and, through its progress row, on every instance, and the first batch that succeeds
+    /// lifts it again.
+    /// </summary>
+    /// <returns>Whether every sequence was caught up or left for the next pass; false when the lease was lost.</returns>
     private async Task<bool> CatchUpAsync(string owner, CancellationToken stopping)
     {
         var renewed = timeProvider.GetTimestamp();
         foreach (var sequence in await sequences.ListAsync(stopping).ConfigureAwait(false))
         {
-            while (true)
+            try
             {
-                var head = sequence.Tail.Head;
-                var numbered = await sequencer.SequenceBatchAsync(sequence.TenantId, head, stopping).ConfigureAwait(false);
-                sequence.Numbering.Publish(numbered);
-                if (numbered >= head)
+                while (true)
                 {
-                    break;
-                }
-
-                if (timeProvider.GetElapsedTime(renewed) >= RenewInterval)
-                {
-                    if (await leases.AcquireLeaseAsync(OrdinalSequencing.LeaseName, owner, null, _leaseDuration, stopping).ConfigureAwait(false) is not null)
+                    var head = sequence.Tail.Head;
+                    var numbered = await sequencer.SequenceBatchAsync(sequence.TenantId, head, stopping).ConfigureAwait(false);
+                    sequence.Numbering.Publish(numbered);
+                    if (numbered >= head)
                     {
-                        return false;
+                        break;
                     }
 
-                    renewed = timeProvider.GetTimestamp();
+                    if (timeProvider.GetElapsedTime(renewed) >= RenewInterval)
+                    {
+                        if (await leases.AcquireLeaseAsync(OrdinalSequencing.LeaseName, owner, null, _leaseDuration, stopping).ConfigureAwait(false) is not null)
+                        {
+                            return false;
+                        }
+
+                        renewed = timeProvider.GetTimestamp();
+                    }
                 }
             }
+            catch (Exception exception) when (!stopping.IsCancellationRequested)
+            {
+                await FailAsync(sequence, exception, stopping).ConfigureAwait(false);
+                continue;
+            }
+
+            await RecoverAsync(sequence, stopping).ConfigureAwait(false);
         }
 
         return true;
     }
+
+    /// <summary>Counts a failed batch, and stops the sequence's numbering with the fault once the count reaches the threshold.</summary>
+    private async Task FailAsync(NumberedSequence sequence, Exception exception, CancellationToken stopping)
+    {
+        var key = new SequenceKey(sequence.TenantId);
+        var failures = _failures[key] = _failures.GetValueOrDefault(key) + 1;
+        LogBatchFailed(exception, sequence.TenantId ?? SharedSequence, failures);
+        if (failures < FaultAfter || sequence.Numbering.Stopped is not null)
+        {
+            return;
+        }
+
+        sequence.Numbering.Stop(new OrdinalSequencerFaultedException(exception.Message, exception));
+        _faulted.Add(key);
+        LogFaulted(sequence.TenantId ?? SharedSequence, failures);
+        await RecordAsync(sequence, exception.Message, stopping).ConfigureAwait(false);
+    }
+
+    /// <summary>Clears what a numbered sequence had failed: its count, and its fault, here and on its progress row.</summary>
+    private async Task RecoverAsync(NumberedSequence sequence, CancellationToken stopping)
+    {
+        var key = new SequenceKey(sequence.TenantId);
+        _failures.Remove(key);
+        if (sequence.Numbering.Stopped is OrdinalSequencerFaultedException)
+        {
+            sequence.Numbering.Resume();
+        }
+
+        if (_faulted.Contains(key) && await RecordAsync(sequence, null, stopping).ConfigureAwait(false))
+        {
+            _faulted.Remove(key);
+            LogRecovered(sequence.TenantId ?? SharedSequence);
+        }
+    }
+
+    /// <summary>Writes a fault, or its end, to the progress row; a failure is logged and costs only the other instances' answer meanwhile.</summary>
+    /// <returns>Whether it was written.</returns>
+    private async Task<bool> RecordAsync(NumberedSequence sequence, string? fault, CancellationToken stopping)
+    {
+        try
+        {
+            await faults.WriteAsync(sequence.TenantId, fault, timeProvider.GetUtcNow(), stopping).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (!stopping.IsCancellationRequested)
+        {
+            LogFaultNotRecorded(exception, sequence.TenantId ?? SharedSequence);
+            return false;
+        }
+    }
+
+    /// <summary>How the log names the shared sequence, which has no tenant.</summary>
+    private const string SharedSequence = "(shared)";
 
     [LoggerMessage(Level = LogLevel.Information, Message = "This instance ({Owner}) numbers the virtual streams.")]
     private partial void LogTookOver(string owner);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Numbering the virtual streams failed; retrying after the interval.")]
     private partial void LogFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Numbering the sequence of tenant {Tenant} failed, {Failures} times in a row; the other sequences go on, and it is tried again at the next pass.")]
+    private partial void LogBatchFailed(Exception exception, string tenant, int failures);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "The ordinal sequencer is faulted for the sequence of tenant {Tenant} after {Failures} failures in a row: reads and subscriptions by ordinal in it are refused with SEQUENCER_FAULTED until a batch succeeds.")]
+    private partial void LogFaulted(string tenant, int failures);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "The ordinal sequencer numbers the sequence of tenant {Tenant} again; its fault is cleared.")]
+    private partial void LogRecovered(string tenant);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The fault of the sequence of tenant {Tenant} could not be written to its progress row; the other instances learn of it at the next try.")]
+    private partial void LogFaultNotRecorded(Exception exception, string tenant);
 }

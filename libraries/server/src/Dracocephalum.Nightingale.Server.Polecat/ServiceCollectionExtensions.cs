@@ -204,6 +204,7 @@ public static class ServiceCollectionExtensions
                     provider.GetService<ILogger<SqlServerOrdinalSequencer>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SqlServerOrdinalSequencer>.Instance),
                 partitionedByTenant,
                 fastInterval,
+                options.Store.OrdinalSequencerEnabled,
                 options.OrdinalSequencerLeaseDuration);
         }
 

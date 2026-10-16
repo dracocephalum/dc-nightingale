@@ -34,4 +34,19 @@ message PingResponse {
   // one sequence across tenants; a server whose store numbers each tenant on
   // its own says false here and refuses the wildcard.
   bool supports_all_tenants = 4;
+  // How the ordinal sequencer stands for the caller's sequence, on a store
+  // with ordinals; unspecified on one without.
+  OrdinalSequencerState ordinal_sequencer = 5;
+}
+
+enum OrdinalSequencerState {
+  ORDINAL_SEQUENCER_STATE_UNSPECIFIED = 0;
+  // Numbering events as they are appended.
+  ORDINAL_SEQUENCER_STATE_RUNNING = 1;
+  // Turned off by the server's operator: reads and subscriptions by ordinal
+  // are refused with SEQUENCER_DISABLED until it is turned on again.
+  ORDINAL_SEQUENCER_STATE_DISABLED = 2;
+  // Failing to number the caller's sequence, and trying again: reads and
+  // subscriptions by ordinal are refused with SEQUENCER_FAULTED meanwhile.
+  ORDINAL_SEQUENCER_STATE_FAULTED = 3;
 }
