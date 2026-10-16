@@ -103,6 +103,21 @@ public sealed class SequenceTailsTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Look_WhenTheHorizonCannotBeAsked_ShouldStillMoveTheHeadUpToTheGap()
+    {
+        // Arrange: committed through 3, 4 missing, and a horizon that fails when asked.
+        _positions.Append(A, 1, 2, 3, 5);
+        _horizon.Fail();
+        var a = Sut.For(A);
+
+        // Act
+        await Should.ThrowAsync<InvalidOperationException>(() => Sut.LookAsync(TestContext.Current.CancellationToken));
+
+        // Assert: the gap waits on the horizon; the committed run before it does not.
+        a.Head.ShouldBe(3);
+    }
+
+    [Fact]
     public async Task Look_WhenNothingHoldsTheHorizon_ShouldGiveTheGapUpAtOnceAndMoveToTheCeiling()
     {
         // Arrange: 4 was taken by a transaction that rolled back; nothing is open.
@@ -432,6 +447,7 @@ public sealed class SequenceTailsTests : IAsyncDisposable
     private sealed class FakeHorizon : ITransactionHorizon
     {
         private HorizonHolder? _holder;
+        private Exception? _failure;
         private int _marks;
 
         public int Marks => Volatile.Read(ref _marks);
@@ -442,11 +458,13 @@ public sealed class SequenceTailsTests : IAsyncDisposable
 
         public void Release() => _holder = null;
 
+        public void Fail() => _failure = new InvalidOperationException("The horizon cannot be read.");
+
         public ValueTask<HorizonAvailability> CheckAvailabilityAsync(CancellationToken cancellationToken) => ValueTask.FromResult(HorizonAvailability.Available);
 
         public ValueTask<HorizonMarker> MarkAsync(CancellationToken cancellationToken) => ValueTask.FromResult(new HorizonMarker(Interlocked.Increment(ref _marks)));
 
-        public ValueTask<HorizonHolder?> FindHolderAsync(HorizonMarker marker, CancellationToken cancellationToken) => ValueTask.FromResult(_holder);
+        public ValueTask<HorizonHolder?> FindHolderAsync(HorizonMarker marker, CancellationToken cancellationToken) => _failure is { } failure ? ValueTask.FromException<HorizonHolder?>(failure) : ValueTask.FromResult(_holder);
     }
 
     /// <summary>The kept heads, in memory: raised, never lowered, as the table keeps them.</summary>

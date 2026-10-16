@@ -332,8 +332,8 @@ of `$all` or a subscription must stop at the sequence head, which advances by
 polling; per-stream reads are unaffected because versions are dense under the
 stream lock. The head is the gateway's own, for every store partition and
 every backend: `SequenceTails`, in the server's `Sequencing` namespace, one
-poller per process, keeps a head per sequence, the shared one or each served
-tenant's, and every subscription waits on it rather than polling. The store's
+poller per process for each journal, keeps a head per store partition, the
+shared sequence or each served tenant's, and every subscription waits on it rather than polling. The store's
 own high-water agent is not run: its rule gives a gap up after 3 seconds,
 whatever holds it, and where readers read past an open transaction an append
 open longer than that commits below a mark that has passed it, never to be
@@ -443,9 +443,10 @@ as they are. A message stays on the outbox while it is in flight, so a wake
 in the meantime never delivers it twice. The outbox row has a due time, so a
 retry with a delay is the same row with a later one.
 
-`IStoreTail` is the seam for liveness. One poller per process, `SequenceTails`,
-keeps the sequence heads and publishes every advance; each subscription waits on it instead of polling the
-store, so a thousand subscribers cost the store one poll per interval. A
+`IStoreTail` is the seam for liveness. One poller per process for each journal,
+`SequenceTails`, keeps the sequence heads and publishes every advance; each
+subscription waits on it instead of polling the store, so a thousand
+subscribers cost the store one poll per interval. A
 subscription confirms with the head, catches up in pages, says so, then
 delivers whatever each advance brings, through `StreamRouter`, one per
 tenant's store, which reads each advance once for every subscription that
@@ -531,8 +532,8 @@ is the witness that an event is numbered.
 `OrdinalSequencerHost`, in the server's `Sequencing` namespace, hosts the
 sequencer for every backend, its lease and its loop, with only the batch the
 backend's own (`IOrdinalSequencer`, `SqlServerOrdinalSequencer` on SQL Server):
-one per cluster, on the same lease rows the persistent-subscription groups
-use, walking the events table behind the sequence head in batches, by its
+one per journal in the cluster, on the same lease rows the persistent-subscription
+groups use, walking the events table behind the sequence head in batches, by its
 key, and giving each event its links, each
 batch continuing from the last ordinal of each key found with one backward
 seek in the links' key. A batch is the range from the progress to its end,
