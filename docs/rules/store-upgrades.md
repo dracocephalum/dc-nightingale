@@ -6,8 +6,9 @@ each assumption the gateway makes of the store is a test that fails when the
 store changes it. This is the order to run them in, and what no test can do.
 
 1. **Read what changed** between the two versions: the release notes of the
-   store, JasperFx and Weasel, for schema, append, high-water and exception
-   changes.
+   store, JasperFx and Weasel, for schema, append and exception changes. The
+   store's high-water agent is not run: the gateway keeps its own sequence
+   heads.
 2. **Check every workaround against the new source**, not against the notes:
    fetch the store's reference checkout, check out the new version's tag,
    and see whether each issue a workaround stands on is still there. That is
@@ -23,7 +24,8 @@ store changes it. This is the order to run them in, and what no test can do.
    (`Approved/store-schema.sql`) is a review, not a re-approval: read the
    diff, see the gateway's additions survive, then approve again.
 5. **The integration suite, then the examples**, one after the other, never
-   together.
+   together. `AppendOrderTests` among them pins what the transaction horizon
+   rests on: an append writes its stream row before it takes a position.
 6. **Record what moved** in `VARIANCES.md` and `PENDING.md`.
 
 After the first release, before a release that carries the upgrade: serve a

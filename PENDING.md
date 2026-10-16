@@ -4,7 +4,8 @@ Features that belong to the product but are deliberately not built yet, each
 with the approach already decided so it can be picked up cold. An entry moves
 to a ticket when work starts and is deleted when it ships. Items owed soon are
 in [`TODO.md`](TODO.md); deliberate behavioural differences from the reference event store are
-in [`VARIANCES.md`](VARIANCES.md).
+in [`VARIANCES.md`](VARIANCES.md); what was weighed and set aside is in
+[`UNSUPPORTED.md`](UNSUPPORTED.md).
 
 ## Authentication: what is left
 
@@ -427,12 +428,6 @@ checks on streams not written. What is left of them:
   streams at once sees the difference, `$all`, a correlation or a category,
   within one commit. Not without the store writing a commit's events in the
   order given, which no public seam offers.
-- **A reset inside an append to several streams.** Refused: the mark it
-  writes is the stream's last revision plus one, and in the same commit that
-  revision includes the commit's own events, which exist only inside the
-  store's write. A participant reading the stream's version under a lock
-  after the store's inserts could compute it; one more statement the gateway
-  writes itself, so not until someone needs it.
 - **Deleted and tombstoned as check states.** The reference's checks can
   assert a stream is deleted or tombstoned; the gateway's assert a revision,
   no stream or that it exists. The adapter maps the two onto a reset and a
@@ -441,9 +436,9 @@ checks on streams not written. What is left of them:
   commit as its own command, so the parameter limit binds one stream's
   events; the total is held to the same count only so that a request held in
   full stays bounded. One of the tunables in `TODO.md`.
-- **The store's own conditions.** Tag-based, of the form "no event matching
-  this query since position N", richer than a stream's state; the
-  reference's query check is unimplemented too. Once someone needs them.
+
+A reset inside an append to several streams, and the store's own tag-based
+conditions, were weighed and set aside (`UNSUPPORTED.md`).
 
 ## Database per tenant
 

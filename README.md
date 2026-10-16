@@ -21,6 +21,20 @@ map of categories.
 | `libraries/` | packages published to NuGet | [`libraries/README.md`](libraries/README.md) |
 | `examples/` | end-to-end sample programs that double as integration tests | [`examples/README.md`](examples/README.md) |
 
+## Documents
+
+The repository's own documents sit at the root, each answering one question.
+
+| Document | Answers |
+|---|---|
+| [`DESIGN.md`](DESIGN.md) | how the pieces fit, and why the code is shaped the way it is |
+| [`GLOSSARY.md`](GLOSSARY.md) | what a term means here |
+| [`VARIANCES.md`](VARIANCES.md) | where the behaviour differs from the reference event store on purpose, and why |
+| [`PENDING.md`](PENDING.md) | what is deferred, with its approach decided |
+| [`UNSUPPORTED.md`](UNSUPPORTED.md) | what was weighed and set aside, and what would make it worth doing |
+| [`UPSTREAM.md`](UPSTREAM.md) | what only the store's maintainers can change, and the workaround meanwhile |
+| [`TODO.md`](TODO.md) | what is owed soon |
+
 ## Working here
 
 - One solution per component; **no root solution** — build the component you
@@ -37,10 +51,9 @@ map of categories.
 `AGENTS.md` is the index. The rules under `agentics/rules/` are the toolkit's
 standard for code, tests, dependencies, pull requests, and review — for people
 as much as for agents — and a sync replaces that folder whole, so an edit
-there is lost. This repository adds no rules of its own yet; its documents
-beyond the toolkit's, `VARIANCES.md`, `PENDING.md` and `UPSTREAM.md`, have
-their rows in `AGENTS.md` outside the generated block. The day a rule of its own exists, it
-goes under `docs/rules/` with an index there, as `agentics/rules/layout.md`
+there is lost. Its documents beyond the toolkit's, those under *Documents*
+above, have their rows in `AGENTS.md` outside the generated block. Its own
+rules go under `docs/rules/` with an index there, as `agentics/rules/layout.md`
 says.
 
 ## Licence

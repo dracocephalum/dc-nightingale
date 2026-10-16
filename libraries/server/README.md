@@ -50,7 +50,11 @@ the settings that shaped it; a database that is not its own is refused.
 
 What a store needs, by what the host uses. A tier adds to the ones above it;
 what the server can check, it checks at start-up and refuses with what is
-missing. The PostgreSQL column is the planned Marten backend's
+missing. The server owns its database, as the reference event store owns its
+storage: a transaction left open there after it has written anything, in
+any table, holds the sequence heads at a gap until it ends, under the
+transaction horizon, and the server names it in a warning after half a
+minute. It stalls rather than skip an event that may still commit. The PostgreSQL column is the planned Marten backend's
 (`PENDING.md`, *Marten backend*).
 
 | Tier | SQL Server (Polecat) | PostgreSQL (Marten, planned) |

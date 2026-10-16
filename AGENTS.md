@@ -90,7 +90,7 @@ by saying so in the document — *Precedence* in
 
 ## This repository's own documents
 
-Three root documents the toolkit's table does not know, in its columns; they
+The root documents the toolkit's table does not know, in its columns; they
 sit outside the generated block, where a sync never reaches, because they are
 documents of the repository and not rules.
 
@@ -99,6 +99,7 @@ documents of the repository and not rules.
 | Naming a concept, or unsure what a term means here | [`GLOSSARY.md`](GLOSSARY.md) — use its word; add a term there when a new one settles |
 | Making the API behave differently from the reference event store on purpose, or asked why it differs | [`VARIANCES.md`](VARIANCES.md) — record the difference and the reason there |
 | Deferring a product feature with its approach already decided | [`PENDING.md`](PENDING.md) — record it there; `TODO.md` is for what is owed soon |
+| Deciding not to build something someone may want, or asked whether the gateway does it | [`UNSUPPORTED.md`](UNSUPPORTED.md) — record why not and what would make it worth doing; it moves to `PENDING.md` when wanted |
 | Working around a limit of the store, or wanting something only its maintainers can change | [`UPSTREAM.md`](UPSTREAM.md) — record the request and the workaround there; it becomes a `TODO.md` entry only while it blocks |
 
 ## Conventions
