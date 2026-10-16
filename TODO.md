@@ -29,28 +29,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   at 0% (`server` reads 63% and `polecat` 71% with every class of their own
   at 100%). Read the per-class rates in the cobertura file for those two, not
   the total.
-- **The gRPC contract is half drafted, and the first slice of it works end to
-  end.** `libraries/core/src/.../Protocols.Grpc/V1/` splits the contract by area the
-  way the reference protocol does. `streams.proto` is drafted in full, with
-  `shared.proto` for the numbers, names, bodies, headers and error conventions
-  and `errors.proto` for the reasons. Implemented and verified against a local
-  SQL Server: `Append`, bounded reads and catch-up subscriptions over plain
-  streams, `$all` and the virtual streams, `Reset`, and `Archive` and `Delete`
-  behind the host's deletion level, persistent subscriptions with create, delete, one
-  consumer with acknowledgements, retries, parking and replay, on a lease per
-  group, and the virtual streams by ordinal on a store initialized with
-  `Nightingale:Store:AssignOrdinals`, filters on `$all` with their
-  checkpoints, for reads, catch-up subscriptions and persistent groups, and a
-  stream's metadata, set and read back as events of `$$<stream>` and applied
-  to reads of the stream, with `$de` and `$mde` beside `$all`, binary
-  data beside an event's JSON or instead of it, `$bc-` by correlation and
-  `$streams` and `$category-` by each stream's first event, by position
-  and by ordinal, filters on `$all` by whole categories and exact types,
-  and appends to several streams in one commit, with checks on streams
-  they do not write; the samples
-  under `examples/` are the end-to-end
-  runs. Not yet: the ordinal
-  backfill, in `PENDING.md`. Close by: see `PENDING.md`.
 - **An archive's expected-revision check is not atomic with the archive.**
   The store reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,

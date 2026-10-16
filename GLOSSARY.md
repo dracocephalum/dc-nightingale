@@ -66,7 +66,7 @@ How the tenancy modes fill the levels:
 | **Revision** | An event's place in its own stream, dense from 0. | |
 | **Ordinal** | An event's dense number within a virtual stream, from 0, given after commit by the sequencer. Only these. | never the store provider's `tenant_ordinal`, which is a *partition key* |
 | **Partition key** | The value of the partitioning column a store partitioned by tenant gives each tenant, which places its rows in their table partition (Polecat's `tenant_ordinal`). | not a *partition number*, which is SQL Server's slot the value maps to |
-| **Locus** | The number a record carries in what it was read from, booked for a later slice (`PENDING.md`). | |
+| **Locus** | The number a record carries in what it was read from, its revision, ordinal or position by what was read; weighed and set aside (`UNSUPPORTED.md`). | |
 
 ## Streams
 

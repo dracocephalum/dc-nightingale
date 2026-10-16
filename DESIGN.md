@@ -717,6 +717,28 @@ types over one mapping, `EventsDbContext` on the main connection and
 registration of its own, so a reader asks for the connection it means by
 type.
 
+A plain stream's read is the same LINQ, with its metadata applied in the
+statements the read already ran: the first finds the stream's row and, in
+the same statement, its last metadata event, a `TOP 1` seek backwards on
+the store's unique index of a stream's versions, so a stream without
+metadata costs a few index pages and no round trip; the second reads the
+page from the bound `max(last − $maxCount + 1, $tb)` as the start of its
+seek on that index, with `$maxAge` checked against the database's clock,
+`SYSUTCDATETIME()`, the clock that stamped the rows, before the page is
+counted, so a short page still means the end. The head's first revision is
+that bound. Nothing is cached: every instance appends, and a cache would
+learn of a change only through the tail, a polling interval late, serving
+meanwhile events a new `$maxCount` has cut; if the probe ever costs too
+much, the way out is a store setting fixed at initialization that refuses
+metadata and skips it, not a cache. On a store partitioned by tenant every
+statement of the read names the tenant's partition key, through a subquery
+of the store's registry, since the unique index leads with it and a
+predicate on the tenant alone eliminates no partition; the tenant stays in
+the predicate because tenants can share a partition, and no second index is
+added, since it would cost every append a second write. An integration test
+forces each statement onto the index by the key and the stream, and holds
+that the same statements without the key are refused (error 8622).
+
 What stays SQL text, because its shape is the point or there is no table
 to map: the sequencer's batch, which numbers thousands of events in one
 set-based statement under a lock where row-by-row writes would be an order
