@@ -127,3 +127,94 @@ the gateway renamed would no longer be the store's own.
 
 **Worth doing if:** the schema library puts the schema in the names; until
 then, a database for each such store.
+
+## An index for `$maxAge`
+
+A stream long past its `$maxAge` reads its expired rows on every forwards
+read from the start, each looked up in the table for its timestamp, which
+the store's unique index of a stream's versions does not hold.
+
+**Why not:** `$maxAge` is no first-tier path. An index on the stream and the
+timestamp costs every append to every stream a write, and a timestamp
+included in the unique index is a change to the store's own index. Physical
+removal of what metadata hides (`PENDING.md`, *Stream metadata*) is the
+answer, as the reference's scavenge is.
+
+**Worth doing if:** a store measures the expired rows as a cost; then as an
+index a host adds, as it adds any optional index, never one provisioned by
+default, or as a binary search by version over the existing index, as the
+reference's read does, which costs appends nothing and relies on a stream's
+timestamps rising with its versions, which they do while the database's
+clock does not step back.
+
+## Database per tenant
+
+A database per tenant, each a single-tenant store of its own. The store
+supports it through a master table mapping each tenant to a connection
+string, with tenants added, disabled and removed at runtime; it registers
+connection strings only, so the database behind one must exist already, a
+`CREATE DATABASE` under a login that may on a self-hosted server and a
+control-plane operation outside the gateway on a managed one. There is no
+coherent position across databases, so the wildcard tenant, cross-tenant
+ordinals and any cross-tenant subscription are gone in this mode, and the
+server would say so through its features call.
+
+**Why not:** what enabling it means is a design each: no default tenant, a
+credential bound to a registered tenant and a tenant registered with one or
+two connection strings resolved per tenant; a composition root per tenant,
+one database, one tail, one sequencer lease, one set of gateway tables and
+one registry of running groups each, activated on first use and evicted
+when idle, so that startup, migration and the catalog comparison, seconds
+per fresh database, are not paid for every tenant on every instance at once;
+a database that knows its tenant, the tenant id stamped in the store's
+marker row at provisioning and a registration refused when the database
+says another, since the registry row is otherwise the only link; connection
+pools per tenant, primary and replica, with a budget against the server's
+connection ceiling; registry changes seen by every instance, a tenant
+disabled or re-pointed on one ending the consumers and stopping the tail on
+the others; placement of per-tenant leases, so every tenant's sequencer does
+not land on the instance that woke first; operator tooling per database,
+the schema report and apply, the collation rule and the initialization-fixed
+settings checked per tenant, tenant partitioning refused as meaningless;
+management calls that name a tenant, a listing across tenants a fan-out;
+failure isolation, one unreachable tenant database failing neither the
+instance's health nor the other tenants; and credentials in the control
+plane, since a caller is authenticated before its tenant is known, which is
+the model the authentication takes from the start so that it does not move
+later.
+
+**Worth doing if:** a deployment needs a tenant's isolation from the
+database itself, its log, its locks and its backups. The shape that holds it
+and today's layout as its two corners is decided (`PENDING.md`, *A registry
+of stores*).
+
+## A record's locus
+
+A record carries three numbers: its revision in its own stream, its position
+in the log, and its ordinal under ordinal numbering, and a consumer has to
+know which of them its read speaks: the revision for a plain stream, the
+ordinal under ordinal numbering, the position for `$all` and for a virtual
+stream numbered globally. The locus would be that number, set on every
+record the client delivers, so a consumer reads, stores and resumes after one
+property whatever it reads:
+
+> **Locus**: a record's place in what you read. Its revision when you read a
+> plain stream; its ordinal under ordinal numbering; its position otherwise.
+> Compare it, store it, and resume after it, in the same read and the same
+> numbering.
+
+The client would set it from the request it made, the stream and the
+numbering; it is never on the wire, where it would repeat what the caller
+said, and a record the server's store returns leaves it unset. The name was
+chosen over `Checkpoint`, which in the reference names a point announced or
+saved now and then, never a property of every event; `Cursor`, which
+suggests an opaque token; and the reference's `OriginalEventNumber`, which on
+`$all` is a revision rather than the position a reader of `$all` resumes
+from.
+
+**Why not:** booked, not asked for; a consumer knows what it read, and the
+KurrentDB adapter computes the reference's own numbers for its clients and
+is not served by it.
+
+**Worth doing if:** a consumer that reads several kinds of stream through one
+code path asks for one property to resume by.
