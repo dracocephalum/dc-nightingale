@@ -146,9 +146,12 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:Store:Collation` | `Latin1_General_100_BIN2_UTF8` | the collation the database is created with, and the one a database provisioned by hand must have. It must be a UTF-8 collation: any other is refused, because names in another script would collide. The default is binary, so names that differ in case are different names; a case-insensitive UTF-8 collation makes them one, on reads exactly and on live delivery as near as the server can match in process (`VARIANCES.md`, *Names are compared by the database*) |
 | `Nightingale:Store:IgnoreCollationCompatibility` | `false` | work with a collation that is not UTF-8, for a database that already has one or a server older than SQL Server 2019. The host's own choice and consequence: a character of a name outside the collation's code page is stored as a question mark, so two such names can become one. Not recorded with the store; the server logs a warning at every start |
 | `Nightingale:Store:Partitioning` | `None` | `Tenant` partitions the events table by tenant, each with its own sequence and its own sequence head, which the server keeps for every tenant it serves, and the wildcard tenant is then refused; `ArchivedStream` partitions it by the archived flag, so deleted streams' events sit apart; one mode, because a table has one partition scheme |
+| `Nightingale:Store:OrdinalSequencerEnabled` | `true` | on a store with ordinals, whether this instance runs the ordinal sequencer. Off, it numbers nothing and refuses every read and subscription by ordinal with `SEQUENCER_DISABLED`; on again, the sequencer goes on from where it stopped. The operator's choice of the moment, so it is not fixed with the store and each instance follows its own |
 
 The settings under `Nightingale:Store` are fixed when the store is
-initialized and checked on every later start: the server refuses to start
+initialized and checked on every later start, but for
+`IgnoreCollationCompatibility` and `OrdinalSequencerEnabled`, which are the
+host's: the server refuses to start
 against a store whose record disagrees with them. Changing one means a new
 database.
 

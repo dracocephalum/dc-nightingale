@@ -53,6 +53,7 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
     private readonly CancellationTokenSource _stopping = new();
     private TaskCompletionSource _anyAdvanced = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private HeadStrategy? _strategy;
+    private OrdinalSequencerException? _numberingStopped;
     private long _advances;
     private Task? _loop;
     private bool _disposed;
@@ -129,7 +130,23 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
     /// <summary>The tail of a sequence, followed from now on.</summary>
     /// <param name="sequence">The sequence.</param>
     /// <returns>The tail.</returns>
-    public IStoreTail For(SequenceKey sequence) => _tails.GetOrAdd(sequence, key => new Tail(this, key));
+    public IStoreTail For(SequenceKey sequence) => _tails.GetOrAdd(sequence, CreateTail);
+
+    /// <summary>
+    /// Stops the numbering of every sequence, followed now or later, for the life of the process:
+    /// what the operator's switch for the ordinal sequencer does, so that every wait on the
+    /// numbering ends with the reason and every read by ordinal is refused with it.
+    /// </summary>
+    /// <param name="reason">What every waiter and reader is told.</param>
+    public void StopNumbering(OrdinalSequencerException reason)
+    {
+        ArgumentNullException.ThrowIfNull(reason);
+        Volatile.Write(ref _numberingStopped, reason);
+        foreach (var tail in _tails.Values)
+        {
+            tail.Numbering.Stop(reason);
+        }
+    }
 
     /// <summary>The numbering of a sequence as it is followed: where the sequencer, or whoever follows it for this process, publishes how far it has come.</summary>
     /// <param name="sequence">The sequence.</param>
@@ -392,6 +409,18 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
         return true;
     }
 
+    /// <summary>A tail for a sequence followed from now on, its numbering stopped when every sequence's is.</summary>
+    private Tail CreateTail(SequenceKey sequence)
+    {
+        var tail = new Tail(this, sequence);
+        if (Volatile.Read(ref _numberingStopped) is { } stopped)
+        {
+            tail.Numbering.Stop(stopped);
+        }
+
+        return tail;
+    }
+
     private void Publish(Tail tail, long mark)
     {
         if (!tail.Followed.Publish(mark))
@@ -455,6 +484,8 @@ public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
         public long Head => Followed.Head;
 
         public long Numbered => Numbering.Head;
+
+        public OrdinalSequencerException? NumberingStopped => Numbering.Stopped as OrdinalSequencerException;
 
         public ValueTask<long> RefreshAsync(CancellationToken cancellationToken) => owner.RefreshAsync(this, cancellationToken);
 

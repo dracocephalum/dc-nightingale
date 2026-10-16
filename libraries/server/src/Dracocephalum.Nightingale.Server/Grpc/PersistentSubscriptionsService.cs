@@ -401,6 +401,14 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
         stream = definition.Stream;
         group = definition.Group;
 
+        // A group numbered by ordinal delivers nothing while its sequence is not numbered: refused
+        // with the reason, as a subscription by ordinal is. One that stops later ends its
+        // consumers with the reason through the group's own failure.
+        if (definition.Settings.Numbering == Numbering.Ordinal && GetTail(definition).NumberingStopped is { } stopped && NightingaleErrors.TryTranslate(stopped, out var refused))
+        {
+            throw refused;
+        }
+
         // The group runs once in this instance, shared by its consumers here: the first to
         // arrive starts it, the others join it, the last to leave stops it.
         var seat = await registry.JoinAsync(definition.Id, definition.Settings.MaxSubscriberCount, cancellationToken).ConfigureAwait(false)

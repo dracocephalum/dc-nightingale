@@ -549,6 +549,25 @@ sequence head by the sequencer's cadence, which is the tails', and a removed
 event leaves a numbered hole the reader skips and the sequencer never reuses,
 which is what a link whose event is gone does in the reference.
 
+The sequencer is running, disabled or faulted, and a client never waits on
+one that is not running. Disabled is the operator's switch,
+`Nightingale:Store:OrdinalSequencerEnabled`, each instance's own: off, the
+instance runs no host and stops the numbering of every sequence it follows
+with the reason, so every read and subscription by ordinal is refused with
+`SEQUENCER_DISABLED`, not worth a retry, and a subscription already waiting on
+the numbering ends with it; on again, the sequencer goes on from its progress.
+Faulted is a sequence's own: a batch that fails is tried again at the next
+pass while the other sequences go on, and after three failures in a row the
+host stops that sequence's numbering with the cause and records it on the
+sequence's progress row, which the follower on every other instance reads
+with the progress, so every instance refuses with `SEQUENCER_FAULTED`, worth a
+retry after a back-off. The first batch that succeeds lifts the stop and
+clears the row, and a host that takes the lease over clears what an earlier
+holder recorded as it numbers again. One sequencer numbers every ordinal, so
+the system's virtual streams stop and start together; KurrentDB stops its
+system projections one by one (`UNSUPPORTED.md`). The server features call
+reports the state for the caller's sequence.
+
 The numbering is the caller's explicit choice per read or subscription,
 global by default, and the service refuses an ordinal read of `$all` and
 `$de`, and with `ORDINALS_NOT_ENABLED` on a store without the

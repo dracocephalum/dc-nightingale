@@ -11,6 +11,7 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 
 public sealed class ServerFeaturesServiceTests : IAsyncLifetime
 {
+    private readonly FakeTail _tail = new();
     private WebApplication? _app;
 
     public async ValueTask InitializeAsync()
@@ -23,6 +24,7 @@ public sealed class ServerFeaturesServiceTests : IAsyncLifetime
         builder.WebHost.UseTestServer();
         builder.Services.AddNightingaleServer();
         builder.Services.AddSingleton(store);
+        builder.Services.AddSingleton<IStoreTail>(_tail);
         _app = builder.Build();
         _app.MapNightingaleServer();
         await _app.StartAsync();
@@ -51,5 +53,26 @@ public sealed class ServerFeaturesServiceTests : IAsyncLifetime
         // Assert
         response.Version.ShouldNotBeNullOrWhiteSpace();
         response.SupportsOrdinals.ShouldBeTrue();
+        response.OrdinalSequencer.ShouldBe(OrdinalSequencerState.Running);
+    }
+
+    [Fact]
+    public async Task Ping_ShouldSayWhenTheSequencerIsDisabledOrFaulted()
+    {
+        // Arrange
+        using var channel = GrpcChannel.ForAddress(
+            "http://localhost",
+            new GrpcChannelOptions { HttpHandler = _app!.GetTestServer().CreateHandler() });
+        var client = new ServerFeatures.ServerFeaturesClient(channel);
+
+        // Act
+        _tail.NumberingStopped = new OrdinalSequencerDisabledException();
+        var disabled = await client.PingAsync(new PingRequest(), cancellationToken: TestContext.Current.CancellationToken);
+        _tail.NumberingStopped = new OrdinalSequencerFaultedException("the batch timed out");
+        var faulted = await client.PingAsync(new PingRequest(), cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        disabled.OrdinalSequencer.ShouldBe(OrdinalSequencerState.Disabled);
+        faulted.OrdinalSequencer.ShouldBe(OrdinalSequencerState.Faulted);
     }
 }

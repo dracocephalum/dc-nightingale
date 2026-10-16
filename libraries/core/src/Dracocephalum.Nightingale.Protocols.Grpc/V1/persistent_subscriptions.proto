@@ -78,7 +78,7 @@ service PersistentSubscriptions {
   // group's limit, is parked. The call ends with GROUP_UPDATED when the
   // group's settings are changed under it. Errors: GROUP_NOT_FOUND,
   // GROUP_OWNED_ELSEWHERE, CONSUMER_LIMIT_REACHED, GROUP_UPDATED,
-  // INVALID_ARGUMENT.
+  // SEQUENCER_DISABLED, SEQUENCER_FAULTED, INVALID_ARGUMENT.
   rpc Read (stream PersistentReadRequest) returns (stream PersistentReadResponse);
 
   // Moves parked messages to the group's outbox, from which they are

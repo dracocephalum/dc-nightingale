@@ -53,7 +53,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     TenantId = table.Column<string>(type: "varchar(250)", unicode: false, maxLength: 250, nullable: true),
-                    Position = table.Column<long>(type: "bigint", nullable: false)
+                    Position = table.Column<long>(type: "bigint", nullable: false),
+                    Fault = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
+                    FaultedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true)
                 },
                 constraints: table =>
                 {

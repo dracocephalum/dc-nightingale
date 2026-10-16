@@ -1,10 +1,12 @@
 namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
-/// A head as it is followed: the highest mark published so far, the waits on it, and the failure
-/// that ends every wait when whatever follows the store has stopped following. Every tail
-/// publishes into one of these, the sequence head of a tail and how far the sequencer has
-/// numbered it, so the waiting is written once for every backend.
+/// A head as it is followed: the highest mark published so far, the waits on it, the failure that
+/// ends every wait for good when whatever follows the store has stopped following, and a stop that
+/// ends every wait only until it is lifted, while whatever moves the head is not moving it but may
+/// again: the ordinal sequencer disabled or faulted. Every tail publishes into one of these, the
+/// sequence head of a tail and how far the sequencer has numbered it, so the waiting is written
+/// once for every backend.
 /// </summary>
 public sealed class FollowedHead
 {
@@ -12,9 +14,13 @@ public sealed class FollowedHead
     private TaskCompletionSource _advanced = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _head;
     private InvalidOperationException? _failure;
+    private InvalidOperationException? _stopped;
 
     /// <summary>Gets the head: the highest mark published.</summary>
     public long Head => Volatile.Read(ref _head);
+
+    /// <summary>Gets why the head is stopped, until the stop is lifted; <see langword="null"/> while it moves.</summary>
+    public InvalidOperationException? Stopped => Volatile.Read(ref _stopped);
 
     /// <summary>Waits until the head is beyond a position.</summary>
     /// <param name="beyond">The position the caller has already seen.</param>
@@ -47,6 +53,13 @@ public sealed class FollowedHead
                     throw _failure;
                 }
 
+                // A head that is stopped tells its waiters why for as long as it is, and waits on
+                // again once the stop is lifted.
+                if (_stopped is not null)
+                {
+                    throw _stopped;
+                }
+
                 advanced = _advanced.Task;
             }
 
@@ -72,6 +85,32 @@ public sealed class FollowedHead
 
         advanced?.TrySetResult();
         return advanced is not null;
+    }
+
+    /// <summary>Ends every wait with the reason the head is stopped, now and until <see cref="Resume"/>; what is already known stays known, and a mark published meanwhile still moves it.</summary>
+    /// <param name="reason">What every waiter is told meanwhile.</param>
+    public void Stop(InvalidOperationException reason)
+    {
+        ArgumentNullException.ThrowIfNull(reason);
+        TaskCompletionSource advanced;
+        lock (_gate)
+        {
+            Volatile.Write(ref _stopped, reason);
+            advanced = _advanced;
+            _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        advanced.TrySetException(reason);
+        _ = advanced.Task.Exception;
+    }
+
+    /// <summary>Lifts a stop: waits begun from now on wait for the head again.</summary>
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            Volatile.Write(ref _stopped, null);
+        }
     }
 
     /// <summary>Ends every wait, now and from here on, with the failure; what is already known stays known.</summary>

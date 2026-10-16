@@ -86,6 +86,7 @@ How the tenancy modes fill the levels:
 | **High-water mark** | The store providers' word for a sequence head, and the value they keep of it. | |
 | **Tail** | What follows a sequence head in a process and wakes whoever waits on it to move. | |
 | **Numbered** | How far the sequencer has given ordinals through a sequence. | |
+| **Disabled**, **faulted** | Of the ordinal sequencer: switched off by the operator, every sequence at once; failing, again and again, to number one sequence, and trying again. Either way nothing is read by ordinal meanwhile. | |
 | **Gap** | A position missing below a later one: its transaction is still open, rolled back, or a number the sequence lost. | |
 | **Given up** | A gap the tail stops waiting for, so the sequence head moves past it. | |
 | **Late commit** | A transaction committing below a position the sequence head or the sequencer already passed; possible only where readers read past an open transaction and the head gives a gap up by a wait rather than by the horizon. | |

@@ -27,12 +27,20 @@ public static class OrdinalSequencing
     /// <param name="sequencer">Makes the backend's sequencer.</param>
     /// <param name="sequencePerTenant">Whether the store has a sequence per tenant rather than one shared sequence.</param>
     /// <param name="followInterval">How long the follower waits between reads of the progress while a sequence is behind.</param>
+    /// <param name="enabled">Whether the operator lets the sequencer run; disabled, nothing is numbered, and every read and subscription by ordinal is refused with the reason, until the server starts enabled again.</param>
     /// <param name="leaseDuration">How long the lease lasts without renewal; <see cref="LeaseDuration"/> when not given.</param>
     /// <returns>The same collection, for chaining.</returns>
-    public static IServiceCollection AddNightingaleOrdinalSequencer(this IServiceCollection services, Func<IServiceProvider, IOrdinalSequencer> sequencer, bool sequencePerTenant, TimeSpan followInterval, TimeSpan? leaseDuration = null)
+    public static IServiceCollection AddNightingaleOrdinalSequencer(this IServiceCollection services, Func<IServiceProvider, IOrdinalSequencer> sequencer, bool sequencePerTenant, TimeSpan followInterval, bool enabled, TimeSpan? leaseDuration = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(sequencer);
+        if (!enabled)
+        {
+            // The numbering of every sequence stopped with the operator's reason, before any call
+            // is served; what is numbered stays readable from the progress, untouched.
+            services.AddSingleton<IHostedService>(provider => new DisabledOrdinalSequencer(provider.GetRequiredService<SequenceTails>()));
+            return services;
+        }
 
         // The registry is the server's, but a host that registers only the backend still numbers.
         services.TryAddSingleton<SubscriptionGroupRegistry>();
@@ -50,6 +58,7 @@ public static class OrdinalSequencing
                 followInterval),
             provider.GetRequiredService<SubscriptionGroupRegistry>(),
             sequencer(provider),
+            new OrdinalSequencingFaults(provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>()),
             provider.GetService<TimeProvider>() ?? TimeProvider.System,
             provider.GetService<ILogger<OrdinalSequencerHost>>() ?? NullLogger<OrdinalSequencerHost>.Instance,
             leaseDuration));

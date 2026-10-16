@@ -96,6 +96,16 @@ enum ErrorReason {
   // details carry an AppendConflicts beside the ErrorInfo, every condition
   // that failed, in the order the conditions were given.
   ERROR_REASON_STREAM_CONFLICTS = 23;
+  // FAILED_PRECONDITION. Ordinal numbering was asked for and the server's
+  // ordinal sequencer is disabled by its operator: nothing is numbered until
+  // it is enabled again, so a retry does not help. A subscription waiting on
+  // the numbering ends with it. metadata: none.
+  ERROR_REASON_SEQUENCER_DISABLED = 24;
+  // UNAVAILABLE. Ordinal numbering was asked for and the ordinal sequencer
+  // has failed, again and again, to number the sequence the read is in; it
+  // keeps trying, and recovers by itself. Retry with a back-off. A
+  // subscription waiting on the numbering ends with it. metadata: cause.
+  ERROR_REASON_SEQUENCER_FAULTED = 25;
 }
 
 // The conditions of an append to several streams that failed, carried in the

@@ -14,6 +14,8 @@ internal sealed class FakeTail : IStoreTail
 
     public long Numbered => _numbering.Value;
 
+    public OrdinalSequencerException? NumberingStopped { get; set; }
+
     public ValueTask<long> RefreshAsync(CancellationToken cancellationToken) => ValueTask.FromResult(Head);
 
     public void Advance(long head) => _head.Set(head);
@@ -22,7 +24,7 @@ internal sealed class FakeTail : IStoreTail
 
     public ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken) => _head.WaitForAsync(beyond + 1, cancellationToken);
 
-    public ValueTask<long> WaitForNumberedAsync(long through, CancellationToken cancellationToken) => _numbering.WaitForAsync(through, cancellationToken);
+    public ValueTask<long> WaitForNumberedAsync(long through, CancellationToken cancellationToken) => NumberingStopped is { } stopped ? ValueTask.FromException<long>(stopped) : _numbering.WaitForAsync(through, cancellationToken);
 
     private sealed class Mark
     {

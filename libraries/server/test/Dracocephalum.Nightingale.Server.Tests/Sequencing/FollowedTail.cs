@@ -13,6 +13,8 @@ internal sealed class FollowedTail : IStoreTail
 
     public long Numbered => Numbering.Head;
 
+    public OrdinalSequencerException? NumberingStopped => Numbering.Stopped as OrdinalSequencerException;
+
     public ValueTask<long> RefreshAsync(CancellationToken cancellationToken) => ValueTask.FromResult(Head);
 
     public ValueTask<long> WaitForAdvanceAsync(long beyond, CancellationToken cancellationToken) => Followed.WaitForAdvanceAsync(beyond, cancellationToken);

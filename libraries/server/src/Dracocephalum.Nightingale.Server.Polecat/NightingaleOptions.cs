@@ -138,7 +138,7 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     /// another, and refuses a database provisioned by hand that has another. A database
     /// provisioned by hand keeps the collation it has, and the setting must match it. Ordinals
     /// fit partitioning by tenant by construction: the sequencer then numbers each tenant's
-    /// sequence behind that tenant's own high-water mark.
+    /// sequence behind that tenant's own sequence head.
     /// </summary>
     public sealed partial class StoreOptions : StoreSettings
     {
@@ -160,6 +160,16 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
         /// setting of the store, so it is not recorded with the store's settings.
         /// </summary>
         public bool IgnoreCollationCompatibility { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the ordinal sequencer runs, on a store
+        /// initialized with ordinals. Off, this instance numbers nothing, and refuses every read
+        /// and subscription by ordinal with <c>SEQUENCER_DISABLED</c> rather than leaving it to
+        /// wait; on again, the sequencer goes on from where it stopped. The operator's choice of
+        /// the moment rather than a setting of the store, so it is not recorded with the store's
+        /// settings, and each instance follows its own. On by default.
+        /// </summary>
+        public bool OrdinalSequencerEnabled { get; set; } = true;
 
         /// <summary>Initializes a new instance of the <see cref="StoreOptions"/> class with this backend's defaults.</summary>
         public StoreOptions()

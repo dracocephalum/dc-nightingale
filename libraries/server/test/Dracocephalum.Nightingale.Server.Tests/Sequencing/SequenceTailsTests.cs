@@ -196,6 +196,29 @@ public sealed class SequenceTailsTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task StopNumbering_ShouldStopEveryTailsNumberingNowAndLaterAndLeaveTheHeadsMoving()
+    {
+        // Arrange: one tail followed before the switch, one after; the operator's reason.
+        _positions.Append(A, 1, 2);
+        var before = Sut.For(A);
+        var reason = new OrdinalSequencerDisabledException();
+
+        // Act
+        var waiting = before.WaitForNumberedAsync(1, TestContext.Current.CancellationToken).AsTask();
+        Sut.StopNumbering(reason);
+        var after = Sut.For(B);
+        await Sut.LookAsync(TestContext.Current.CancellationToken);
+
+        // Assert: a wait under way ends with the reason, a wait begun after it too; the head of
+        // the sequence still moves, since only the numbering is stopped.
+        (await Should.ThrowAsync<OrdinalSequencerDisabledException>(() => waiting)).ShouldBeSameAs(reason);
+        before.NumberingStopped.ShouldBeSameAs(reason);
+        after.NumberingStopped.ShouldBeSameAs(reason);
+        await Should.ThrowAsync<OrdinalSequencerDisabledException>(() => after.WaitForNumberedAsync(1, TestContext.Current.CancellationToken).AsTask());
+        before.Head.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task Refresh_ShouldExtendThroughWhatIsCommittedAndStopAtAGapWhateverTheHorizonSays()
     {
         // Arrange: nothing holds the horizon; a look would give 3 up.

@@ -41,6 +41,25 @@ one seek rather than a second copy of every event, and for the correlations
 and the listings, which most events are in none of, a link only for each
 event that is.
 
+## The ordinals stop together, and refuse while stopped
+
+**Reference:** each system projection, `$by_category`, `$by_event_type`,
+`$by_correlation_id`, `$streams`, is enabled and disabled on its own; a
+disabled one's stream stays readable and stops growing, and a subscription to
+it waits.
+
+**Nightingale:** one sequencer numbers every ordinal, and it is disabled as a
+whole, by `Nightingale:Store:OrdinalSequencerEnabled`. While it is disabled,
+or faulted for the sequence a read is in, a read or subscription by ordinal is
+refused with `SEQUENCER_DISABLED` or `SEQUENCER_FAULTED`, and one under way
+ends with it. Reads by position are unaffected: the virtual streams are
+predicates over the events, and always there.
+
+**Why:** a stream that silently stops growing looks like a quiet one; a
+refusal says what is wrong and whether a retry helps. One sequencer keeps
+every ordinal at the same position. A per-projection switch the KurrentDB
+adapter could fake for its clients is in `UNSUPPORTED.md`.
+
 ## A name without a hyphen is its own category
 
 **Reference:** a stream's category is its name up to the first separator,

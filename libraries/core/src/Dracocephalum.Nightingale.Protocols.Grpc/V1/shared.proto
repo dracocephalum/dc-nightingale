@@ -27,7 +27,9 @@
 //   carries its ordinal beside the position it always carries. A consumer
 //   stores the numbering with its checkpoint and never resumes under the
 //   other. ORDINAL is refused with INVALID_ARGUMENT on a plain stream or
-//   $all, and with ORDINALS_NOT_ENABLED when the store has no ordinals.
+//   $all, and with ORDINALS_NOT_ENABLED when the store has no ordinals; while
+//   the ordinal sequencer is disabled or faulted, with SEQUENCER_DISABLED or
+//   SEQUENCER_FAULTED, and a subscription under way ends with them.
 //
 // Stream names
 //   Any string up to 250 characters. The category of a stream is everything

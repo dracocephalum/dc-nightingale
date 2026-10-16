@@ -76,6 +76,43 @@ public sealed class OrdinalSequencingFollowerTests
         _progress.Reads.ShouldBe(2);
     }
 
+    [Fact]
+    public async Task Look_ShouldStopTheNumberingWithTheFaultTheRowRecordsAndResumeItOnceTheFaultIsCleared()
+    {
+        // Arrange: the numbering instance recorded the shared sequence as faulted at 12.
+        _tail.Followed.Publish(20);
+        _progress.Holding(null, 12, "the batch timed out");
+        var sut = Follower();
+        IReadOnlyList<NumberedSequence> behind = [new(null, _tail, _tail.Numbering)];
+
+        // Act
+        await sut.LookAsync(behind, TestContext.Current.CancellationToken);
+        var faulted = _tail.NumberingStopped;
+        _progress.Holding(null, 20);
+        await sut.LookAsync(behind, TestContext.Current.CancellationToken);
+
+        // Assert
+        faulted.ShouldBeOfType<OrdinalSequencerFaultedException>().Cause.ShouldBe("the batch timed out");
+        _tail.NumberingStopped.ShouldBeNull();
+        _tail.Numbered.ShouldBe(20);
+    }
+
+    [Fact]
+    public async Task Look_ShouldNeverLiftAStopThatIsThisInstancesOwn()
+    {
+        // Arrange: this instance has the sequencer disabled; another numbers.
+        _tail.Followed.Publish(20);
+        _tail.Numbering.Stop(new OrdinalSequencerDisabledException());
+        _progress.Holding(null, 20);
+        var sut = Follower();
+
+        // Act
+        await sut.LookAsync([new(null, _tail, _tail.Numbering)], TestContext.Current.CancellationToken);
+
+        // Assert
+        _tail.NumberingStopped.ShouldBeOfType<OrdinalSequencerDisabledException>();
+    }
+
     private OrdinalSequencingFollower Follower() =>
         new(new SharedSequence(_tail, _tail.Numbering), _progress, _time, NullLogger<OrdinalSequencingFollower>.Instance);
 

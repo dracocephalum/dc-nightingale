@@ -167,6 +167,17 @@ public static class NightingaleErrors
     public static RpcException OrdinalsNotEnabled(string stream) =>
         Build(StatusCode.FailedPrecondition, ErrorReason.OrdinalsNotEnabled, $"Stream '{stream}' cannot be read by ordinal: the store was not initialized with ordinals.", ("stream", stream));
 
+    /// <summary>Ordinal numbering was asked for while the operator has the ordinal sequencer disabled; a retry does not help.</summary>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException SequencerDisabled() =>
+        Build(StatusCode.FailedPrecondition, ErrorReason.SequencerDisabled, "The ordinal sequencer is disabled: nothing is read or followed by ordinal until the server's operator enables it again.");
+
+    /// <summary>Ordinal numbering was asked for while the ordinal sequencer is failing to number the sequence; it recovers by itself, so a retry with a back-off helps.</summary>
+    /// <param name="cause">Why it fails, as the sequencer last saw it.</param>
+    /// <returns>The exception to throw.</returns>
+    public static RpcException SequencerFaulted(string cause) =>
+        Build(StatusCode.Unavailable, ErrorReason.SequencerFaulted, "The ordinal sequencer is failing to number this sequence and is trying again: " + cause, ("cause", cause));
+
     /// <summary>The call's credentials were not accepted; which part was wrong is not said.</summary>
     /// <param name="message">What the client is told, which names no name and no tenant.</param>
     /// <returns>The exception to throw.</returns>
@@ -241,6 +252,8 @@ public static class NightingaleErrors
             TenantNotFoundException notFound => TenantNotFound(notFound.TenantId?.ToString("D") ?? string.Empty),
             TenantDisabledException disabled => TenantDisabled(disabled.TenantId),
             NotSupportedException unsupported => NotImplemented(unsupported.Message),
+            OrdinalSequencerDisabledException => SequencerDisabled(),
+            OrdinalSequencerFaultedException faulted => SequencerFaulted(faulted.Cause),
             _ => null,
         };
         return status is not null;
