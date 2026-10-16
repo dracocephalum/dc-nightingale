@@ -24,23 +24,21 @@ END
 IF OBJECT_ID('dbo.pc_events') IS NULL
 BEGIN
 CREATE TABLE dbo.pc_events (
-    seq_id              bigint              NOT NULL IDENTITY,
-    id                  uniqueidentifier    NOT NULL,
-    stream_id           varchar(250)        NOT NULL,
-    version             bigint              NOT NULL,
-    data                json                NOT NULL,
-    bdata               varbinary(max)      NULL,
-    type                varchar(500)        NOT NULL,
-    timestamp           datetimeoffset      NOT NULL DEFAULT SYSDATETIMEOFFSET(),
-    tenant_id           varchar(250)        NOT NULL DEFAULT '*DEFAULT*',
-    dotnet_type         varchar(500)        NULL,
-    correlation_id      varchar(250)        NULL,
-    causation_id        varchar(250)        NULL,
-    headers             json                NULL,
-    is_archived         bit                 NOT NULL DEFAULT 0,
+    seq_id            bigint              NOT NULL IDENTITY,
+    id                uniqueidentifier    NOT NULL,
+    stream_id         varchar(250)        NOT NULL,
+    version           bigint              NOT NULL,
+    data              json                NOT NULL,
+    bdata             varbinary(max)      NULL,
+    type              varchar(500)        NOT NULL,
+    timestamp         datetimeoffset      NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    tenant_id         varchar(250)        NOT NULL DEFAULT '*DEFAULT*',
+    dotnet_type       varchar(500)        NULL,
+    correlation_id    varchar(250)        NULL,
+    causation_id      varchar(250)        NULL,
+    headers           json                NULL,
+    is_archived       bit                 NOT NULL DEFAULT 0,
     category AS (CASE WHEN CHARINDEX('-', stream_id) > 1 THEN LEFT(stream_id, CHARINDEX('-', stream_id) - 1) ELSE stream_id END) PERSISTED,
-    category_ordinal    bigint              NULL,
-    type_ordinal        bigint              NULL,
 CONSTRAINT pkey_pc_events_seq_id PRIMARY KEY (seq_id)
 );
 END
@@ -62,15 +60,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_stream_star
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_category_starts' AND object_id = OBJECT_ID(N'dbo.pc_events'))
     CREATE INDEX ix_pc_events_category_starts ON dbo.pc_events (tenant_id, category, seq_id) WHERE (version = 1 AND is_archived = 0);
-
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_category_ordinal' AND object_id = OBJECT_ID(N'dbo.pc_events'))
-    CREATE INDEX ix_pc_events_category_ordinal ON dbo.pc_events (tenant_id, category, category_ordinal) WHERE (category_ordinal IS NOT NULL);
-
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_type_ordinal' AND object_id = OBJECT_ID(N'dbo.pc_events'))
-    CREATE INDEX ix_pc_events_type_ordinal ON dbo.pc_events (tenant_id, type, type_ordinal) WHERE (type_ordinal IS NOT NULL);
-
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_unsequenced' AND object_id = OBJECT_ID(N'dbo.pc_events'))
-    CREATE INDEX ix_pc_events_unsequenced ON dbo.pc_events (tenant_id, seq_id) WHERE (category_ordinal IS NULL);
 IF OBJECT_ID('dbo.pc_event_progression') IS NULL
 BEGIN
 CREATE TABLE dbo.pc_event_progression (

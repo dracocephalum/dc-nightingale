@@ -177,7 +177,7 @@ public sealed class SnapshotReadTests : IAsyncLifetime
         await using var connection = new SqlConnection(TestDatabases.ConnectionStringFor(_name));
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT stream_id, category_ordinal FROM dbo.pc_events WHERE category = @category ORDER BY seq_id;";
+        command.CommandText = "SELECT e.stream_id, l.[Ordinal] FROM nightingale.OrdinalLink l JOIN dbo.pc_events e ON e.seq_id = l.[SeqId] AND e.tenant_id = l.[TenantId] WHERE l.[Type] = 2 AND l.[Key] = @category ORDER BY e.seq_id;";
         command.Parameters.Add(new SqlParameter("@category", System.Data.SqlDbType.VarChar, 250) { Value = category });
         var ordinals = new List<(string, long)>();
         await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);

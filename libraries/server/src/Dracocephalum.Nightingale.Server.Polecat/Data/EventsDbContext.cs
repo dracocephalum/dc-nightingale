@@ -15,8 +15,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data;
 /// types are the store's exactly, and the string ones matter: a parameter sent as Unicode to a
 /// column that is not makes the database convert the column and scan the index it should seek.
 /// A unit test holds every mapped column to the store's own definition. A query selects the
-/// columns it needs by name, never a whole row, because the ordinal columns exist only on a
-/// store initialized with ordinals. This type reads over the main connection;
+/// columns it needs by name, never a whole row, because the partition key exists only on a
+/// store partitioned by tenant. This type reads over the main connection;
 /// <see cref="ReadOnlyEventsDbContext"/> is the same mirror over the read-only one.
 /// </summary>
 internal class EventsDbContext : DbContext, ISchemaScoped
@@ -106,11 +106,8 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             row.Property(e => e.Headers).HasColumnName("headers").HasColumnType("json");
             row.Property(e => e.IsArchived).HasColumnName("is_archived").HasColumnType("bit");
             row.Property(e => e.Category).HasColumnName("category").HasColumnType("varchar(250)");
-            row.Property(e => e.CategoryOrdinal).HasColumnName(PatchedEventStoreFeature.CategoryOrdinalColumn).HasColumnType("bigint");
-            row.Property(e => e.TypeOrdinal).HasColumnName(PatchedEventStoreFeature.TypeOrdinalColumn).HasColumnType("bigint");
 
-            // Only on a store partitioned by tenant, like the ordinals on one without them; a
-            // query names it only there.
+            // Only on a store partitioned by tenant; a query names it only there.
             row.Property(e => e.PartitionKey).HasColumnName(TenantPartitionColumn).HasColumnType("int");
         });
 
@@ -147,7 +144,7 @@ internal class EventsDbContext : DbContext, ISchemaScoped
             link.HasKey(l => new { l.Type, l.TenantId, l.Key, l.Ordinal });
             link.Property(l => l.Type).HasConversion<byte>().HasColumnType("tinyint");
             link.Property(l => l.TenantId).HasColumnType("varchar(250)");
-            link.Property(l => l.Key).HasColumnType("varchar(250)");
+            link.Property(l => l.Key).HasColumnType("varchar(500)");
             link.Property(l => l.Ordinal).HasColumnType("bigint");
             link.Property(l => l.SeqId).HasColumnType("bigint");
         });

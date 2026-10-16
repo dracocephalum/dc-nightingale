@@ -28,19 +28,18 @@ with `Nightingale:Store:AssignOrdinals`, a read or subscription of `$ce-`,
 `$et-`, `$mde`, `$bc-`, `$streams` or `$category-`, never `$de`, may ask
 for ordinal numbering instead: dense, zero-based numbers assigned
 after commit by one sequencer per cluster, so they trail the sequence head by
-its cadence, a deleted event leaves a hole that is skipped and never reused,
-and an event that committed late, after the sequence head had passed its position,
-gets the next ordinal when the sequencer finds it, so by ordinal it follows
-what was appended after it. The choice is explicit per call, global by default, and refused with
+its cadence, and a deleted event leaves a hole that is skipped and never
+reused; since the sequence head passes a position only once it is final, the
+ordinals are in position order. The choice is explicit per call, global by default, and refused with
 `ORDINALS_NOT_ENABLED` on a store without the feature; under it every number
 in the conversation is an ordinal and each event carries its ordinal beside
 its position.
 
 **Why:** no link events, no projection lag, no extra writes by default; and
-where a dense number is worth a numbering pass, it is two columns and one
-seek rather than a second copy of every event, and for the correlations and
-the listings, which most events are in none of, a link only for each event
-that is.
+where a dense number is worth a numbering pass, it is a small link row and
+one seek rather than a second copy of every event, and for the correlations
+and the listings, which most events are in none of, a link only for each
+event that is.
 
 ## A name without a hyphen is its own category
 

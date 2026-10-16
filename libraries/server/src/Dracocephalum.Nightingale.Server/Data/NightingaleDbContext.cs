@@ -149,7 +149,9 @@ public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> 
             // table that grows with the events.
             link.Property(row => row.Type).HasConversion<byte>();
             link.Property(row => row.TenantId).HasMaxLength(250).IsUnicode(false);
-            link.Property(row => row.Key).HasMaxLength(250).IsUnicode(false);
+
+            // As wide as the widest key it holds, an event type, which the store types as 500.
+            link.Property(row => row.Key).HasMaxLength(500).IsUnicode(false);
         });
 
         modelBuilder.Entity<Tenant>(tenant =>

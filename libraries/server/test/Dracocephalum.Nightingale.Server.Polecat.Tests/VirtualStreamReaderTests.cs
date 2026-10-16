@@ -34,14 +34,25 @@ public sealed class VirtualStreamReaderTests
         _sut = new VirtualStreamReader(() => new EventsDbContext(_options, Schema), Tenant);
         using var context = new Seeding(_root);
         context.Set<EventRow>().AddRange(
-            Row(1, "orders-1", 1, "order_placed", categoryOrdinal: 0, typeOrdinal: 0),
+            Row(1, "orders-1", 1, "order_placed"),
             Row(2, "shipments-1", 1, "shipment_sent"),
-            Row(3, "orders-1", 2, "order_paid", categoryOrdinal: 1),
-            Row(4, "orders-2", 1, "order_placed", archived: true, categoryOrdinal: 2, typeOrdinal: 1),
-            Row(5, "orders-3", 1, "order_placed", tenant: "tenant-b", categoryOrdinal: 0, typeOrdinal: 0),
-            Row(6, "orders-4", 1, "order_placed", categoryOrdinal: 3, typeOrdinal: 2),
-            Row(7, "orders-4", 2, "order_paid", categoryOrdinal: 4),
+            Row(3, "orders-1", 2, "order_paid"),
+            Row(4, "orders-2", 1, "order_placed", archived: true),
+            Row(5, "orders-3", 1, "order_placed", tenant: "tenant-b"),
+            Row(6, "orders-4", 1, "order_placed"),
+            Row(7, "orders-4", 2, "order_paid"),
             Row(8, "orders-4", 3, "order_shipped"));
+        context.Set<OrdinalLink>().AddRange(
+            Link(OrdinalLinkType.Category, "orders", 0, 1),
+            Link(OrdinalLinkType.Category, "orders", 1, 3),
+            Link(OrdinalLinkType.Category, "orders", 2, 4),
+            Link(OrdinalLinkType.Category, "orders", 3, 6),
+            Link(OrdinalLinkType.Category, "orders", 4, 7),
+            Link(OrdinalLinkType.Category, "orders", 0, 5, "tenant-b"),
+            Link(OrdinalLinkType.EventType, "order_placed", 0, 1),
+            Link(OrdinalLinkType.EventType, "order_placed", 1, 4),
+            Link(OrdinalLinkType.EventType, "order_placed", 2, 6),
+            Link(OrdinalLinkType.EventType, "order_placed", 0, 5, "tenant-b"));
         context.Set<SequenceHead>().AddRange(new SequenceHead { Id = Guid.NewGuid(), Position = 6 }, new SequenceHead { Id = Guid.NewGuid(), TenantId = Tenant, Position = 2 });
         context.SaveChanges();
     }
@@ -398,7 +409,7 @@ public sealed class VirtualStreamReaderTests
     private static OrdinalLink Link(OrdinalLinkType type, string key, long ordinal, long position, string tenant = Tenant) =>
         new() { Type = type, TenantId = tenant, Key = key, Ordinal = ordinal, SeqId = position };
 
-    private static EventRow Row(long position, string stream, long version, string type, string tenant = Tenant, bool archived = false, long? categoryOrdinal = null, long? typeOrdinal = null) =>
+    private static EventRow Row(long position, string stream, long version, string type, string tenant = Tenant, bool archived = false) =>
         new()
         {
             SeqId = position,
@@ -414,7 +425,5 @@ public sealed class VirtualStreamReaderTests
             Headers = "{\"source\":\"test\"}",
             IsArchived = archived,
             Category = stream.Contains('-', StringComparison.Ordinal) ? stream[..stream.IndexOf('-', StringComparison.Ordinal)] : stream,
-            CategoryOrdinal = categoryOrdinal,
-            TypeOrdinal = typeOrdinal,
         };
 }

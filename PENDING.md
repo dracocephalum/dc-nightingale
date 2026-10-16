@@ -504,8 +504,8 @@ meaningless across stores, which the features call says per tenant. A store
 carries a backend kind, so stores on SQL Server and on PostgreSQL mix behind
 one gateway once the Marten backend exists; a backend is admitted by what the
 store port demands — an append-only total order per store, atomic
-multi-event appends with the per-stream revision check, a high-water mark the
-tail can follow, the category and type projections, and a lease — and a
+multi-event appends with the per-stream revision check, positions the tails
+can follow and a horizon to judge their gaps by, and a lease — and a
 database without a sequence of its own brings one, as the ordinal sequencer
 already does.
 
@@ -580,55 +580,46 @@ value of `Nightingale:Store:Partitioning`, fixed at initialization and
 exclusive with the others, since a table has one partition scheme. Built when
 sizing demands it.
 
-## Ordinals as links
+## The PostgreSQL horizon
 
-Dense numbers are what make the reference's virtual streams usable, and what
-a client of it counts on: a checkpoint, a count by subtraction, a page by
-number. The reference gets them from one writer appending to one log, whose
-order of positions is its order of commits; the gateway's stores have many
-writers taking positions from a sequence and committing in any order, so a
-lower position can appear after a higher one. The sequencer today finds what
-it has not numbered through an index over the rows whose ordinal is null, on
-SQL Server, which is exact however late a row arrives. It needs columns on the
-events table, and that is the part that does not travel: the Marten backend
-cannot add a column to a table whose migrations drop what they do not know,
-and on PostgreSQL every update of an event row writes the whole row again, in
-every index. So the ordinals move out of the events table on both backends.
+The Marten backend's sequence heads, and so its ordinals, which are links on
+both backends (`DESIGN.md`, seam 6), need a horizon of its own: no
+transaction of this database still in progress whose id is below the
+snapshot's `xmax` at the marker, from `pg_snapshot_xip(pg_current_snapshot())`,
+each id mapped to its database through the lock every id holder takes on its
+own id in `pg_locks` and that session's database in `pg_stat_activity`, and no
+prepared transaction of this database, from `pg_prepared_xacts`; the gateway's
+own sessions left out. Every role may read all of it, so the backend needs no
+grant. The backend appends in Marten's quick mode, which writes or locks the
+stream's row before it takes a position for a new stream or an append that
+checks the version, so its transaction has an id first; a plain append to an
+existing stream takes its position a statement before its first write, inside
+one function call, which a minimum age of a second covers, or none at all if
+the backend's append locks the stream's row first. Marten's rich append mode
+is not supported (`UNSUPPORTED.md`). What Marten's own detector learned, a
+cluster's transaction ids counted for one database, the daemon's own lock
+session holding a gap for good, applies to this query as written.
 
-Every ordinal becomes a link in `OrdinalLink`, the category's and the type's
-beside the correlation's and the listings', a type each. The sequencer numbers
-the range of positions from its progress to the sequence head through the
-events table's own key, and every event gets one type link: every event has a
-type, which the store guarantees, where the category is a rule of the
-gateway's that may become configurable; and a range's links are written in one
-transaction, so "is this event numbered" is "has it a type link", and
-"is every ordinal current" is "has the sequencer's progress reached the
-sequence head". A row cannot commit late below a range the sequencer has
-passed, because the head passes a missing position only once it is final
-(`DESIGN.md`, seam 4): the sequencer numbers what the head says is there, and
-needs no pass of its own to settle a range.
+## Adopting ordinals on a store initialized without them
 
-On PostgreSQL the head needs the Marten backend's horizon: no transaction of
-this database still in progress whose id is below the snapshot's `xmax` at the
-marker, from `pg_snapshot_xip(pg_current_snapshot())`, each id mapped to its
-database through the lock every id holder takes on its own id in `pg_locks`
-and that session's database in `pg_stat_activity`, and no prepared transaction
-of this database, from `pg_prepared_xacts`; the gateway's own sessions left
-out. Every role may read all of it, so the backend needs no grant. Marten's
-quick append writes or locks the stream's row before it takes a position for
-a new stream or an append that checks the version, so its transaction has an
-id first; a plain append to an existing stream takes its position a statement
-before its first write, inside one function call, which a minimum age of a
-second covers. Marten's rich append mode takes its positions on a connection
-of their own before the append's transaction opens, which no horizon can see;
-the minimum age covers it only as far as the time between the two, which the
-application decides. What Marten's own detector learned, a cluster's
-transaction ids counted for one database, the daemon's own lock session
-holding a gap for good, applies to this query as written.
+The events table is the same with ordinals and without, so adopting them is
+the sequencer numbering from position 0 into the links while the store is
+served, and saying how far behind it is until it catches up. Refused today,
+since `Nightingale:Store:AssignOrdinals` is fixed when the store is
+initialized; built when a store needs it.
 
-Adopting ordinals on a store initialized without them becomes the sequencer
-numbering from position 0 into the links, while the store is served, with no
-change to the events table.
+## Pruning links whose events are gone
+
+A link outlives its event: a stream deleted, the store's hard delete, leaves
+its events' links behind as holes a read skips, and they count in a virtual
+stream's bounds, as link events to deleted events do in the reference until
+a scavenge. A maintenance pass can remove them, an anti-join of the links
+against the events, a range of positions at a time and throttled, with one
+rule: the highest link of every key stays, because the sequencer finds a
+key's next ordinal from it, and removing it would hand that ordinal out again.
+Everything below it may go, and the stream's first ordinal then moves up, as
+the reference's does after a scavenge. An archived event keeps its row, so
+its link stays. Not until a store's links are worth the space.
 
 ## Scrubs
 
@@ -637,7 +628,7 @@ events against the links, for where the head can be wrong: the best-effort
 strategy, whose wait can skip a position whose row is not yet in the table when
 it ends, and a writer no horizon sees, as Marten's rich append mode. Three, by
 window and meaning, each numbering what it finds with the next ordinal of its
-keys, as the sequencer numbers a late row today:
+keys, so by ordinal a late event follows what was appended after it:
 
 - a light guardrail every few minutes over the last quarter of an hour, a
   finding logged and counted; opt-in;
@@ -685,9 +676,9 @@ category had a stream before it: one more seek of the same index.
 Under ordinals it is cheaper still. A category's first stream is the event
 the sequencer numbers 0 in `$category-x`, so `$categories` is the links of
 that type at ordinal 0, an index on them filtered to that ordinal, and the
-numbers of `$categories` itself are one more type of link, filled in the
-same batch: the way to build it on a store with ordinals, by position the way
-on one without. Not until someone asks for it.
+numbers of `$categories` itself are one more type of link, the next number,
+6, filled in the same batch: the way to build it on a store with ordinals,
+by position the way on one without. Not until someone asks for it.
 
 ## Separator characters, chosen at initialization
 
@@ -825,8 +816,8 @@ counts.
 ## More reads from the read-only connection
 
 Shipped (`DESIGN.md`, seam 8): pages of `$all` and of the virtual streams by
-position are served from the read-only connection as far as its own
-high-water mark reaches, exactly, and bounded reads of plain streams when the
+position are served from the read-only connection as far as the sequence
+head it holds reaches, exactly, and bounded reads of plain streams when the
 host asks, eventually consistent. Pending:
 
 - **Reads by ordinal.** The numbered rows a secondary holds are a prefix of
@@ -963,7 +954,7 @@ ships:
   expression index on an immutable function of the stream name, which needs no
   column and is served by a seek in position order on the live partition;
   Marten's documented `IgnoreIndex` keeps its migrations off it and off the
-  other indexes. The ordinals are links (*Ordinals as links*).
+  other indexes. The ordinals are links (`DESIGN.md`, seam 6).
 - **Its placeholder rows.** After a save that fails once positions were taken,
   Marten writes a `tombstone` event in the stream `mt_tombstone` at each, so
   its high-water mark need not wait. Every read and the sequencer leave that

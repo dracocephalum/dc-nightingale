@@ -493,65 +493,58 @@ of a parameter list the in-process match does not need; both could coexist,
 chosen per host, if a collation ever demands it.
 Where now matters, a subscription from the end or a bounded read of `$all`,
 the tail refreshes itself first with one query through the committed rows that
-follow the mark without a gap, so an append that has returned is never on the
-wrong side of "now". It never passes a gap; giving up an abandoned gap is the
-poller's call, after the store's threshold.
+follow the head without a gap, so an append that has returned is never on the
+wrong side of "now". It never passes a gap; giving one up is the poller's
+call, by the head strategy (seam 4).
 
 ### 6. Ordinals are assigned after commit, by one sequencer
 
 A virtual stream's positions are sparse, so two of them subtracted are not a
 count. The reference gets dense numbers from link events with their own
-revisions; ours are two nullable columns on the events table, the category
-ordinal and the type ordinal, on a store initialized with
-`Nightingale:Store:AssignOrdinals`. Each has a filtered index over the numbered rows
-only, leading with the tenant column, so a read by ordinal is one seek and can
-never return an unnumbered row. The columns are declared through the same
-patched schema as the category column and recorded in the marker row, because
-they shape the table: a store initialized without them refuses the setting
-until a backfill exists, and one initialized with them refuses to run without.
+revisions; ours are rows of `OrdinalLink`, on a store initialized with
+`Nightingale:Store:AssignOrdinals`: one for each event in each numbered
+virtual stream it is in, its type's and its category's always, its
+correlation's when it carries one, and the listings' when it begins a
+stream. They are not columns of the events table: a store provider's
+migrations drop the columns they do not know, which rules columns out on
+Marten, and on PostgreSQL every update of an event's row writes the whole row
+again, in every index; one design serves both backends, and the events table
+is the same with ordinals and without. The setting is recorded in the marker
+row all the same: a store initialized without it refuses it until a backfill
+exists, and one initialized with it refuses to run without.
 
-A correlation, `$streams` and `$category-` have ordinals too, but not as
-columns: most events carry no correlation id and most begin no stream, so a
-column would spend eight bytes on every row for numbers few rows have. Their
-ordinals are rows of `OrdinalLink`, one for each event a correlation or a
-listing holds. The table is an extension of the events table, not an entity
-of the gateway's: what it holds could be columns of the event's row, as the
-other two ordinals are, and it sits in a table of its own, in the gateway's
-schema, only so that the rows without it cost nothing. So it is keyed as the
-store's data is, by what it describes: the type, stored as a byte, the
-tenant, the key and the ordinal, with the event's position beside them. A
-read by ordinal seeks that key in order and fetches each event by its own
-key, in the tenant's partition on a store partitioned by tenant; a unique
-index by type, tenant and position means no batch can link an event twice.
-Rows are never removed: a link whose event was archived or deleted is a
-hole the read skips, and the last ordinal of a key stays, so none is reused.
-A store whose events carry no correlation id holds two links a stream and
-nothing more. The category's and the type's ordinals are to become links too,
-on both backends, with an audit settled by the database's transaction horizon
-in place of the index over the unnumbered rows (`PENDING.md`, *The ordinal
-audit*).
+The table is an extension of the events table, not an entity of the
+gateway's: what it holds describes the event's rows, and it sits in a table
+of its own, in the gateway's schema, so that the store's migrations never
+touch it. So it is keyed as the store's data is, by what it describes: the
+type, stored as a byte and numbered by how many links each makes, the event
+type first; the tenant; the key, as wide as an event type; and the ordinal,
+with the event's position beside them. A read by ordinal seeks that key in
+order and fetches each event by its own key, in the tenant's partition on a
+store partitioned by tenant, an index seek and a lookup a row; a unique index
+by type, tenant and position means no batch can link an event twice. Rows are
+never removed: a link whose event was archived or deleted is a hole the read
+skips, and the last ordinal of a key stays, so none is reused. Every event has
+its type's link, written in the same batch as its others, so the type's link
+is the witness that an event is numbered.
 
 `OrdinalSequencer` is the sequencer: one per cluster, on the same lease rows the
 persistent-subscription groups use, walking the events table behind the
-high-water mark in batches and giving each event its place within its
-category and its type, and its links, each batch continuing from the last
-ordinal of each key found with one backward seek. A batch is read once, into
-a table variable, and both the columns and the links are made from it, so a
-row committing between two reads of the events table can never get its
-ordinals and miss its links. The append path is untouched, because
-numbering at append time would serialize every append to a category. A batch
-and the progress row, the position numbered through, are one transaction, and
-the progress row is read under an update lock, so a sequencer whose lease
-overlapped a takeover continues from what the other committed. A batch is
-every unnumbered row up to its end, found through a third filtered index,
-over the unsequenced rows by position, which holds only the lag: so an event whose
-position the tail gave up as a gap and that committed late, below the
-sequencer's progress, is numbered by the next batch with the next ordinal of
-its key. By ordinal it follows what was appended after it; it is never left
-out. The price is lag: ordinals trail the high-water mark by the sequencer's
-cadence, which is the tail's, and a removed event leaves a numbered hole the
-reader skips and the sequencer never reuses, which is what a link whose event
-is gone does in the reference.
+sequence head in batches, by its key, and giving each event its links, each
+batch continuing from the last ordinal of each key found with one backward
+seek in the links' key. A batch is the range from the progress to its end,
+read once, into a table variable, so every link is made from the same rows.
+The append path is untouched, because numbering at append time would
+serialize every append to a category. A batch and the progress row, the
+position numbered through, are one transaction, and the progress row is read
+under an update lock, so a sequencer whose lease overlapped a takeover
+continues from what the other committed. A range numbered is never looked at
+again: the tails pass a missing position only once it is final (seam 4), so
+nothing commits below the head once it has passed, and nothing below the
+sequencer's progress is unnumbered. The price is lag: ordinals trail the
+sequence head by the sequencer's cadence, which is the tails', and a removed
+event leaves a numbered hole the reader skips and the sequencer never reuses,
+which is what a link whose event is gone does in the reference.
 
 The numbering is the caller's explicit choice per read or subscription,
 global by default, and the service refuses an ordinal read of `$all` and
@@ -672,11 +665,11 @@ the gateway adds, its streams, and the registry of tenants' partition keys;
 and, from the gateway's own schema, the ordinal links, which a read joins to
 the events, and the sequence heads, which bound a read of a replica. The reads
 by category, by event type and by position are LINQ over that mirror, and so
-is the tails' look
-for the unbroken run of positions after a head, whose gap rule is plain
-code; the best-effort strategy's locking reads are the same LINQ composed
-over the table taken with a hint. A query names the columns it needs, never a whole row, because the
-ordinal columns exist only on a store initialized with ordinals; and the
+is the tails' look for the unbroken run of positions after a head, whose gap
+rule is plain code; the best-effort strategy's locking reads are the same
+LINQ composed over the table taken with a hint. A query names the columns it
+needs, never a whole row, because the partition key exists only on a store
+partitioned by tenant; and the
 mirror declares the store's column types exactly, since a name sent as
 Unicode to a column that is not makes the database convert the column and
 scan the index it should seek. One test holds every mapped column to the

@@ -13,12 +13,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// so its logger, which the store's own would send to the console, stays the default and unused.
 /// </summary>
 /// <param name="options">The store options this database belongs to.</param>
-/// <param name="ordinals">Whether the events table carries the ordinal columns.</param>
-internal sealed class AugmentedPolecatDatabase(StoreOptions options, bool ordinals) : PolecatDatabase(options)
+internal sealed class AugmentedPolecatDatabase(StoreOptions options) : PolecatDatabase(options)
 {
     /// <inheritdoc/>
     public override IFeatureSchema[] BuildFeatureSchemas() =>
         base.BuildFeatureSchemas()
-            .Select(feature => feature.Identifier == PatchedEventStoreFeature.EventStoreIdentifier ? new PatchedEventStoreFeature(feature, ordinals) : feature)
+            .Select(feature => feature.Identifier == PatchedEventStoreFeature.EventStoreIdentifier ? new PatchedEventStoreFeature(feature) : feature)
             .ToArray();
 }

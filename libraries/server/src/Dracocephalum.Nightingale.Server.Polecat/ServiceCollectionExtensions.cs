@@ -116,7 +116,7 @@ public static class ServiceCollectionExtensions
         {
             var store = new StoreOptions();
             Configure(store, connectionString, options);
-            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store, options.Store.AssignOrdinals), connectionString);
+            store.Tenancy = new SingleTenancy(new AugmentedPolecatDatabase(store), connectionString);
             return store;
         }).UseLightweightSessions();
 

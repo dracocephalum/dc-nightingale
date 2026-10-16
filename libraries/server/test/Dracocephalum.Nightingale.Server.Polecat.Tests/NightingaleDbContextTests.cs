@@ -38,9 +38,11 @@ public sealed class NightingaleDbContextTests
         Enum.GetUnderlyingType(typeof(OrdinalLinkType)).ShouldBe(typeof(byte));
         Enum.GetValues<OrdinalLinkType>().ToDictionary(type => type.ToString(), type => (byte)type).ShouldBe(new Dictionary<string, byte>
         {
-            ["Correlation"] = 1,
-            ["Streams"] = 2,
-            ["CategoryStreams"] = 3,
+            ["EventType"] = 1,
+            ["Category"] = 2,
+            ["Correlation"] = 3,
+            ["Streams"] = 4,
+            ["CategoryStreams"] = 5,
         });
     }
 

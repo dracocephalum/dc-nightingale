@@ -123,9 +123,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data.Migrations
                         .HasColumnType("varchar(250)");
 
                     b.Property<string>("Key")
-                        .HasMaxLength(250)
+                        .HasMaxLength(500)
                         .IsUnicode(false)
-                        .HasColumnType("varchar(250)");
+                        .HasColumnType("varchar(500)");
 
                     b.Property<long>("Ordinal")
                         .HasColumnType("bigint");
