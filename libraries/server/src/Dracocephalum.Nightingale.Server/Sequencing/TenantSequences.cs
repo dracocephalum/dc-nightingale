@@ -1,8 +1,7 @@
 using Dracocephalum.Nightingale.Server.Data;
-using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>A sequence per tenant: every tenant the gateway keeps, each with its own tail, which the listing asks for and so has followed; those followed in this process are the tenants whose tail was asked for.</summary>
 /// <param name="tails">The tails.</param>

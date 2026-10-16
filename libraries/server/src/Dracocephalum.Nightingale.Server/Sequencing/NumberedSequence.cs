@@ -1,6 +1,4 @@
-using Dracocephalum.Nightingale.Server.Sequencing;
-
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>A sequence the sequencer numbers: the tenant it belongs to, or none for a shared sequence, the tail that says how far it is committed, and the numbering its progress is published into for this process.</summary>
 /// <param name="TenantId">The id the store keeps for the tenant, or <see langword="null"/> for the shared sequence.</param>

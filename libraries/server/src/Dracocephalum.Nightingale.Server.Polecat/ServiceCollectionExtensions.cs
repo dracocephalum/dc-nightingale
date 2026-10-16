@@ -194,28 +194,17 @@ public static class ServiceCollectionExtensions
 
         if (options.Store.AssignOrdinals)
         {
-            // After the tailer, so the sequencer's first look at the head is a real one. The
-            // registry is the server's, but a host that registers only the backend still numbers.
-            services.TryAddSingleton<SubscriptionGroupRegistry>();
-            services.AddSingleton<INumberedSequences>(provider => partitionedByTenant
-                ? new TenantSequences(provider.GetRequiredService<SequenceTails>(), provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>())
-                : new SharedSequence(provider.GetRequiredService<IStoreTail>(), provider.GetRequiredService<SequenceTails>().NumberingOf(SequenceKey.Shared)));
-            services.AddSingleton<IHostedService>(provider => new OrdinalSequencer(
-                provider.GetRequiredService<ISubscriptionGroupStore>(),
-                provider.GetRequiredService<INumberedSequences>(),
-                new NumberingFollower(
-                    provider.GetRequiredService<INumberedSequences>(),
-                    new OrdinalSequencingProgressReader(provider.GetRequiredService<IDbContextFactory<NightingaleDbContext>>()),
-                    provider.GetService<TimeProvider>() ?? TimeProvider.System,
-                    provider.GetService<ILogger<NumberingFollower>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NumberingFollower>.Instance,
-                    fastInterval),
-                provider.GetRequiredService<SubscriptionGroupRegistry>(),
-                connectionString,
-                provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
-                options.Schema,
-                provider.GetService<TimeProvider>() ?? TimeProvider.System,
-                provider.GetRequiredService<ILogger<OrdinalSequencer>>(),
-                options.OrdinalSequencerLeaseDuration));
+            // After the tails, so the sequencer's first look at a head is a real one; the loop is
+            // the server's, the batch this backend's statement.
+            services.AddNightingaleOrdinalSequencer(
+                provider => new SqlServerOrdinalSequencer(
+                    connectionString,
+                    provider.GetRequiredService<IDocumentStore>().Options.DatabaseSchemaName,
+                    options.Schema,
+                    provider.GetService<ILogger<SqlServerOrdinalSequencer>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SqlServerOrdinalSequencer>.Instance),
+                partitionedByTenant,
+                fastInterval,
+                options.OrdinalSequencerLeaseDuration);
         }
 
         return services;

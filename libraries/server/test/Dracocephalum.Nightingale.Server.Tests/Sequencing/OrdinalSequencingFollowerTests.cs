@@ -1,14 +1,15 @@
+using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
-namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
+namespace Dracocephalum.Nightingale.Server.Tests.Sequencing;
 
 /// <summary>
 /// The follower that keeps a process's numbering current while another instance numbers, with
 /// no database: when it reads the progress rows, what it publishes, and what a failed read costs.
 /// </summary>
-public sealed class NumberingFollowerTests
+public sealed class OrdinalSequencingFollowerTests
 {
     private static readonly DateTimeOffset Started = new(2026, 10, 12, 8, 0, 0, TimeSpan.Zero);
     private readonly FakeTimeProvider _time = new(Started);
@@ -64,7 +65,7 @@ public sealed class NumberingFollowerTests
         var reached = _tail.WaitForNumberedAsync(20, TestContext.Current.CancellationToken).AsTask();
         while (!reached.IsCompleted)
         {
-            _time.Advance(NumberingFollower.Interval);
+            _time.Advance(OrdinalSequencingFollower.Interval);
             await Task.WhenAny(reached, Task.Delay(10, TestContext.Current.CancellationToken));
         }
 
@@ -75,8 +76,8 @@ public sealed class NumberingFollowerTests
         _progress.Reads.ShouldBe(2);
     }
 
-    private NumberingFollower Follower() =>
-        new(new SharedSequence(_tail, _tail.Numbering), _progress, _time, NullLogger<NumberingFollower>.Instance);
+    private OrdinalSequencingFollower Follower() =>
+        new(new SharedSequence(_tail, _tail.Numbering), _progress, _time, NullLogger<OrdinalSequencingFollower>.Instance);
 
     /// <summary>Moves the clock past the time the following was given, until it returns.</summary>
     private async Task RunOutAsync(Task following, TimeSpan given)
@@ -85,7 +86,7 @@ public sealed class NumberingFollowerTests
         while (!following.IsCompleted)
         {
             await Task.WhenAny(following, Task.Delay(10, TestContext.Current.CancellationToken));
-            _time.Advance(NumberingFollower.Interval);
+            _time.Advance(OrdinalSequencingFollower.Interval);
         }
 
         await following;

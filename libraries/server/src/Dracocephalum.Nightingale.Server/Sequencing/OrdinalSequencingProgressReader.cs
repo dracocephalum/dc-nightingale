@@ -1,7 +1,7 @@
 using Dracocephalum.Nightingale.Server.Data;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>The ordinal sequencer's progress rows as the gateway's own context reads them, one query for every sequence asked.</summary>
 /// <param name="contexts">Makes the gateway's own context.</param>

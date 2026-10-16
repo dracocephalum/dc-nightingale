@@ -28,8 +28,10 @@ Its `Sequencing` namespace holds what every backend supplies or shares for
 its sequences: `SequenceTails`, the one poller of a process that keeps a
 sequence head per sequence and the gateway's `SequenceHead` rows; the ports a
 backend implements, the transaction horizon over its database and the reads
-of its events table, which together are its head strategy; and the
-checkpoint the tails judge a gap by.
+of its events table, which together are its head strategy; the checkpoint
+the tails judge a gap by; and the ordinal sequencer, its lease, loop and
+follower, registered by `AddNightingaleOrdinalSequencer` over the one port a
+backend implements for it, `IOrdinalSequencer`, a batch in its own statement.
 `test/Dracocephalum.Nightingale.Server.Contracts` holds those ports'
 contracts as abstract tests, a library and not a test project: a backend's
 integration project derives a class from each and supplies its database,

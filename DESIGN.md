@@ -29,8 +29,8 @@ twenty terabytes, about a hundred services connected over gRPC.
 |---|---|---|
 | `core` | two assemblies: `Core`, the domain types both sides share — positions, expected states, event data and records, exceptions — with no wire package at all; and `Protocols.Grpc`, the gRPC contract (`V1/*.proto`) and the conversions between its messages and the domain types | any store; `Core` knows no transport, `Protocols.Grpc` knows only its own |
 | `client` | `NightingaleClient` over the generated stub, opened from one connection string in the reference client's shape that lists the instances and carries every setting, and the mapping from wire failure reasons to the shared exceptions | the server's internals |
-| `server` | the application core — the port a backend implements, `IStreamStore`, the tail every subscription waits on, `IStoreTail`, the subscription runtime, `Authorizer` deciding on a principal, and the credential and tenant managers — and, in its `Grpc` namespace, the one transport over it: the service implementations, the interceptor and the status mapping | any particular store; the core knows no transport |
-| `server` (Polecat backend) | `PolecatStreamStore`, the SQL Server reads and horizon the server's tails keep the sequence heads by, the sequencer that assigns ordinals, the schema additions, the initializer that owns the database, and the default host | the wire |
+| `server` | the application core — the port a backend implements, `IStreamStore`, the tail every subscription waits on, `IStoreTail`, the subscription runtime, `Authorizer` deciding on a principal, and the credential and tenant managers, and, in its `Sequencing` namespace, what every backend's sequences share, the tails that keep the sequence heads and the ordinal sequencer's loop — and, in its `Grpc` namespace, the one transport over it: the service implementations, the interceptor and the status mapping | any particular store; the core knows no transport |
+| `server` (Polecat backend) | `PolecatStreamStore`, the SQL Server reads and horizon the server's tails keep the sequence heads by, the statement the ordinal sequencer numbers a batch with, the schema additions, the initializer that owns the database, and the default host | the wire |
 
 The port is deliberately small: append with an expected state, read a bounded
 slice. Everything the contract adds, paging, the head-first read order, error
@@ -528,9 +528,12 @@ skips, and the last ordinal of a key stays, so none is reused. Every event has
 its type's link, written in the same batch as its others, so the type's link
 is the witness that an event is numbered.
 
-`OrdinalSequencer` is the sequencer: one per cluster, on the same lease rows the
-persistent-subscription groups use, walking the events table behind the
-sequence head in batches, by its key, and giving each event its links, each
+`OrdinalSequencerHost`, in the server's `Sequencing` namespace, hosts the
+sequencer for every backend, its lease and its loop, with only the batch the
+backend's own (`IOrdinalSequencer`, `SqlServerOrdinalSequencer` on SQL Server):
+one per cluster, on the same lease rows the persistent-subscription groups
+use, walking the events table behind the sequence head in batches, by its
+key, and giving each event its links, each
 batch continuing from the last ordinal of each key found with one backward
 seek in the links' key. A batch is the range from the progress to its end,
 read once, into a table variable, so every link is made from the same rows.
@@ -583,7 +586,7 @@ which in SQL Server is the slot the function maps a value to (value `k`
 lands in partition number `k + 2` under the store's boundaries). The store's
 column names appear only where the mirror maps them, under a property named
 `PartitionKey`, never in a name, message or document of the gateway's own as
-an ordinal. A sequencer is named for what it sequences: `OrdinalSequencer`
+an ordinal. A sequencer is named for what it sequences: `IOrdinalSequencer`
 numbers every ordinal in one batch, and its progress rows are named for the
 ordinals they track. A sequencer of another kind, for a virtual stream added
 after a store is numbered far along, would need a type on its progress rows

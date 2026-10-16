@@ -1,6 +1,7 @@
 using Dracocephalum.Nightingale.Server.Data;
+using Dracocephalum.Nightingale.Server.Sequencing;
 
-namespace Dracocephalum.Nightingale.Server.Polecat.Tests;
+namespace Dracocephalum.Nightingale.Server.Tests.Sequencing;
 
 /// <summary>The ordinal sequencer's progress rows as a test keeps them: what each read answers, how many reads there were, and a failure to throw once.</summary>
 internal sealed class FakeOrdinalSequencingProgressReader : IOrdinalSequencingProgressReader

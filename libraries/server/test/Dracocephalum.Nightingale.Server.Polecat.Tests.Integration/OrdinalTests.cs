@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
 
+using Dracocephalum.Nightingale.Server.Sequencing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Shouldly;
@@ -255,7 +256,7 @@ public sealed class OrdinalTests : IAsyncLifetime
             await using (var provider = services.BuildServiceProvider())
             {
                 var held = await provider.GetRequiredService<ISubscriptionGroupStore>()
-                    .AcquireLeaseAsync(OrdinalSequencer.LeaseName, "an-instance-that-died", null, TimeSpan.FromMilliseconds(1500), TestContext.Current.CancellationToken);
+                    .AcquireLeaseAsync(OrdinalSequencing.LeaseName, "an-instance-that-died", null, TimeSpan.FromMilliseconds(1500), TestContext.Current.CancellationToken);
                 held.ShouldBeNull();
             }
 

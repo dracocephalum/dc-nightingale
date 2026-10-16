@@ -1,6 +1,4 @@
-using Dracocephalum.Nightingale.Server.Sequencing;
-
-namespace Dracocephalum.Nightingale.Server.Polecat;
+namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>The one shared sequence, whose head is the count: it moves when the head does.</summary>
 /// <param name="tail">The tail of the process.</param>
