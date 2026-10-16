@@ -608,6 +608,19 @@ served, and saying how far behind it is until it catches up. Refused today,
 since `Nightingale:Store:AssignOrdinals` is fixed when the store is
 initialized; built when a store needs it.
 
+## Pruning links whose events are gone
+
+A link outlives its event: a stream deleted, the store's hard delete, leaves
+its events' links behind as holes a read skips, and they count in a virtual
+stream's bounds, as link events to deleted events do in the reference until
+a scavenge. A maintenance pass can remove them, an anti-join of the links
+against the events, a range of positions at a time and throttled, with one
+rule: the highest link of every key stays, because the sequencer finds a
+key's next ordinal from it, and removing it would hand that ordinal out again.
+Everything below it may go, and the stream's first ordinal then moves up, as
+the reference's does after a scavenge. An archived event keeps its row, so
+its link stays. Not until a store's links are worth the space.
+
 ## Scrubs
 
 A re-check of a range for events without a type link, an anti-join of the
