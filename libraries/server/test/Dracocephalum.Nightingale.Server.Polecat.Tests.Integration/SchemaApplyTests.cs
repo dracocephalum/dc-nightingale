@@ -48,6 +48,28 @@ public sealed class SchemaApplyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Start_WhenAColumnDrifted_ShouldRepairTheColumnAndTheIndexesOverItWhenMigrating()
+    {
+        // Arrange: the gateway's category column gone, with the indexes that name it. Putting it
+        // back is a delta that adds a column and then indexes naming it, which the schema library
+        // writes as batches apart, with a separator line between them that only tooling reads.
+        using (var first = await TestDatabases.StartHostAsync(_name))
+        {
+            await first.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        await TestDatabases.ExecuteAsync(_name, "DROP INDEX ix_pc_events_category_seq ON dbo.pc_events; DROP INDEX ix_pc_events_category_starts ON dbo.pc_events; ALTER TABLE dbo.pc_events DROP COLUMN category;");
+
+        // Act
+        using var repaired = await TestDatabases.StartHostAsync(_name, options => options.SchemaMode = SchemaMode.Migrate);
+
+        // Assert
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pc_events') AND name = 'category'")).ShouldBe(1);
+        (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM sys.indexes WHERE name IN ('ix_pc_events_category_seq', 'ix_pc_events_category_starts')")).ShouldBe(2);
+        await repaired.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Start_WhenAnIndexBatchRunsPastTheIndexTimeout_ShouldStopItAndNameIt()
     {
         // Arrange: an initialized store missing an index, and another session holding the events

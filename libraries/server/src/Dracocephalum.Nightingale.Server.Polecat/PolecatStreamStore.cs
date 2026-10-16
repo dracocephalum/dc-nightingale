@@ -198,7 +198,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         {
             return await ResolveConflict(stream, expected, events, cancellationToken).ConfigureAwait(false);
         }
-        catch (InvalidStreamException)
+        catch (JasperFx.Events.ArchivedStreamException)
         {
             throw new StreamDeletedException(stream);
         }
@@ -274,10 +274,10 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
     /// <summary>
     /// A page of <c>$all</c> from the main connection, through the mirror of the events table for
     /// every tenant alike: the mirror scopes to the tenant, or to all of them under the wildcard,
-    /// hides archived events, and hydrates a row with its headers. The store's own raw-events query
-    /// does not read the headers column (<c>UPSTREAM.md</c>), so a page read through it came back
-    /// without the metadata the events carry, which the read-only connection, serving most pages,
-    /// kept from view until a page fell to the main connection.
+    /// hides archived events, and hydrates a row with its headers and with whichever body it keeps.
+    /// The store's own readers take a row's binary column as its only body and refuse one they have
+    /// no serializer for (<c>UPSTREAM.md</c>), so a page read through them could not hold an event
+    /// appended with both.
     /// </summary>
     private Task<IReadOnlyList<EventRecord>> ReadAllFromPrimaryAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken) =>
         _virtual.ReadAllAsync(direction, from, head, count, cancellationToken);

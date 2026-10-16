@@ -33,6 +33,11 @@ public sealed class OrdinalTests : IAsyncLifetime
 
             // A short lease, so the sequencer's quiet-store pass, on renewal, comes within a second.
             options.OrdinalSequencerLeaseDuration = TimeSpan.FromSeconds(3);
+
+            // A tail that looks only when an append here wakes it, never on its own, so that a
+            // count of the events table's scans around a read counts the read alone: the store's
+            // high-water agent reads the table's highest position at every look, which is a scan.
+            options.TailPollingInterval = TimeSpan.FromMinutes(5);
         });
     }
 

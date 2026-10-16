@@ -194,7 +194,7 @@ internal sealed partial class PolecatStreamStore
         {
             await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is EventStreamUnexpectedMaxEventIdException or JasperFx.Events.ExistingStreamIdCollisionException or InvalidStreamException)
+        catch (Exception exception) when (exception is EventStreamUnexpectedMaxEventIdException or JasperFx.Events.ExistingStreamIdCollisionException or JasperFx.Events.ArchivedStreamException)
         {
             return await ResolveConflictsAsync(streams, writes, checks, cancellationToken).ConfigureAwait(false);
         }

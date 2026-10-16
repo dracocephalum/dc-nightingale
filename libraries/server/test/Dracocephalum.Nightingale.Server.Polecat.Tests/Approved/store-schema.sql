@@ -1,3 +1,6 @@
+SET QUOTED_IDENTIFIER ON;
+
+
 IF NOT EXISTS ( SELECT  *
                 FROM    sys.schemas
                 WHERE   name = N'dbo' )
@@ -42,23 +45,32 @@ CONSTRAINT pkey_pc_events_seq_id PRIMARY KEY (seq_id)
 );
 END
 
-CREATE UNIQUE INDEX ix_pc_events_stream_and_version ON dbo.pc_events (tenant_id, stream_id, version);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_stream_and_version' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE UNIQUE INDEX ix_pc_events_stream_and_version ON dbo.pc_events (tenant_id, stream_id, version);
 
-CREATE INDEX ix_pc_events_category_seq ON dbo.pc_events (tenant_id, category, seq_id) WHERE (is_archived = 0);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_category_seq' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_category_seq ON dbo.pc_events (tenant_id, category, seq_id) WHERE (is_archived = 0);
 
-CREATE INDEX ix_pc_events_type_seq ON dbo.pc_events (tenant_id, type, seq_id) WHERE (is_archived = 0);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_type_seq' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_type_seq ON dbo.pc_events (tenant_id, type, seq_id) WHERE (is_archived = 0);
 
-CREATE INDEX ix_pc_events_correlation_seq ON dbo.pc_events (tenant_id, correlation_id, seq_id) WHERE (correlation_id IS NOT NULL AND is_archived = 0);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_correlation_seq' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_correlation_seq ON dbo.pc_events (tenant_id, correlation_id, seq_id) WHERE (correlation_id IS NOT NULL AND is_archived = 0);
 
-CREATE INDEX ix_pc_events_stream_starts ON dbo.pc_events (tenant_id, seq_id) WHERE (version = 1 AND is_archived = 0);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_stream_starts' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_stream_starts ON dbo.pc_events (tenant_id, seq_id) WHERE (version = 1 AND is_archived = 0);
 
-CREATE INDEX ix_pc_events_category_starts ON dbo.pc_events (tenant_id, category, seq_id) WHERE (version = 1 AND is_archived = 0);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_category_starts' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_category_starts ON dbo.pc_events (tenant_id, category, seq_id) WHERE (version = 1 AND is_archived = 0);
 
-CREATE INDEX ix_pc_events_category_ordinal ON dbo.pc_events (tenant_id, category, category_ordinal) WHERE (category_ordinal IS NOT NULL);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_category_ordinal' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_category_ordinal ON dbo.pc_events (tenant_id, category, category_ordinal) WHERE (category_ordinal IS NOT NULL);
 
-CREATE INDEX ix_pc_events_type_ordinal ON dbo.pc_events (tenant_id, type, type_ordinal) WHERE (type_ordinal IS NOT NULL);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_type_ordinal' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_type_ordinal ON dbo.pc_events (tenant_id, type, type_ordinal) WHERE (type_ordinal IS NOT NULL);
 
-CREATE INDEX ix_pc_events_unsequenced ON dbo.pc_events (tenant_id, seq_id) WHERE (category_ordinal IS NULL);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_pc_events_unsequenced' AND object_id = OBJECT_ID(N'dbo.pc_events'))
+    CREATE INDEX ix_pc_events_unsequenced ON dbo.pc_events (tenant_id, seq_id) WHERE (category_ordinal IS NULL);
 IF OBJECT_ID('dbo.pc_event_progression') IS NULL
 BEGIN
 CREATE TABLE dbo.pc_event_progression (
