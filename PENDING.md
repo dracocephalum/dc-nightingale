@@ -130,34 +130,17 @@ into this repository.
 When: once the gateway has most of what the reference's client calls, so
 the adapter is a mapping rather than a list of `Unimplemented` answers. The
 client discovers optional features through `ServerFeatures` and adapts, but
-a core call it makes unconditionally fails in front of the application, so
-parity comes first, in the order the client exposes it:
-
-1. **Stream metadata**, `$maxAge`, `$maxCount` and `$tb`, read and set as the
-   client's own calls do, and the reference's delete as the gateway's reset:
-   done. `$acl` waits for the authentication that is left (*Stream metadata*
-   below).
-2. **Binary event bodies**: done, as a second body beside the JSON one
-   (`VARIANCES.md`, *An event has two bodies*); the mapping to the
-   reference's one body is the adapter's, under *Bodies* below.
-3. **The small ones together**: `$bc-` by correlation id, `$streams` and
-   `$category-`, by position, and by ordinal through links the sequencer
-   writes: done. The `Stop` action of a group's nack is a
-   variance, mapped by the adapter under *Group nacks* below.
-4. **Multi-stream and conditional appends**: done, as `AppendToStreams`,
-   the reference's append session and its consistency checks on streams
-   not written in one call; what is left of them is under *Multi-stream and
-   conditional appends* below, and the mapping under *Multi-stream appends*.
-
-Parity is not bought with the core's speed. The gateway is not a clone, and
-some of the reference's behaviour is there for its history or its single
-writer rather than for an application. Features come in three tiers. The
-first tier is appends, reads and subscriptions, which stay as efficient as
-they are. A behaviour that would add a read, a write or a lock to all of
-them goes to the second tier, served on a path of its own at best effort and
-paid for only by the callers who use it, or to the third tier, written down
-as a variance with the client-side way around it. *Stream metadata* below is
-the worked example.
+a core call it makes unconditionally fails in front of the application. What
+that client calls unconditionally is in: stream metadata, `$maxAge`,
+`$maxCount` and `$tb`, with the reference's delete as the gateway's reset,
+`$acl` waiting on the authentication that is left (above); binary event
+bodies (`VARIANCES.md`, *An event has two bodies*); `$bc-`, `$streams` and
+`$category-`, by position and by ordinal; and multi-stream and conditional
+appends, as `AppendToStreams`. Parity is never bought with the core's speed:
+features come in the three tiers `GLOSSARY.md` defines, and a behaviour that
+would add a read, a write or a lock to every append, read or subscription is
+served on a path of its own, paid for by its callers alone, or written down
+as a variance with the client-side way around it.
 
 What the gateway has that the reference does not, deferred delivery, a
 client that resubscribes on its own, server-computed lag counts, waits for a
@@ -211,7 +194,8 @@ here is re-derived:
   ordinals it serves positions in its place: they only increase, so a
   checkpoint still resumes, but two of them subtracted are no count, a
   variance to write when the adapter ships. The core's own client gets its
-  one number per record differently, as *A record's locus* below.
+  one number per record differently, if ever (`UNSUPPORTED.md`, *A record's
+  locus*).
 - **Deletes and metadata.** The reference's delete is the gateway's `Reset`
   and its tombstone the gateway's `Delete`, one call each; the gateway's
   `Archive` has no reference call to map. That client reads metadata as the
@@ -281,219 +265,24 @@ here is re-derived:
 
 ## Stream metadata
 
-The reference keeps a stream's metadata as events of type `$metadata` in a
-stream of its own, `$$<stream>`, the last one in force: the reserved keys
-`$maxAge`, `$maxCount`, `$tb` (truncate before), `$cacheControl`, `$tmp` and
-`$acl`, and whatever else the application puts there. It changes what a read of the
-stream returns and, for a soft delete alone, how an append to it is checked;
-a read of `$all` ignores it. Parity here is weighed against cost, as
-everywhere (*KurrentDB's own protocol* above): reads and appends stay as
-cheap as they are, and what of the reference's behaviour would add a read, a
-write or a lock to every append is served on a path of its own at best
-effort, or written down as a variance. The shape, decided so nothing here is
-re-derived:
+Metadata is stored, set, read back and applied to reads (`VARIANCES.md`,
+*Stream metadata keeps its history*; `DESIGN.md`, seam 7). What is left:
 
-- **Landed: stored, set, read back, and `$all` the whole log.**
-  `SetStreamMetadata` appends a `$metadata` event to `$$<stream>`, in the
-  reference's JSON, and `GetStreamMetadata` reads the last one, with the
-  metadata stream's revision a set expects; no table of the gateway's, so a
-  change keeps its place in the one sequence for a replay of `$all` and the
-  history is the audit of who changed a stream's retention. Concurrency is
-  the store's unique index, as for any append; a set needs no stream, so
-  metadata can precede the first event; delete removes the metadata stream
-  in the same transaction and archive leaves it. `$$<stream>` is read
-  and followed as a stream, written only by the metadata calls, and refused
-  for a group. Reserved keys are checked, a wrong type or a value out of
-  range refusing the set; `$acl` is refused as an invalid argument; `$tb` at
-  its largest value resets the stream (below); `$cacheControl`
-  and `$tmp` are kept in `StreamMetadataKeys.CarriedOver`, stored and
-  returned without effect, `$tmp` to get its meaning with physical removal.
-  `$all` carries the metadata events; `$de`, the data events, is `$all`
-  without the types that begin with `$`, at the cost of `$all`, by position
-  only and followed as `$all` is; `$mde` is `$et-$metadata` under another
-  name, ordinals included. `VARIANCES.md` says what differs.
-- **Landed: enforced on reads, in the statements a read already ran.** A read
-  of a plain stream goes through the gateway's mirror of the store's tables,
-  as the pages of `$all` did, in the two statements the store's own fetch
-  took. The first finds the stream's row and, in the same statement, the last
-  metadata event with a `TOP 1` seek backwards on the store's unique index of
-  a stream's versions, so the probe costs no round trip and a stream without
-  metadata finds nothing in a few index pages. The second reads the page with
-  the lower bound `max(last − $maxCount + 1, $tb)` as the start of its seek on
-  that index and `$maxAge` as a check of each row's timestamp against the
-  database's clock, `SYSUTCDATETIME()`, the clock that stamped it; the check
-  comes before the page is counted, so a short page still means the end. The
-  head's first revision is that bound, beyond the last revision when the
-  metadata hides every event, and such a stream reads empty and exists, as in
-  the reference. A catch-up subscription or a group on the stream starts from
-  the bound because its reads do, and goes on from the head after a short
-  page, whatever the metadata hid. Live delivery is not checked, as in the
-  reference: the router reads what an append brought as it is stored, for the
-  stream's followers and its category's and type's alike. Neither `$all` nor
-  a virtual stream applies metadata, and a metadata stream reads its whole
-  history (`VARIANCES.md`). Nothing is cached: every instance appends, and a
-  cache would learn of a change only through the tail, a polling interval
-  late, serving meanwhile events a new `$maxCount` has cut. If a measurement
-  ever asks for less than the probe, the way out is a store setting fixed at
-  initialization that refuses metadata and skips it, not a cache.
-- **Landed: the partition key in a stream's read.** On a store partitioned by
-  tenant the store's unique index of a stream's versions leads with the
-  tenant's partition key, `tenant_ordinal` in the store's names (not an
-  ordinal of the gateway's, `DESIGN.md` seam 6), which the read and its probe
-  did not name, any more than the store's own fetch had, so they could not
-  seek it, and a predicate on the tenant alone eliminates no partition. Every
-  statement of a stream's read now names it, through a subquery of the
-  store's registry, `pc_tenant_partitions`, so nothing about a tenant is
-  cached; the tenant stays in the predicate because tenants can share a
-  partition. No index is added: a second index over the same columns would
-  cost every append a second write. The key is selected nullable, since the
-  first of an `int` is wrapped in `COALESCE(..., 0)`, which the database does
-  not seek by. An integration test forces each statement onto the index by
-  the key and the stream: the statements naming the key run, and the same
-  ones without it are refused with error 8622.
-- **`$maxAge` reads its expired rows, booked.** A stream long past its
-  `$maxAge` reads its expired rows on every forwards read from the start,
-  each looked up in the table for its timestamp, which the unique index does
-  not hold. Physical removal (below) is the answer, as the reference's
-  scavenge is. Booked and not planned, since `$maxAge` is no first-tier path:
-  an index for it is one a host adds as it adds any optional index, never one
-  provisioned by default, because an index on the stream and the timestamp
-  costs every append to every stream a write, and the timestamp included in
-  the unique index is a change to the store's index; and a binary search by
-  version over the existing index, as the reference's read does, which
-  costs appends nothing and relies on a stream's timestamps rising with its
-  versions, which they do while the database's clock does not step back.
-- **Appends never read metadata.** The reference checks an append against
-  the soft-delete value of `$tb` and writes an un-delete after it, which is
-  safe there because one writer handles every write in turn. Here every
-  instance appends, and a check of metadata before an append would go stale
-  between the two, or cost a lock on every append for a feature most stores
-  never use. So an append is checked against the stream's revisions alone,
-  by the store and atomically, and whatever metadata decides is decided when
-  the stream is read. The one sequence already places a change of metadata
-  among the events around it for a reader of `$all`, which is all the
-  reference's single writer gives a reader.
-- **Landed: reset, archive and delete, under one deletion level.** Three
-  calls where the reference has two, named for what each does: `Reset` is
-  the reference's delete, its soft delete, which hides and comes back;
-  `Archive` is the store's archive, which the gateway called delete before,
-  flagging the stream and its events out of every read, `$all` included, and
-  refusing appends, the rows kept; `Delete` is the reference's tombstone,
-  removing the stream and freeing its name. `Nightingale:Deletion:Allowed`,
-  `None`, `Archive` or `Delete`, each allowing what is below it, replaces the
-  two switches; a reset is allowed at every level, authorized as a metadata
-  set, since it removes nothing and a set undoes it. `VARIANCES.md`, *Reset,
-  archive and delete*, has what differs from the reference.
-- **Reset is a read rule, stored as a negative `$tb`.** One metadata event
-  replacing the metadata as the reference's does, `{"$tb": -6}` for a stream
-  reset at revision 5, so one number says both that the stream was reset and
-  where it is truncated. A read finds it not found while the mark is beyond
-  the last revision; once an append reaches it, it is a plain truncation,
-  which is what the reference's un-delete writes, so recreation needs nothing
-  of its own and no write follows an append. No interleaving of an append
-  and a reset on two instances strands an event: an append committed before
-  the reset reads the last revision is hidden by it, one committed after is
-  the recreation, the two orders the reference's writer allows. A caller can
-  never set a negative `$tb`, and the metadata call reports the truncation
-  and the reset apart. A stream with no events but with metadata has it
-  cleared, which is what a reset comes to with nothing to hide. A set at the
-  largest `$tb` resets keeping the other settings; a set on a reset stream
-  brings it back in the reference's two events, the metadata as given, then
-  the same with the reset's truncation, in one append, and a second set
-  lowers the truncation. An append that expects no stream and finds a reset
-  one is retried once on the failure path, expecting the last revision, and
-  the same events sent again after a lost answer succeed with what was
-  written; an append that succeeds never reads metadata.
-- **No row lock.** The design held the update lock on the stream's row for a
-  reset and a set on a reset stream. Neither needs it: each decision is
-  written under an expected revision of the metadata stream, so a change of
-  metadata between its read and its write is caught by the store's unique
-  index and decided again, and an append landing between them is ordered
-  after the decision, which is one of the two orders the reference's single
-  writer could have given.
-- **Physical removal** of the events metadata hides is a separate maintenance
-  job, the analogue of a scavenge, and a slice of its own; whether the store
-  can delete a stream's events below a version, or that is a request in
-  `UPSTREAM.md`, is the first thing it finds out.
+- **Physical removal** of the events metadata hides, the analogue of the
+  reference's scavenge, is a maintenance job and a slice of its own; whether
+  the store can delete a stream's events below a version, or that is a
+  request in `UPSTREAM.md`, is the first thing it finds out. Until then a
+  stream long past its `$maxAge` reads its expired rows on every forwards
+  read from the start (`UNSUPPORTED.md`, *An index for `$maxAge`*).
+- **`$acl`** waits on the authentication that is left (above).
 
-## Multi-stream and conditional appends
+## A registry of stores
 
-`AppendToStreams` carries both of the reference's: the append session,
-several streams each under its own expected revision, and the consistency
-checks on streams not written. What is left of them:
-
-- **Records in one order across streams.** The reference's `AppendRecords`
-  keeps the order the records were given in, a1, b1, a2; the store positions
-  a commit stream by stream (`VARIANCES.md`). Only a reader of several
-  streams at once sees the difference, `$all`, a correlation or a category,
-  within one commit. Not without the store writing a commit's events in the
-  order given, which no public seam offers.
-- **Deleted and tombstoned as check states.** The reference's checks can
-  assert a stream is deleted or tombstoned; the gateway's assert a revision,
-  no stream or that it exists. The adapter maps the two onto a reset and a
-  deleted stream when it comes.
-- **A total beside the per-append limit.** The store writes each stream of a
-  commit as its own command, so the parameter limit binds one stream's
-  events; the total is held to the same count only so that a request held in
-  full stays bounded. One of the tunables in `TODO.md`.
-
-A reset inside an append to several streams, and the store's own tag-based
-conditions, were weighed and set aside (`UNSUPPORTED.md`).
-
-## Database per tenant
-
-Not planned, and recorded so that the cost is known if it is ever wanted.
-The store supports it through a master table that maps each tenant to a
-connection string, with tenants added, disabled and removed at runtime; each
-tenant's database is then a single-tenant store of its own, migrated like
-the one store is today. The store registers connection strings only: the
-database behind one must already exist, which on a self-hosted server is a
-`CREATE DATABASE` under a login that may, and on a managed cloud database is
-a control-plane operation outside the gateway. There is no coherent position
-across databases, so the wildcard tenant, cross-tenant ordinals and any
-cross-tenant subscription are gone in this mode, and the server says so
-through its features call.
-
-What enabling it would mean, each a design of its own:
-
-- **No default tenant**; a credential is bound to a registered tenant, and
-  a tenant is registered with one or two connection strings, the read-only
-  one the gateway's to keep beside the store's registry, resolved per tenant
-  where today it is resolved once.
-- **A tenant per composition root**: one database, one tail, one sequencer
-  lease, one set of gateway tables and one registry of running groups per
-  tenant, activated on first use and evicted when idle, so that startup,
-  migration and the catalog comparison, seconds per fresh database, are not
-  paid for all tenants on every instance at once.
-- **A database that knows its tenant**: the tenant id stamped in the
-  store's marker row at provisioning, and a registration refused when the
-  database says another, since the registry row is otherwise the only link
-  and removing it leaves the database behind.
-- **Connection pools per tenant**, primary and replica, per instance, with a
-  budget and eviction against the server's connection ceiling.
-- **Registry changes seen by every instance**: a tenant disabled or
-  re-pointed on one instance ends the consumers and stops the tail on the
-  others, on a refresh cadence or a signal.
-- **Placement of per-tenant leases**, so all tenants's sequencer does not
-  land on the instance that woke first.
-- **Operator tooling per database**: the schema report and apply, the
-  collation rule and the initialization-fixed settings checked and reported
-  per tenant; tenant partitioning refused as meaningless in this mode.
-- **Management calls that name a tenant**, since groups are per database:
-  a listing across tenants is a fan-out, and an admin credential sends the
-  tenant header on management calls too.
-- **Failure isolation**: one unreachable tenant database fails neither the
-  instance's health nor the other tenants.
-- **Credentials in the control plane**, since a caller is authenticated
-  before its tenant is known; which is the model the authentication design
-  takes from the start, so that it does not move later.
-
-### A registry of stores
-
-The shape that holds database-per-tenant and today's layout as its two
-corners is a registry of **stores**, with tenants placed into them: one store
-with many conjoined tenants is what runs today, one store per tenant is the
-heading above, and several stores with several tenants each is the mix. A
+The shape that holds database per tenant (`UNSUPPORTED.md`) and today's
+layout as its two corners is a registry of **stores**, with tenants placed
+into them: one store with many conjoined tenants is what runs today, one
+store per tenant is the other corner, and several stores with several
+tenants each is the mix. A
 store is exactly the unit the composition root serves now — one database and
 its read-only secondary, one tail, one sequencer lease, one set of gateway
 tables, one registry of running groups, one marker row — so the work is to
@@ -511,7 +300,7 @@ already does.
 
 Three decisions are settled now so that they do not move later. The registry
 is **driven by `appsettings` first**: stores are declared in configuration,
-not registered at runtime, until the dynamic design above is wanted and
+not registered at runtime, until registration at runtime is wanted and
 mature; the registry row then exists already, with the same columns. A store
 row holds a **reference to its connection strings, never the secret**: a name
 the host resolves through its configuration or a vault provider at
@@ -537,8 +326,8 @@ tenants. The other way, decided so nothing here is re-derived:
 
 - **The index.** `ix_pc_events_tenant_seq` on tenant and position, filtered
   on the archived flag like the gateway's other indexes, with `is_system`
-  included: a computed column, whether the type begins with `$`, which `$de`
-  brings (*Stream metadata*). The column is not persisted, so no row is
+  included: a computed column, whether the type begins with `$`, added with
+  the index. The column is not persisted, so no row is
   rewritten to add it, only the index built; that a column computed and not
   persisted can be included in a filtered index is checked on a real server
   first, the category column of `ix_pc_events_category_seq` being persisted.
@@ -759,31 +548,6 @@ subscriber's position to the head, reported on the fell-behind message or by a
 small extra call. Under ordinal numbering the count is already a subtraction,
 holes included; this entry is for global numbering.
 
-## A record's locus
-
-Booked, not planned. A record carries three numbers: its revision in its own
-stream, its position in the log, and its ordinal under ordinal numbering. A
-consumer has to know which of them its read speaks: the revision for a plain
-stream, the ordinal under ordinal numbering, the position for `$all` and for a
-virtual stream numbered globally. The locus would be that number, set on
-every record the client delivers, so a consumer reads, stores and resumes
-after one property whatever it reads, in reads and subscriptions alike:
-
-> **Locus**: a record's place in what you read. Its revision when you read a
-> plain stream; its ordinal under ordinal numbering; its position otherwise.
-> Compare it, store it, and resume after it, in the same read and the same
-> numbering.
-
-The client sets it from the request it made, the stream and the numbering;
-it is never on the wire, where it would repeat what the caller said, and a
-record the server's store returns leaves it unset. The name was chosen over
-`Checkpoint`, which in the reference names a point announced or saved now and
-then, never a property of every event; `Cursor`, which suggests an opaque
-token; and the reference's `OriginalEventNumber`, which on `$all` is a
-revision rather than the position a reader of `$all` resumes from. The
-KurrentDB adapter computes the reference's own numbers for its clients, and
-is not served by this property.
-
 ## Resubscription after a dropped connection
 
 A subscription ends with an exception when its connection drops, and the
@@ -835,29 +599,17 @@ tables itself to get round it:
   between client and server, and with an answer for a client that stops
   half-way, which has to be given up on promptly for everyone else's sake.
 
-## Parked messages as rows, and the outbox beside them
+## Deferred delivery
 
-The reference parks a message, after its retries are spent, into a stream per
-group and can replay only all of them or the first so many, because a log
-has no random-access removal. Ours are rows, one per group and event, with
-the reason, the attempt count and when it was parked, and a replay moves a
-row to the group's outbox, the shape of a service bus's dead-letter queue:
-what is on the outbox is delivered ahead of the stream, a delivery that
-fails again moves the row back. Shipped: parking, replay of all, of one and
-of all before a number, delivery at once to a consumer connected to the
-serving instance, listing parked and outbox rows, and skipping parked ones.
-Pending: deferred delivery, a retry
-with a delay or a nack that says later, which is an outbox row with a due
-time in the future and a timer in the group's loop, the outbox already
-having the column. Group info carries the parked and outbox
-counts.
+A retry with a delay, or a nack that says later: an outbox row with a due
+time in the future, which the outbox already has the column for, and a timer
+in the group's loop. Parked messages and the outbox are otherwise done
+(`VARIANCES.md`, *Parked messages are rows*; `DESIGN.md`, seam 5).
 
 ## More reads from the read-only connection
 
-Shipped (`DESIGN.md`, seam 8): pages of `$all` and of the virtual streams by
-position are served from the read-only connection as far as the sequence
-head it holds reaches, exactly, and bounded reads of plain streams when the
-host asks, eventually consistent. Pending:
+Beyond the pages of `$all` and of the virtual streams by position, and the
+bounded reads of plain streams a host moves there (`DESIGN.md`, seam 8):
 
 - **Reads by ordinal.** The numbered rows a secondary holds are a prefix of
   the primary's, so a full page from it is the primary's page; what is
@@ -884,7 +636,7 @@ says what a start may do, and a start that cannot bring the database to what
 the server expects fails. The shape wanted later: schema work that does not
 block the server. A `SchemaErrorAction` with two values, fail the start as now,
 or disable, where disable puts the store in a *disabled* state, a state of the
-store unit `DESIGN.md` describes under *A registry of stores*: the management
+store unit *A registry of stores* above describes: the management
 calls answer, the health endpoint says why, the operations that need nothing
 of what is missing still work, and the store is enabled once the schema is
 brought up to date, by a pipeline or by an operator. Migrations themselves
