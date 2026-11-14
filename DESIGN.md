@@ -17,8 +17,9 @@ stores the events in a document and event-sourcing framework on SQL Server
 which. The contract is Nightingale's own, written in the reference client's
 shape because that shape is familiar and proven; the reference's own client
 is not meant to connect to this server, and nothing is owed to its wire
-format, only borrowed from it where useful. The sizing target is the deployment it replaces: three nodes, about
-twenty terabytes, about a hundred services connected over gRPC.
+format, only borrowed from it where useful. The sizing target is the
+deployment it replaces: three nodes, about twenty terabytes, about a hundred
+services connected over gRPC.
 
 ## The shape
 
@@ -114,24 +115,23 @@ append behind.
 
 An append to several streams is the store's too: one session holding every
 stream's append, each under its own expected state, which the store writes
-in one transaction and positions stream by stream, in the order given,
-writing each stream as a command of its own, so the parameter limit binds a
-stream's events and not the total. What it adds is checks on streams the
-append does not write, and those are a second participant,
-`StreamStateChecker`: one statement reading the checked streams' rows under
-an update lock held to the commit, a range lock where a stream has no row,
-so no append to a checked stream, and no stream begun under a checked name,
-can commit between the check and the append's commit. The store has a check
-of a stream without events of its own, but it reads without a lock, which an
-append landing in between would pass. Only an append with checks has the
-participant. When the store refuses, the gateway reads every stream named
-again, in one statement through the mirror, and reports every condition that
-failed rather than the first the store met, the failure path paying for
-what the success path never does. A metadata set in such an append is
-decided as a set of it alone is, on its metadata stream as read just before,
-and written as its events under that stream's expected revision; a reset is
-not a set there, since the value it writes depends on its stream's last
-revision, which in the same commit would include the commit's own events.
+in one transaction, positioned stream by stream and each stream as a command
+of its own, so the parameter limit binds a stream's events and not the
+total. What the gateway adds is checks on streams the append does not write,
+a second participant, `StreamStateChecker`: one statement reading the
+checked streams' rows under an update lock held to the commit, a range lock
+where a stream has no row, so no append to a checked stream, and no stream
+begun under a checked name, can commit between the check and the append's
+commit. The store has a check of a stream without events of its own, but it
+reads without a lock, which an append landing in between would pass. Only an
+append with checks has the participant. When the store refuses, the gateway
+reads every stream named again, in one statement through the mirror, so the
+answer names every condition that failed, the failure path paying for what
+the success path never does. A metadata set in such an append is decided as
+a set of it alone is, on its metadata stream as read just before, and
+written as its events under that stream's expected revision; a reset is not
+a set there. What a caller sees of all this is `VARIANCES.md`, *An append
+to several streams is positioned stream by stream*.
 
 ### 2. The schema is patched, not replaced
 
@@ -149,15 +149,10 @@ applied by hand; they have to be part of the definition the store migrates
 from.
 
 The category is one rule, the same in the column and in process, where the
-router matches live events by it (`StreamNames.CategoryOf`): the name up to
-its first hyphen, when one follows at least one character, and the whole name
-otherwise. A category is never empty, and a stream named just `orders` is in
-category `orders`, so `$ce-orders` and the category filter `orders` hold it.
-The prefix filter `orders-` does not: it is answered by the same index, the
-category's equality, and takes the stream named just the category away again,
-since that name does not begin with the prefix. The rule is not configurable:
-a different rule would rebuild the column and every category index and
-renumber every category ordinal.
+router matches live events by it (`StreamNames.CategoryOf`), held equal by
+an integration test, and not configurable: the rule, the prefix filter
+beside it and why one rule from the start are `VARIANCES.md`, *A name
+without a hyphen is its own category*.
 
 `AugmentedPolecatDatabase` is that seam. It is the store's database class with one
 override: when the store builds its feature schemas, the event-store feature
@@ -215,22 +210,22 @@ exists. Neither tool applies: each writes the statements it would run, and
 the server runs them itself, one batch at a time, the store's per object as
 the tooling would and the migrations' per `GO` of their idempotent script,
 without the transaction the migrations' tooling wraps each migration in. So
-what the report prints is exactly what the apply runs, each batch is logged
-as it starts and when it ends with how long it took, a batch that creates or
-alters an index runs under `Nightingale:IndexMigrationStatementTimeout`, an
-hour by default, rather than the connection's command timeout, and a batch
-that fails is named. Every batch waits for a table's lock no longer than
-`Nightingale:SchemaLockWaitTimeout`, thirty seconds by default, then sleeps
-as long and tries again, six times before giving up: a statement queued for
-a schema lock behind a long reader has every later reader and writer queue
-behind it, so a schema change on a system being served must never wait
-unboundedly, and the sleep between tries lets the queue drain. When online
-index builds arrive (`PENDING.md`), the same setting becomes the index
-statement's own low-priority wait. A connection that fails under the apply, as the store's
-tooling judges such failures, has the whole apply begun again, which is safe
-because both tools apply only what is missing. `StoreSchema` is the one
-place that reports what is pending in both and applies it; startup, the
-default host's switches and a host's own code all go through it.
+what the report prints is exactly what the apply runs, and every batch of
+both halves is logged under `StoreSchema`'s category as it starts and as it
+ends, with how long it took, or with an error naming it. Two timeouts bound
+a batch, `Nightingale:IndexMigrationStatementTimeout` for one that builds an
+index and `Nightingale:SchemaLockWaitTimeout` for every batch's wait on a
+table's lock, tried again after as long a sleep, six times before giving up:
+a statement queued for a schema lock behind a long reader has every later
+reader and writer queue behind it, so a schema change on a system being
+served must never wait unboundedly, and the sleep between tries lets the
+queue drain. When online index builds arrive (`PENDING.md`), the lock
+setting becomes the index statement's own low-priority wait. A connection
+that fails under the apply, as the store's tooling judges such failures, has
+the whole apply begun again, which is safe because both tools apply only
+what is missing. `StoreSchema` is the one place that reports what is pending
+in both and applies it; startup, the default host's switches and a host's
+own code all go through it.
 
 - Every start takes the schema lock, an application lock named for the
   gateway in the database, on a connection of its own that is never pooled,
@@ -266,15 +261,13 @@ default host's switches and a host's own code all go through it.
   The comparison of the store's tables is the slow part of a start the first
   time the database server compiles it, about ten seconds for the eighty
   catalog statements the store's schema library sends, and a fraction of a
-  second after. Every apply records the hash of the store's creation script,
-  which covers the store library, the schema library, the gateway's additions
-  and the settings; with `Nightingale:FastBoot` on, a start that finds its own
-  hash recorded skips the comparison. It trades away noticing a change made
-  to the tables outside the server, so it is off by default and the report
-  and the apply never use it. The integration tests that are not about
-  initialization make their store from the creation script and start with
-  fast boot on; one test holds a store made that way equal to one the server
-  initialized, catalog and recorded rows.
+  second after. `Nightingale:FastBoot` lets a start that finds the hash of
+  its own creation script recorded skip it, at the price of not noticing a
+  change made to the tables outside the server, so it is off by default and
+  the report and the apply never use it. The integration tests that are not
+  about initialization make their store from the creation script and start
+  with fast boot on; one test holds a store made that way equal to one the
+  server initialized, catalog and recorded rows.
 - A database with tables and no record of a store is refused outright, it is
   not ours, unless every table is one the server creates and every one is
   empty but for the migrations' history: that is what a start that died
@@ -282,28 +275,21 @@ default host's switches and a host's own code all go through it.
   the next start in `Initialize` mode initializes it the rest of the way,
   with a warning. A table that is not the server's, or one with rows, still
   refuses.
-- What a start applies is logged under `StoreSchema`'s category, both
-  halves alike: an entry as each batch starts, with the batch, one as it
-  ends, with how long it took, and an error naming the batch when one fails.
 
-The same report and the same work are there without starting the server:
-`--schema-report` on the default host prints what the database needs and
-exits with 1 when it is not current, `--apply-schema` does what `Migrate`
-does and `--initialize` what `Initialize` does, whatever the setting says,
-and a host of its own calls `GetNightingaleSchemaReportAsync`,
+The same report and the same work are there without starting the server,
+through the default host's switches, which the server's README lists, and
+for a host of its own through `GetNightingaleSchemaReportAsync`,
 `ApplyNightingaleSchemaAsync` and `InitializeNightingaleStoreAsync`.
 
 The settings under `Nightingale:Store` are the ones fixed at initialization
 because each shapes the store's tables or where they live: the schema they
-are in, `dbo` unless said otherwise; the collation, which must be a UTF-8 one so
-that a name holds any character, and which decides whether names that differ
-in case are the same name, binary and so case-sensitive unless said otherwise; the partitioning mode, one of none, by
-tenant, which gives each tenant its own sequence, or by the archived flag,
-which keeps deleted streams' events out of every live read, one mode rather
-than one switch per scheme because a table has one partition scheme; and
-whether ordinals are assigned (seam 6). Changing any of them means a new
-database, and the store's property rows record each so a changed
-configuration is refused rather than served.
+are in; the collation, which must be a UTF-8 one so that a name holds any
+character, and which decides whether names that differ in case are the same
+name (`VARIANCES.md`, *Names are compared by the database*); the
+partitioning mode, one mode rather than one switch per scheme because a
+table has one partition scheme; and whether ordinals are assigned (seam 6).
+Changing any of them means a new database, and the store's property rows
+record each so a changed configuration is refused rather than served.
 
 The table is called `StoreProperty` because not every row is a setting: some
 are what the store was initialized with, `Partitioning`, `Collation`, and the
@@ -328,184 +314,175 @@ streams' events between. A virtual stream ends at its own last event, never at
 the sequence head.
 
 Sequence numbers are assigned before a transaction commits, so a forward read
-of `$all` or a subscription must stop at the sequence head, which advances by
-polling; per-stream reads are unaffected because versions are dense under the
-stream lock. The head is the gateway's own, for every store partition and
-every backend: `SequenceTails`, in the server's `Sequencing` namespace, one
-poller per process for each journal, keeps a head per store partition, the
-shared sequence or each served tenant's, and every subscription waits on it rather than polling. The store's
-own high-water agent is not run: its rule gives a gap up after 3 seconds,
-whatever holds it, and where readers read past an open transaction an append
-open longer than that commits below a mark that has passed it, never to be
-delivered by position. The gateway's rule is a `HorizonCheckpoint`: when a gap
-is first seen, the highest position seen at that look and a marker of the
-journal's transaction horizon taken after it; once the horizon has passed the
-marker, every position up to that ceiling is final, those seen committed and
-the missing ones never to be, so the head moves to the ceiling at once, the
-whole span with it, and extends from there; while a transaction that began
-before the marker is open, it waits, however long, and names the transaction
-in a warning after half a minute. A rolled-back append is given up at the next
-look rather than after a threshold. How the checkpoint is judged is the
-`HeadStrategy`, chosen once when the tails start and kept for the life of the
-process, the first the login may read. On SQL Server, first the horizon of each
-store partition, when the login has `VIEW SERVER PERFORMANCE STATE`: a gap is
-held only by a transaction that has written to the database since before the
-marker and holds a lock in the gap's partition of the events or streams table.
-An append writes its stream's row, in its tenant's partition, before it draws a
-position, and keeps the lock to its end, so nothing that could still fill the
-gap is missed, and a transaction in another tenant's partition, or on tables
-that are not the store's, holds nothing. It asks in two stages: the
-database's writers, one cheap read, which settle most gaps, since the writer
-is most often the append a moment from its commit; then the locks, a walk of
-the server's lock manager, only for a marker older than a second while a writer
-older than it is open, one read for every gap held. Next the transaction
-horizon of the whole database, `DBCC OPENTRAN`, with that permission or
-`VIEW DATABASE STATE`, where any open writer holds every head. Otherwise the
-best-effort strategy, a horizon that has always passed with the store's 3
-seconds as its minimum age, over reads that take the events table
-`WITH (READCOMMITTEDLOCK)`, so they wait on an open append's row even under
-read committed snapshot and the wait never starts for it; only a position whose
-row is not yet in the table when the wait ends can be skipped. A look marks
-once for every gap it first sees, and asks the horizon once for every gap it
-holds. None is required: each step down is logged with the grant that would
-avoid it, the last is the store's own rule made safer, and a grant takes effect
-at the next start. The head is kept in the gateway's `SequenceHead` table, a row per
-sequence raised by every instance and lowered by none, its position the row's
-concurrency token: a tail begins there rather than at the start of the table,
-a reader of a replica takes it as the bound of what the replica holds, and the
-time checked moves at every look, so a head that has caught up is told from one
-nobody keeps. An append made through this process does not wait for the poll:
-every stream store pulses `AppendSignal` once its append has committed, and the
-poller waits on that signal between looks. Only the appending instance is
-woken; the others find the event at their next look, again after the store's
-fast polling time, a quarter of a second, while a look left a head short of
-what is already seen past it, a head catching up or a gap waiting on its
-checkpoint, most often an append a moment from its commit; after
-`Nightingale:TailPollingInterval` once every head has caught up, a second by
-default. So a subscriber on another instance than
-the writer is at most that interval behind, measured at a median of half of it
-on a quiet store and the whole of it while events flow, since every look then
-catches up; the setting buys it down, a quarter of a second for four small
-queries a second per instance, and a signal across instances, Service Broker
-or query notifications on SQL Server, was not worth its machinery for a
-quarter of a second that a setting already gives. Under tenant partitioning
-there is no global sequence, each tenant has its own and its own head, so the
-wildcard read across tenants is refused there and the tail is per tenant:
-`ITenantStores` hands a scope its tail beside its stores, the one tail while the
-sequence is shared and the tenant's own under a sequence per tenant. One read
-per look finds which followed sequences moved, and only those are read. A
-backend supplies the reads, `ISequencePositions`, and the horizon; the rules
-are tested in the server against positions and a horizon written by hand.
+of `$all` or a subscription must stop at the sequence head; per-stream reads
+are unaffected because versions are dense under the stream lock. The head is
+the gateway's own, for every store partition and every backend:
+`SequenceTails`, in the server's `Sequencing` namespace, one poller per
+process for each journal, keeps a head per store partition, the shared
+sequence or each served tenant's (seam 9), and every subscription waits on
+it rather than polling. The store's own high-water agent is not run: its
+rule gives a gap up after 3 seconds, whatever holds it, and where readers
+read past an open transaction an append open longer than that commits below
+a mark that has passed it, never to be delivered by position. The gateway's
+rule is a `HorizonCheckpoint`: when a gap is first seen, the highest
+position seen at that look and a marker of the journal's transaction horizon
+taken after it; once the horizon has passed the marker, every position up to
+that ceiling is final, those seen committed and the missing ones never to
+be, so the head moves to the ceiling at once and extends from there; while a
+transaction that began before the marker is open, it waits, however long,
+and names the transaction in a warning after half a minute. A rolled-back
+append is given up at the next look rather than after a threshold. A look
+marks once for every gap it first sees, and asks the horizon once for every
+gap it holds.
+
+How the checkpoint is judged is the `HeadStrategy`, chosen once when the
+tails start and kept for the life of the process, the first the login may
+read, each step down logged with the grant that would avoid it. On SQL
+Server, first the horizon of each store partition, with `VIEW SERVER
+PERFORMANCE STATE`: a gap is held only by a transaction that has written to
+the database since before the marker and holds a lock in the gap's partition
+of the events or streams table. An append writes its stream's row, in its
+tenant's partition, before it draws a position, and keeps the lock to its
+end, so nothing that could still fill the gap is missed, and a transaction
+in another tenant's partition, or on tables that are not the store's, holds
+nothing. It asks in two stages: the database's writers, one cheap read,
+which settle most gaps, since the writer is most often the append a moment
+from its commit; then the locks, a walk of the server's lock manager, only
+for a marker older than a second while a writer older than it is open, one
+read for every gap held. Next the transaction horizon of the whole database,
+`DBCC OPENTRAN`, with that permission or `VIEW DATABASE STATE`, where any
+open writer holds every head. Otherwise best effort, a horizon that has
+always passed with the store's 3 seconds as its minimum age, over reads that
+take the events table `WITH (READCOMMITTEDLOCK)`, so they wait on an open
+append's row even under read committed snapshot and the wait never starts
+for it; only a position whose row is not yet in the table when the wait ends
+can be skipped. None is required: the last is the store's own rule made
+safer, and a grant takes effect at the next start.
+
+The head is kept in the gateway's `SequenceHead` table, a row per sequence
+raised by every instance and lowered by none, its position the row's
+concurrency token: a tail begins there rather than at the start of the
+table, a reader of a replica takes it as the bound of what the replica
+holds, and the time checked moves at every look, so a head that has caught
+up is told from one nobody keeps. An append made through this process does
+not wait for the poll: every stream store pulses `AppendSignal` once its
+append has committed, and the poller waits on that signal between looks.
+Only the appending instance is woken; the others find the event at their
+next look, after the store's fast polling time, a quarter of a second, while
+a look left a head short of what is already seen past it, and after
+`Nightingale:TailPollingInterval` once every head has caught up. So a
+subscriber on another instance than the writer is at most that interval
+behind, measured at a median of half of it on a quiet store and the whole of
+it while events flow, since every look then catches up; the setting buys it
+down, and a signal across instances, Service Broker or query notifications
+on SQL Server, was not worth its machinery for a quarter of a second that a
+setting already gives. One read per look finds which followed sequences
+moved, and only those are read. A backend supplies the reads,
+`ISequencePositions`, and the horizon; the rules are tested in the server
+against positions and a horizon written by hand.
 
 ### 5. A group runs in one place, on a lease
 
 A persistent-subscription group is a checkpoint the server keeps and a set of
-events in flight to its consumers. The checkpoint, the group's settings and its
-parked messages are rows in the gateway's own tables, through the `ISubscriptionGroupStore`
-port and its one implementation, `SubscriptionGroupStore`, over the context of seam 7;
-the in-flight events, their retry counts, their deadlines and which consumer
-holds each are in memory, in `SubscriptionGroupRuntime`, in the one instance
-that holds the group's lease. The runtime is one per group per instance, one
-reader and one dispatcher feeding every consumer connected there by the
-group's strategy, round robin, pinned by a hash of the stream name, or a
-single consumer with the others standing by; `SubscriptionGroupRegistry`
-seats the consumers, the first to arrive starting the runtime under the lease
-and the last to leave stopping it, and `SubscriptionGroupHost` keeps the
-lease renewed, redelivers what timed out and writes how the group stands for
-as long as any consumer is there.
+events in flight to its consumers. The checkpoint, the group's settings and
+its parked messages are rows in the gateway's own tables, through the
+`ISubscriptionGroupStore` port and its one implementation,
+`SubscriptionGroupStore`, over the context of seam 7; the in-flight events,
+their retry counts, their deadlines and which consumer holds each are in
+memory, in `SubscriptionGroupRuntime`, in the one instance that holds the
+group's lease. The runtime is one per group per instance, one reader and one
+dispatcher feeding every consumer connected there by the group's strategy;
+`SubscriptionGroupRegistry` seats the consumers, the first to arrive
+starting the runtime under the lease and the last to leave stopping it, and
+`SubscriptionGroupHost` keeps the lease renewed, redelivers what timed out
+and writes how the group stands for as long as any consumer is there.
+
 The lease is a row that only a free, expired or already owned lease lets an
 instance write, two instances racing for it told apart by the row's
 concurrency tokens, renewed while a consumer stays, released when the last
 leaves. The same tokens fence everything a running group writes: its
 checkpoint, a parked message, a message off the outbox, how it stands. Each
 such write reads the lease, checks it is this instance's and unexpired, and
-saves the lease row with it, unchanged but token-checked, in one transaction,
-so an instance that stalled past its lease while another took the group over
-writes nothing when it wakes; the refused write ends its consumers' calls
-with who owns the group now, the same answer a refused renewal gives. The
-checkpoint never moves back. A group over `$all` may carry a filter, fixed at
-creation; its feed then comes from the store's scan a stretch at a time, and
-a stretch the filter keeps nothing of travels through the feed as a marker,
-after the events before it, so the runtime moves the checkpoint over it once
-everything delivered before it is done, and a consumer coming back reads
-nothing twice. The lease carries the owner's address, derived from what the owner
-listens on unless configured, and an instance asked for a group another runs
-refuses with that address; the client goes there itself, once, and keeps the
-connection, the way the reference client follows a not-leader answer to the
-leader. That is the whole of the cluster: no gossip, no registry, no relay,
-the database the only coordination point. A replay is refused the same way
+saves the lease row with it, unchanged but token-checked, in one
+transaction, so an instance that stalled past its lease while another took
+the group over writes nothing when it wakes; the refused write ends its
+consumers' calls with who owns the group now, the same answer a refused
+renewal gives. The checkpoint never moves back. The lease carries the
+owner's address, derived from what the owner listens on unless configured,
+and an instance asked for a group another runs refuses with that address;
+the client goes there itself, once, and keeps the connection. That is the
+whole of the cluster: no gossip, no registry, no relay, the database the
+only coordination point. A replay, and an update, is refused the same way
 while a consumer is connected elsewhere, since only the instance running the
-group can wake it. A relay inside the cluster, for a client that can reach
-one load-balanced address only, would sit on the same lease-carried address
-and is not built. The checkpoint is the last position every
-delivered event up to which is done: acknowledged, skipped, or parked. Parked
-messages are rows, one per event, so one can be replayed by itself; the
-reference keeps them in a stream and can only replay them together. A parked
-row carries every number its event has, the global position as its key, the
-revision within its stream, and the ordinal when the group is numbered by
-ordinal, so a replay addresses it by whichever number the group speaks. A
-replay is a move, the shape of a service bus's dead-letter queue: the row
-goes from parked to the group's outbox, a message is always in exactly one of
-the two, and a delivery that fails again moves it back with its new reason
-and count. Delivery has the reference's shape: one dispatcher counts each
+group can wake or end its consumers. A relay inside the cluster, for a
+client that can reach one load-balanced address only, would sit on the same
+lease-carried address and is not built.
+
+The checkpoint is the last position every delivered event up to which is
+done: acknowledged, skipped, or parked. A group over `$all` may carry a
+filter, fixed at creation; its feed then comes from the store's scan a
+stretch at a time, and a stretch the filter keeps nothing of travels through
+the feed as a marker, after the events before it, so the runtime moves the
+checkpoint over it once everything delivered before it is done. Parked
+messages are rows, one per event, each carrying every number its event has,
+so one can be replayed by itself and addressed by whichever number the group
+speaks; a replay is a move, the shape of a service bus's dead-letter queue,
+from parked to the group's outbox, a message always in exactly one of the
+two, and a delivery that fails again moves it back with its new reason and
+count. Delivery has the reference's shape: one dispatcher counts each
 consumer's slots and serves a list of retries before the live buffer, so
 what is due on the outbox, queued as retries when the group starts and
-whenever it is woken, which the replay call does through the registry
-when a consumer is connected to the same instance, goes out ahead of the
-next event the stream would have sent; the events already in flight complete
-as they are. A message stays on the outbox while it is in flight, so a wake
-in the meantime never delivers it twice. The outbox row has a due time, so a
-retry with a delay is the same row with a later one.
+whenever it is woken, goes out ahead of the next event the stream would have
+sent; the events already in flight complete as they are. A message stays on
+the outbox while it is in flight, so a wake in the meantime never delivers
+it twice, and the outbox row has a due time, so a retry with a delay is the
+same row with a later one. What a consumer sees of all this is
+`VARIANCES.md`, *Parked messages are rows* and *Competing consumers share a
+group where it runs*.
 
-`IStoreTail` is the seam for liveness. One poller per process for each journal,
-`SequenceTails`, keeps the sequence heads and publishes every advance; each
-subscription waits on it instead of polling the store, so a thousand
-subscribers cost the store one poll per interval. A
-subscription confirms with the head, catches up in pages, says so, then
-delivers whatever each advance brings, through `StreamRouter`, one per
-tenant's store, which reads each advance once for every subscription that
-follows it. It reads where the advanced range's events are once, their
-stream, revision and type without their bodies, matches them in process
-against every followed stream, category and type, and reads the events of
-each stream that matched something; when `$all` is followed, one read of the
-range with its bodies serves everyone instead. So an advance costs reads in
-the number of events, not of subscriptions nor of names followed. A
-subscription follows the router before its catch-up reads, so an event the
-reads do not see yet is one the router brings. A plain stream's subscription
-delivers only in revision order, reading its stream again when the router
-brings something ahead of its next revision; one by position skips what it
-delivered already. A follower that leaves too much unread lapses and catches
-up itself from where it stands, the reference server's own answer to a full
-live buffer. A subscription to `$all` under a filter catches up through the
-store's scan, a stretch of positions at a time, the prefixes the database's
-predicate through the category and type indexes and a regular expression
-matched in process, and then keeps, of what the router brings, what the
-filter keeps; positions examined without an event to deliver are counted,
-and at the filter's interval a checkpoint carries the last of them, so a
-consumer's position advances over a quiet stretch (`VARIANCES.md`,
-*Regular-expression filters*). One router per tenant is the one shape that fits both tenant
-modes: a stream name is per tenant, and under a sequence per tenant so is
-the tail.
+`IStoreTail` is the seam for liveness: each subscription waits on the tails
+of seam 4 instead of polling the store, so a thousand subscribers cost the
+store one poll per interval. A subscription confirms with the head, catches
+up in pages, says so, then delivers whatever each advance brings, through
+`StreamRouter`, one per tenant's store, which reads each advance once for
+every subscription that follows it. It reads where the advanced range's
+events are once, their stream, revision and type without their bodies,
+matches them in process against every followed stream, category and type,
+and reads the events of each stream that matched something; when `$all` is
+followed, one read of the range with its bodies serves everyone instead. So
+an advance costs reads in the number of events, not of subscriptions nor of
+names followed. A subscription follows the router before its catch-up reads,
+so an event the reads do not see yet is one the router brings. A plain
+stream's subscription delivers only in revision order, reading its stream
+again when the router brings something ahead of its next revision; one by
+position skips what it delivered already. A follower that leaves too much
+unread lapses and catches up itself from where it stands, the reference
+server's own answer to a full live buffer. A subscription to `$all` under a
+filter catches up through the store's scan, a stretch of positions at a
+time, and then keeps, of what the router brings, what the filter keeps; the
+filter's predicates, its window and its checkpoints are `VARIANCES.md`,
+*Regular-expression filters*. One router per tenant is the one shape that
+fits both tenant modes: a stream name is per tenant, and under a sequence
+per tenant so is the tail.
 
 Matching in process means the server compares names, which the database
-does everywhere else, so the two must agree. The category of a stream is one
-rule in two places, the store's persisted column and `StreamNames.CategoryOf`,
-held equal by an integration test. The comparison itself comes from the
-database: at every start the initializer reads the database's collation and
-what it ignores, `COLLATIONPROPERTY`'s comparison style and locale, and
-`NameComparison` builds the nearest comparer, which the router matches with.
-Under a binary collation, the default, that is ordinal and exact. Under a
-linguistic one it is the same flags, case, accents, kana, width, on .NET's
-engine rather than SQL Server's, whose weights differ in corners, so there a
-name could match on a read and not live or the reverse; `VARIANCES.md`
-records it. Should that corner ever matter, the exact alternative keeps its
-shape here: hand the store every followed name in one query, a table-valued
-parameter or an `OPENJSON` list joined to the range on stream, category and
-type, and let it return each event with the followed name it matched, spelled
-as the follower spelled it, so the server's part is a lookup and never a
-comparison. One range read per advance, exact under any collation, at the cost
-of a parameter list the in-process match does not need; both could coexist,
+does everywhere else, so the two must agree. The category is one rule in
+both (seam 2). The comparison comes from the database: at every start the
+initializer reads the database's collation and what it ignores,
+`COLLATIONPROPERTY`'s comparison style and locale, and `NameComparison`
+builds the nearest comparer, which the router matches with: ordinal and
+exact under a binary collation, the default, and under a linguistic one the
+same flags on .NET's engine rather than SQL Server's, whose weights differ
+in corners (`VARIANCES.md`, *Names are compared by the database*). Should
+that corner ever matter, the exact alternative keeps its shape here: hand
+the store every followed name in one query, a table-valued parameter or an
+`OPENJSON` list joined to the range on stream, category and type, and let it
+return each event with the followed name it matched, spelled as the follower
+spelled it, so the server's part is a lookup and never a comparison. One
+range read per advance, exact under any collation, at the cost of a
+parameter list the in-process match does not need; both could coexist,
 chosen per host, if a collation ever demands it.
+
 Where now matters, a subscription from the end or a bounded read of `$all`,
 the tail refreshes itself first with one query through the committed rows that
 follow the head without a gap, so an append that has returned is never on the
@@ -565,60 +542,49 @@ event leaves a numbered hole the reader skips and the sequencer never reuses,
 which is what a link whose event is gone does in the reference.
 
 The sequencer is running, disabled or faulted, and a client never waits on
-one that is not running. Disabled is the operator's switch,
-`Nightingale:Store:OrdinalSequencerEnabled`, each instance's own: off, the
-instance runs no host and stops the numbering of every sequence it follows
-with the reason, so every read and subscription by ordinal is refused with
-`SEQUENCER_DISABLED`, not worth a retry, and a subscription already waiting on
-the numbering ends with it; on again, the sequencer goes on from its progress.
-Faulted is a sequence's own: a batch that fails is tried again at the next
-pass while the other sequences go on, and after three failures in a row the
-host stops that sequence's numbering with the cause and records it on the
-sequence's progress row, which the follower on every other instance reads
-with the progress, so every instance refuses with `SEQUENCER_FAULTED`, worth a
-retry after a back-off. The first batch that succeeds lifts the stop and
-clears the row, and a host that takes the lease over clears what an earlier
-holder recorded as it numbers again. One sequencer numbers every ordinal, so
-the system's virtual streams stop and start together; KurrentDB stops its
-system projections one by one (`UNSUPPORTED.md`). The server features call
-reports the state for the caller's sequence.
+one that is not running (`VARIANCES.md`, *The ordinals stop together*).
+Disabled is the operator's switch, `Nightingale:Store:OrdinalSequencerEnabled`,
+each instance's own: off, the instance runs no host and stops the numbering
+of every sequence it follows with the reason; on again, the sequencer goes
+on from its progress. Faulted is a sequence's own: a batch that fails is
+tried again at the next pass while the other sequences go on, and after
+three failures in a row the host stops that sequence's numbering with the
+cause and records it on the sequence's progress row, which the follower on
+every other instance reads with the progress, so every instance refuses
+alike, with `SEQUENCER_FAULTED`, worth a retry after a back-off, where a
+disabled sequencer's `SEQUENCER_DISABLED` is not. The first batch that
+succeeds lifts the stop and clears the row, and a host that takes the lease
+over clears what an earlier holder recorded as it numbers again. The server
+features call reports the state for the caller's sequence.
 
 The numbering is the caller's explicit choice per read or subscription,
-global by default, and the service refuses an ordinal read of `$all` and
-`$de`, and with `ORDINALS_NOT_ENABLED` on a store without the
-feature, before anything is delivered. Under ordinal numbering every number in
-the conversation is an ordinal and each event carries its ordinal beside the
-position it always carries; a consumer keeps the numbering with its checkpoint
-and never resumes under the other. A bounded read is a snapshot of what is
-numbered and needs no head, because a batch is atomic. A subscription waits
-on the tail like every other, then looks for newly numbered rows; while the
-sequencer is behind the head it woke for, it waits for the numbering to reach
-that head rather than for an advance a quiet store would never bring. The
-tail carries the numbering beside the head, as the process knows it: the
-instance that numbers publishes each batch as it commits, and every other
-instance follows the progress rows with one reader per process, on the
-tail's cadence and only while a followed sequence is behind, so no
-subscription polls the store for the sequencer. A
-persistent-subscription group chooses its numbering once, when it is created,
-and keeps it for life: its start, its checkpoint and the key of a parked
-message are all in that numbering, so a consumer resuming the group can never
-mix the two, and one that wants the other numbering creates another group.
-Ordinals are per tenant by construction, the sequencer partitions by tenant and
-the indexes lead with the tenant column, so a read across all tenants has no
-single ordinal sequence and is served under global numbering only. Under a
-sequence per tenant the sequencer walks each tenant's sequence in turn, behind
-that tenant's own mark, with a progress row per tenant, and a batch is one
-tenant's rows, since a position is only unique with its tenant there.
+global by default, refused for `$all` and `$de`, and with
+`ORDINALS_NOT_ENABLED` on a store without the feature, before anything is
+delivered; a persistent-subscription group chooses once, when it is created,
+and keeps it for life, since its start, its checkpoint and the key of a
+parked message are all in that numbering (`VARIANCES.md`, *Positions of
+virtual streams are the global sequence*; *Updating a group changes its
+tunables*). A bounded read is a snapshot of what is numbered and needs no
+head, because a batch is atomic. A subscription waits on the tail like every
+other, then looks for newly numbered rows; while the sequencer is behind the
+head it woke for, it waits for the numbering to reach that head rather than
+for an advance a quiet store would never bring. The tail carries the
+numbering beside the head, as the process knows it: the instance that
+numbers publishes each batch as it commits, and every other instance follows
+the progress rows with one reader per process, on the tail's cadence and
+only while a followed sequence is behind, so no subscription polls the store
+for the sequencer. Ordinals are per tenant by construction, the sequencer
+partitions by tenant and the indexes lead with the tenant column, so a read
+across all tenants has no single ordinal sequence and is served under global
+numbering only. Under a sequence per tenant the sequencer walks each
+tenant's sequence in turn, behind that tenant's own mark, with a progress
+row per tenant, and a batch is one tenant's rows, since a position is only
+unique with its tenant there.
 
-"Ordinal" here means these numbers and nothing else. The store partitioned by
-tenant has a number of its own by the same name, the `tenant_ordinal` column
-and the `ordinal` of its `pc_tenant_partitions` table: the value of the
-partitioning column, which the store gives each tenant, or each bucket of
-tenants, and from which SQL Server's partition function finds the partition.
-The gateway calls it the tenant's partition key, not its partition number,
-which in SQL Server is the slot the function maps a value to (value `k`
-lands in partition number `k + 2` under the store's boundaries). The store's
-column names appear only where the mirror maps them, under a property named
+"Ordinal" means these numbers and nothing else; the store's `tenant_ordinal`
+is a partition key, as `GLOSSARY.md` has it, and value `k` lands in
+partition number `k + 2` under the store's boundaries. The store's column
+names appear only where the mirror maps them, under a property named
 `PartitionKey`, never in a name, message or document of the gateway's own as
 an ordinal. A sequencer is named for what it sequences: `IOrdinalSequencer`
 numbers every ordinal in one batch, and its progress rows are named for the
@@ -643,20 +609,16 @@ instance list every group with its live numbers. It is read only under a
 held lease and nothing decides by it.
 
 The tables the gateway keeps, subscription groups, their parked events and
-outbox, leases, the sequencer's progress and the store's properties, are one EF
-Core context, `NightingaleDbContext`, in the server library. The context owns
-them, under the repository's EF rules for a context that does: a `Guid`
-key named `Id` on each, singular table names, natural keys as unique
-indexes, a check that fails a test when a line is forgotten. A column that
-refers to a row of another table is named for that table, `SubscriptionGroupId`;
-when the table is the gateway's own the column is a foreign key to it, never
-cascading, and the check holds the name and the key to each other. When the
-table is the event store's, the column keeps the name and takes no
-constraint: the store's tables are the store's, an event's id has no unique
-index to refer to there, and the store deletes events of a tombstoned stream
-whatever refers to them. Such a column is listed by name where the check is
-run, and anything that joins to the store's events joins on the position,
-which is their key. Two exceptions are stated where they apply, both on the
+outbox, leases, the sequencer's progress and the store's properties, are one
+EF Core context, `NightingaleDbContext`, in the server library, under the
+repository's EF rules for a context that owns its tables, with the
+conventions check run by a test. A column that refers to a row of the event
+store's tables is named as the rules name one and takes no constraint: the
+store's tables are the store's, an event's id has no unique index to refer
+to there, and the store deletes events of a tombstoned stream whatever
+refers to them. Such a column is listed by name where the check is run, and
+anything that joins to the store's events joins on the position, which is
+their key. Two more exceptions are stated where they apply, both on the
 ordinal links (seam 6), which extend the store's events table rather than
 hold anything of the gateway's own. The table is keyed by what it describes,
 as the store's data is, and carries no id: an id would be one more thing
@@ -667,7 +629,7 @@ a table from the rule of one `Guid` key, and from that rule only. And its
 type is stored as a byte, not a name, because it leads the key and the index
 of every link: its enum carries `[StoredAsNumber]`, the check accepts a
 numeric column only for such an enum and only as its own width, and a test
-pins the numbers, which may never change or be reused. It names no
+pins the numbers, which may never change or be reused. The model names no
 provider and no column type, only lengths and whether a string is Unicode,
 so each backend generates its own migrations from the one model, with
 `dotnet ef migrations add`, into its own project: SQL Server's are in the
@@ -783,13 +745,11 @@ on the primary a moment ago may still be read from the secondary, as it
 would have been by a reader a moment earlier.
 
 Bounded reads of a plain stream stay on the main connection, because a
-client reads what it has just appended and appends on what it read. A host
-may move them, `Nightingale:ReadStreamsFromReadOnlyConnection`: they are
-then eventually consistent, nothing lost or reordered, and the cost is a
-revision conflict where the read was behind, since an append's expected
-revision is always checked on the main connection. Subscriptions, heads,
-ordinal reads, every write, the leases and the sequencer use the main
-connection whatever is configured.
+client reads what it has just appended and appends on what it read; a host
+may move them, `Nightingale:ReadStreamsFromReadOnlyConnection`, at the price
+`VARIANCES.md` gives under *Reading from a replica is the host's choice*.
+Subscriptions, heads, ordinal reads, every write, the leases and the
+sequencer use the main connection whatever is configured.
 
 ### 9. A call is authenticated by scheme and authorized by role and tenant
 
@@ -809,43 +769,40 @@ the transport read, and refuses with the shared exceptions;
 promises, once, for every service. Credentials and tenants are managed the
 same way: `CredentialManager` and `TenantManager` hold every rule and know
 no transport, and `CredentialsService` and `TenantsService` parse the wire,
-hand them the caller, and write the answer back. The directory
-maps a tenant's id to the id the store keeps on its rows, which never
-changes and is kept on first use, and whether it is disabled, which is read
-again on a cadence by `TenantRefresher`; a tenant found disabled has its
-running groups failed here. Credentials are rows with a salted, peppered
-PBKDF2 hash in PHC form (`PasswordHasher`), the built-in administrator is
-configuration, and a verified name and password are remembered per
-instance for a short while, keyed by a digest of what was presented. The
-scope is what a call resolves its stores through: `ITenantStores` hands out
-the stream store, the group store and the tail of the tenant, one of each per
-tenant served, made on first use over the one document store and the one set
-of gateway tables — the Polecat stream store opens every session for its
-tenant, the group store reads and writes its tenant's rows, the tail is the
-process's one tail while the sequence is shared and the tenant's own under a
-sequence per tenant (seam 4), and a running group resolves its own tenant's
-stores and tail from the tenant its row carries, so a disabled tenant stops
-its groups alone. The wildcard resolves
-to a stream store with no tenant, which reads `$all` and the virtual streams
-across tenants through the mirror of the events table and refuses a stream
-name, which is per tenant; it exists while the sequence is shared, which
-`ServerFeatures` says. A host without a backend registers `TenantStores`,
-which hands every scope the one store it has.
+hand them the caller, and write the answer back. The directory maps a
+tenant's id to the id the store keeps on its rows, which never changes and
+is kept on first use, and whether it is disabled, which is read again on a
+cadence by `TenantRefresher`; a tenant found disabled has its running groups
+failed here. Credentials are rows hashed by `PasswordHasher`, the built-in
+administrator is configuration, and a verified name and password are
+remembered per instance for a short while, keyed by a digest of what was
+presented; the scheme, the hash and the roles are `VARIANCES.md`,
+*Authentication is Basic*. The scope is what a call resolves its stores
+through: `ITenantStores` hands out the stream store, the group store and the
+tail of the tenant, one of each per tenant served, made on first use over
+the one document store and the one set of gateway tables: the Polecat stream
+store opens every session for its tenant, the group store reads and writes
+its tenant's rows, the tail is the process's one tail while the sequence is
+shared and the tenant's own under a sequence per tenant (seam 4), and a
+running group resolves its own tenant's stores and tail from the tenant its
+row carries, so a disabled tenant stops its groups alone. The wildcard
+resolves to a stream store with no tenant, which reads `$all` and the
+virtual streams across tenants through the mirror of the events table and
+refuses a stream name, which is per tenant; it exists while the sequence is
+shared, which `ServerFeatures` says. A host without a backend registers
+`TenantStores`, which hands every scope the one store it has.
 
 ### 10. The transport is an adapter over the core
 
 Ports and adapters, with the arrows pointing at the domain and nowhere
-else. `Dracocephalum.Nightingale.Core` is the domain both sides share and
-references no wire package; the compiler holds it to that. The gRPC
-contract is its own assembly beside it, `Protocols.Grpc`: the `.proto`
-files, the generated code, and the conversions between messages and domain
-types. The server's application core — stores, runtime, `Authorizer`, the
-managers — takes a `NightingalePrincipal` and core requests and throws the
-shared exceptions; everything that touches `Grpc.Core` or the generated
-types lives in the `Server.Grpc` namespace, one file per service, each a
-bridge that parses the request, calls the core, and maps the answer or the
-refusal. The client's public surface is the connection string and the
-domain types; its gRPC channel, stubs and status mapping are internal.
+else: `Core` references no wire package, and the compiler holds it to that;
+the contract, the server's transport and the client's channel are the
+assemblies and namespaces *The shape* lists. The server's application core
+takes a `NightingalePrincipal` and core requests and throws the shared
+exceptions; each file of `Server.Grpc` is a bridge, one per service, that
+parses the request, calls the core, and maps the answer or the refusal. The
+client's public surface is the connection string and the domain types; its
+gRPC channel, stubs and status mapping are internal.
 
 The rule for what crosses the seam: small scalars are copied into core
 records, payloads are `ReadOnlyMemory<byte>` views over the bytes the
@@ -889,19 +846,18 @@ transports at once and of a client that can fall back between them.
 
 ## How it is tested
 
-- `*.Tests` projects are unit tests and need nothing running: the service
-  against a strict fake of the port and a tail a test moves by hand, the
-  router against the same, the per-tenant poller against positions a test
-  writes, the append signal on a clock a test moves, the client against a
-  scripted call, the conversions, the marker comparison, the group store and
-  the mirror's queries on the in-memory provider, and the model against the
-  schema feature.
-- `*.Tests.Integration` projects need the local SQL Server and run only with
-  `-p:RunIntegrationTests=true`: the store adapter, the initializer's every
-  path, the two guards above, the wake, proven by a host whose polling
-  interval is minutes long reaching its own append in seconds, and the
-  category rule, the database's column against the server's. Each creates
-  its databases and drops them.
+- `*.Tests` projects, the unit tests: the service against a strict fake of
+  the port and a tail a test moves by hand, the router against the same, the
+  tails against positions and a horizon a test writes, the append signal on
+  a clock a test moves, the client against a scripted call, the conversions,
+  the marker comparison, the group store and the mirror's queries on the
+  in-memory provider, and the model against the schema feature.
+- `*.Tests.Integration` projects, against the local SQL Server: the store
+  adapter, the initializer's every path, the guards the seams above name,
+  the wake, proven by a host whose polling interval is minutes long reaching
+  its own append in seconds, the category rule, the database's column
+  against the server's, and the horizons through the contracts of
+  `Server.Contracts`. Each creates its databases and drops them.
 - `examples/` holds one program per backend that narrates each of its scenarios
   end to end, and a test per scenario that asserts the same run, against one
   database per run that the run's server creates and the run drops, with a
