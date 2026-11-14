@@ -52,8 +52,8 @@ it waits.
 whole, by `Nightingale:Store:OrdinalSequencerEnabled`. While it is disabled,
 or faulted for the sequence a read is in, a read or subscription by ordinal is
 refused with `SEQUENCER_DISABLED` or `SEQUENCER_FAULTED`, and one under way
-ends with it. Reads by position are unaffected: the virtual streams are
-predicates over the events, and always there.
+ends with it. Reads by position are unaffected: a virtual stream is always
+there.
 
 **Why:** a stream that silently stops growing looks like a quiet one; a
 refusal says what is wrong and whether a retry helps. One sequencer keeps
@@ -215,9 +215,10 @@ differ.
   one setting without restating the others. The answer carries all of them
   as they then stand.
 - **The change is made by the instance that runs the group**, which is the
-  one that can end its consumers' calls: another refuses with that
-  instance's address and the client repeats the call there, as for a
-  replay. A group nobody runs is changed by whichever instance was asked.
+  one that can end its consumers' calls; another instance sends the client
+  there, as *A group's info comes from its own instance, and a listing from
+  the store* says. A group nobody runs is changed by whichever instance was
+  asked.
 
 **Why:** moving a group's position in place has to say what becomes of its
 parked messages, its outbox and what is in flight; that is parked in
@@ -265,6 +266,13 @@ instance, which is what the lease says. Four things are worth knowing.
   connection: when it connected, its address, its buffer and what it holds,
   from the instance that runs the group; the stored numbers, which any
   instance answers with, keep the count and the totals only.
+
+**Why:** one running copy of a group is what lets the strategies promise
+anything: a pinned key lands on one consumer, and dispatch to single has one
+consumer, only while one process decides. Several instances dispatching the
+same group would have to agree with each other, which nothing here does; a
+lease per group, the row that says where it runs, costs the store one write a
+renewal (`DESIGN.md`, seam 5).
 
 ## A group's info comes from its own instance, and a listing from the store
 
@@ -323,18 +331,21 @@ it is the relay in `PENDING.md`.
 
 ## A connection string lists instances, not gossip seeds
 
-The client is opened from one connection string in the reference's shape,
-with our scheme: hosts, optional credentials, settings as a query. The
-reference's hosts are seeds from which the client gossips its way to the
-leader; ours has no leader and no gossip, every instance serves every call,
+**Reference:** the hosts of the connection string are seeds from which the
+client gossips its way to the leader, and settings steer that: the node
+preference and the discovery attempts, interval and timeout.
+
+**Nightingale:** the client is opened from one connection string in the
+reference's shape, with our scheme: hosts, optional credentials, settings as
+a query. There is no leader and no gossip, every instance serves every call,
 so several hosts are used in rotation and the `+discover` form resolves one
-DNS name to the instances. The settings that steer gossip, the node
-preference and the discovery attempts, interval and timeout, do not exist
-here and are refused like any key the client does not know, rather than
-accepted and ignored: a string carried over from the reference is edited
-once, and a misspelt key never passes for a default. Credentials in the
-string are read and held, and not sent while the server has no
-authentication.
+DNS name to the instances. The settings that steer gossip do not exist here
+and are refused like any key the client does not know, rather than accepted
+and ignored. Credentials in the string are read and held, and not sent while
+the server has no authentication.
+
+**Why:** a string carried over from the reference is edited once, and a
+misspelt key never passes for a default.
 
 ## Subscription start positions are inclusive
 
@@ -360,20 +371,6 @@ link events to resolve.
 
 **Why:** virtual streams are predicates, so an event is only ever itself.
 
-## A deleted stream reads as one that never existed
-
-**Reference:** a tombstone, its hard delete, leaves a marker: a read of the
-stream fails with a stream-deleted error, and the name can never be used
-again.
-
-**Nightingale:** `Delete` removes the stream and its events permanently, its
-metadata stream with them, and afterwards the name reads as not found and may
-be appended to again; metadata set on it afterwards is a new stream's, where
-the reference refuses every write to the name. The KurrentDB adapter maps the
-reference's tombstone to it.
-
-**Why:** the store's hard delete leaves no marker behind.
-
 ## Forward reads of `$all` stop at the sequence head
 
 **Reference:** a read of `$all` sees an event the moment its append returns.
@@ -385,18 +382,13 @@ sequence head: the position up to which every number is committed or given
 up. A bounded read, and a subscription from the end, bring the head up to date
 first, so an append that has returned is in what they see, with one exception:
 while a lower number's transaction is still open, the head stops before it and
-every higher event waits, until that transaction commits, or rolls back and the
-poller gives the gap up: at its next look where the login may read the
-database's transaction horizon, after the store's threshold of 3 seconds where
-it may not. A subscription's live
-phase follows the poller: an append made through the same instance wakes it,
-so the event is delivered within milliseconds; one made through another
-instance is found at that instance's next look, at most
-`Nightingale:TailPollingInterval` later, a second by default, where the
-reference delivers to every node once its replication has the event. A host
-that wants less sets the interval shorter and pays a small query per interval
-per instance, whatever the number of subscriptions. Per-stream reads are
-unaffected: versions are dense under the stream lock.
+every higher event waits, until that transaction commits or the tail gives
+the gap up; how a tail judges a gap is `DESIGN.md`, seam 4. A subscription's
+live phase follows the tail: an append made through the same instance is
+delivered within milliseconds, one made through another instance at that
+instance's next look, at most `Nightingale:TailPollingInterval` later, where
+the reference delivers to every node once its replication has the event.
+Per-stream reads are unaffected: versions are dense under the stream lock.
 
 **Why:** reading past the sequence head can skip an event forever.
 
@@ -474,14 +466,13 @@ filters them out with `ExcludeSystemEvents`, or reads the secondary index
 metadata streams, which `$all` carries in their place in the sequence. A
 filter that excludes system events does what the reference's does, with less
 to exclude; `$de`, the data events, is `$all` without them, read as a
-stream, and `$mde` is the metadata events alone. Events of archived
-(deleted) streams are excluded from `$all` and from the virtual streams.
-`resolveLinkTos` is accepted and ignored because no link events exist.
+stream, and `$mde` is the metadata events alone. `resolveLinkTos` is
+accepted and ignored because no link events exist.
 
 **Why:** what the reference keeps as events, the store keeps in tables of
 its own; metadata stays an event because it changes what a stream reads, and
 a replay of `$all` needs a change of it in its place among the events around
-it. Hiding archived events is the store's convention on every read.
+it.
 
 ## Archive and delete are off unless the host allows them
 
@@ -510,7 +501,8 @@ the metadata, replacing every other key, and an un-delete with `$tb` at the
 last revision plus one after the recreating append or a set of the metadata.
 An append that expects the stream to exist is refused while it is
 soft-deleted; one that expects no stream is accepted. A tombstone is
-permanent.
+permanent and leaves a marker: a read of the stream fails with a
+stream-deleted error, and the name can never be used again.
 
 **Nightingale:** three calls. `Reset` is the reference's delete, read the
 same way. Its metadata event stores `$tb` as the negative of the revision the
@@ -528,13 +520,19 @@ where the reference marks it deleted until its first append; the stream
 reads as not found either way. `Archive` has no counterpart: the stream and
 its events leave every read, `$all` and the virtual streams included, appends
 fail with a stream-deleted error, and the rows stay; the gateway exposes no
-un-archive. `Delete` is the reference's tombstone, except for the name, above.
+un-archive. `Delete` is the reference's tombstone, except for the name: it
+removes the stream and its events permanently, its metadata stream with them,
+and afterwards the name reads as not found and may be appended to again;
+metadata set on it afterwards is a new stream's, where the reference refuses
+every write to the name. The KurrentDB adapter maps the reference's tombstone
+to it.
 
 **Why:** an append never reads metadata, so no check of it lands on the
 first-tier path, and the store's unique index on a stream's versions is what
 orders an append and a reset on any number of instances. Archive is the
 store's own primitive, kept for a stream that must leave every consumer's
-view while its rows are kept.
+view while its rows are kept. Delete is the store's hard delete, which leaves
+no marker behind.
 
 ## Stream metadata keeps its history and refuses what it cannot honour
 
@@ -580,9 +578,10 @@ and newer versions also limit a single record. There is no limit on how many
 events one append carries, and no way to commit several appends together to
 get past the size: the answer to an append too large is to split it.
 
-**Nightingale:** an append is limited in events: 150 in one append unless the
-host sets `Nightingale:MaxEventsPerAppend`, and never more than the backend
-takes in one write, 190 on SQL Server. One event too many is refused with
+**Nightingale:** an append is limited in events: as many as the host sets in
+`Nightingale:MaxEventsPerAppend`, never more than the backend takes in one
+write; the server README's *Configuration* table has the default and the
+ceiling. One event too many is refused with
 `APPEND_SIZE_EXCEEDED` before anything is written, the limit in the answer,
 and the client raises `AppendSizeExceededException`. Splitting is the
 caller's to do, as it is with the reference: several appends, each under the
@@ -654,6 +653,10 @@ store itself tells a binary event from a JSON one.
 types is a snake-cased class name. A server-side projection written against
 CLR types would have to use the names the clients send.
 
+**Why:** the type is the client's word for what happened, and the gateway
+has no CLR type to derive a name from; storing the name as sent is the only
+way a reader gets back what its writer chose.
+
 ## Regular-expression filters are applied after the read
 
 **Reference:** prefix and regular-expression filters on `$all` run in the
@@ -682,6 +685,13 @@ kept; the reference's `CreateToAll` takes one the same way. The group's
 checkpoint advances over a stretch the filter keeps nothing of, once
 everything delivered before it is acknowledged, so a consumer that comes
 back reads nothing twice.
+
+**Why:** a prefix is a seek the database already has an index for; a pattern
+is not, and handing a client's pattern to the database would make its cost
+and its dialect the engine's. Matched in process without backtracking, over
+names read without their bodies, a pattern costs time linear in the names
+scanned, and the window bounds what one call scans, so no client can make a
+read that does not end.
 
 ## Authentication is Basic, roles are three, and a credential has a tenant
 
@@ -729,6 +739,12 @@ proxies carry it unchanged; what is behind it differs.
 - **No client certificates, and no tokens yet**; the Bearer scheme is
   reserved, see `PENDING.md`.
 
+**Why:** the header is the reference's so that its clients and proxies pass
+unchanged; what is behind it is the gateway's because the store has no users
+and the reference has no tenants. A password in configuration is the one
+thing the API cannot take away, and a credential bound to a tenant is what
+keeps a tenant's consumer from needing a right over any other.
+
 ## Multi-tenancy exists
 
 **Reference:** no tenancy.
@@ -740,3 +756,9 @@ the events table by tenant is an initialization choice,
 `Nightingale:Store:Partitioning` set to `Tenant`; under it each tenant numbers
 its events from its own sequence, so positions, the sequence head and the
 ordinals are per tenant, and the wildcard read across tenants is refused.
+
+**Why:** the store is one database shared by tenants, so tenancy has to be
+decided somewhere, and it is decided once, in the credential and the header,
+rather than in every call. Partitioning trades the wildcard for a sequence a
+tenant owns, which is why it is fixed when the store is initialized, as a
+collation is, and not a setting a restart changes.
