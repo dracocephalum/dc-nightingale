@@ -212,11 +212,12 @@ public sealed class NightingaleClient : IAsyncDisposable
         return new ReadStreamResult(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
 
-    private static async Task CallUnaryAsync(Func<Task> call)
+    /// <summary>Makes a unary call, with the server's failure as the exception the client documents.</summary>
+    private static async Task<T> CallUnaryAsync<T>(Func<Task<T>> call)
     {
         try
         {
-            await call().ConfigureAwait(false);
+            return await call().ConfigureAwait(false);
         }
         catch (RpcException exception)
         {
@@ -323,15 +324,11 @@ public sealed class NightingaleClient : IAsyncDisposable
     public async Task<AppendResult> ResetStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await _streams.ResetAsync(new ResetRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false);
             return new AppendResult(response.Revision, response.Position);
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -382,15 +379,11 @@ public sealed class NightingaleClient : IAsyncDisposable
     public async Task<StreamMetadataResult> GetStreamMetadataAsync(string stream, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await _streams.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = stream }, cancellationToken: cancellationToken).ConfigureAwait(false);
             return new StreamMetadataResult(stream, response.Revision, response.Metadata.ToStreamMetadata(), response.Reset);
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -411,17 +404,13 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentNullException.ThrowIfNull(metadata);
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await _streams.SetStreamMetadataAsync(
                 new SetStreamMetadataRequest { Stream = stream, ExpectedRevision = expected.ToInt64(), Metadata = metadata.ToWire() },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             return new AppendResult(response.Revision, response.Position);
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     /// <summary>Creates a persistent-subscription group over a stream, <c>$all</c> or a virtual stream.</summary>
@@ -473,14 +462,7 @@ public sealed class NightingaleClient : IAsyncDisposable
             request.All = new Google.Protobuf.WellKnownTypes.Empty();
         }
 
-        try
-        {
-            return await ReplayAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
-        {
-            return await ReplayAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
-        }
+        return await CallOwnerAsync(client => ReplayAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -507,14 +489,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         wire.ClearStart();
         wire.Numbering = Protocols.Grpc.V1.Numbering.Unspecified;
         var request = new UpdateRequest { Stream = stream, Group = group, Settings = wire };
-        try
-        {
-            return await UpdateAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
-        {
-            return await UpdateAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
-        }
+        return await CallOwnerAsync(client => UpdateAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -532,14 +507,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
         var request = new ReplayParkedRequest { Stream = stream, Group = group, Before = before };
-        try
-        {
-            return await ReplayAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
-        {
-            return await ReplayAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
-        }
+        return await CallOwnerAsync(client => ReplayAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -597,15 +565,11 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <exception cref="GroupNotFoundException">No such group.</exception>
     public async Task<IReadOnlyList<ParkedMessageInfo>> ListParkedMessagesAsync(string stream, string group, long? after = null, int limit = 100, CancellationToken cancellationToken = default)
     {
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await _persistent.ListParkedAsync(BuildPageRequest(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Messages.Select(message => message.ToParkedMessageInfo()).ToList();
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -621,15 +585,11 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <exception cref="GroupNotFoundException">No such group.</exception>
     public async Task<IReadOnlyList<OutboxMessageInfo>> ListOutboxMessagesAsync(string stream, string group, long? after = null, int limit = 100, CancellationToken cancellationToken = default)
     {
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await _persistent.ListOutboxAsync(BuildPageRequest(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Messages.Select(message => message.ToOutboxMessageInfo()).ToList();
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -648,14 +608,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
         var request = new GetInfoRequest { Stream = stream, Group = group };
-        try
-        {
-            return await InfoAsync(_persistent, request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
-        {
-            return await InfoAsync(GetOwnerClient(address), request, cancellationToken).ConfigureAwait(false);
-        }
+        return await CallOwnerAsync(client => InfoAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -669,15 +622,11 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <returns>The groups, ordered by stream and then by group.</returns>
     public async Task<IReadOnlyList<PersistentSubscriptionInfo>> ListPersistentSubscriptionsAsync(string? stream = null, CancellationToken cancellationToken = default)
     {
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await _persistent.ListAsync(new ListRequest { Stream = stream ?? string.Empty }, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Groups.Select(info => info.ToPersistentSubscriptionInfo()).ToList();
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -699,14 +648,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bufferSize);
-        try
-        {
-            return await OpenAsync(_persistent, stream, group, bufferSize, cancellationToken).ConfigureAwait(false);
-        }
-        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
-        {
-            return await OpenAsync(GetOwnerClient(address), stream, group, bufferSize, cancellationToken).ConfigureAwait(false);
-        }
+        return await CallOwnerAsync(client => OpenAsync(client, stream, group, bufferSize, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -739,15 +681,11 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private static async Task<GroupSettings> UpdateAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, UpdateRequest request, CancellationToken cancellationToken)
     {
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await client.UpdateAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Settings.ToGroupSettings();
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     private static ListMessagesRequest BuildPageRequest(string stream, string group, long? after, int limit)
@@ -766,40 +704,44 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private async Task<int> SkipAsync(SkipParkedRequest request, CancellationToken cancellationToken)
     {
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await _persistent.SkipParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Skipped;
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     private static async Task<PersistentSubscriptionInfo> InfoAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, GetInfoRequest request, CancellationToken cancellationToken)
     {
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await client.GetInfoAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Info.ToPersistentSubscriptionInfo();
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
+        }).ConfigureAwait(false);
     }
 
     private static async Task<int> ReplayAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, ReplayParkedRequest request, CancellationToken cancellationToken)
     {
-        try
+        return await CallUnaryAsync(async () =>
         {
             var response = await client.ReplayParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Replayed;
-        }
-        catch (RpcException exception)
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Makes a call about a group on this client's server and, when that server answers that
+    /// another instance runs the group and says where, once more on that instance.
+    /// </summary>
+    private async Task<T> CallOwnerAsync<T>(Func<PersistentSubscriptions.PersistentSubscriptionsClient, Task<T>> call)
+    {
+        try
         {
-            throw NightingaleErrorMapping.ToException(exception);
+            return await call(_persistent).ConfigureAwait(false);
+        }
+        catch (GroupOwnedElsewhereException elsewhere) when (elsewhere.Address is { } address)
+        {
+            return await call(GetOwnerClient(address)).ConfigureAwait(false);
         }
     }
 
