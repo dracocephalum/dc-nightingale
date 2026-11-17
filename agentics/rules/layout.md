@@ -287,7 +287,9 @@ nothing is said twice:
 `DESIGN.md` is written once the first non-obvious seam exists — a wrapper that
 defeats a framework default, a schema patched rather than replaced, a
 lifecycle the code enforces at startup — and kept short: the seams and the
-reasons, not a restatement of the type comments, which already say what. It
+reasons, not a restatement of the type comments, which already say what;
+which fact goes in which of these documents, and which stays in the code, is
+[`coding/where-facts-live.md`](coding/where-facts-live.md). It
 is the page an agent reads before changing anything, so `AGENTS.md` points at
 it. A repository that mirrors a reference product may add `VARIANCES.md` for
 the deliberate differences and `PENDING.md` for features deferred with their

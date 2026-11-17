@@ -509,7 +509,7 @@ same way. Its metadata event stores `$tb` as the negative of the revision the
 stream continues from, `-6` for a stream reset at revision 5, which one number
 says both that it is reset and where it is truncated; no un-delete event is
 written when an append recreates the stream, since the same number is then a
-plain truncation, and the KurrentDB adapter translates the value for that
+plain truncation, and the planned KurrentDB adapter translates the value for that
 client, `$tb` at its largest while the stream is reset and the revision
 after. A set of the metadata on a reset stream writes the reference's two
 events in one append. An append that expects the stream to exist is accepted
@@ -524,8 +524,8 @@ un-archive. `Delete` is the reference's tombstone, except for the name: it
 removes the stream and its events permanently, its metadata stream with them,
 and afterwards the name reads as not found and may be appended to again;
 metadata set on it afterwards is a new stream's, where the reference refuses
-every write to the name. The KurrentDB adapter maps the reference's tombstone
-to it.
+every write to the name. The planned KurrentDB adapter (`PENDING.md`) maps the
+reference's tombstone to it.
 
 **Why:** an append never reads metadata, so no check of it lands on the
 first-tier path, and the store's unique index on a stream's versions is what

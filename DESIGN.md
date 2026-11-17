@@ -285,7 +285,8 @@ The settings under `Nightingale:Store` are the ones fixed at initialization
 because each shapes the store's tables or where they live: the schema they
 are in; the collation, which must be a UTF-8 one so that a name holds any
 character, and which decides whether names that differ in case are the same
-name (`VARIANCES.md`, *Names are compared by the database*); the
+name (`VARIANCES.md`, *Names are compared by the database, under a UTF-8
+collation*); the
 partitioning mode, one mode rather than one switch per scheme because a
 table has one partition scheme; and whether ordinals are assigned (seam 6).
 Changing any of them means a new database, and the store's property rows
@@ -437,7 +438,8 @@ sent; the events already in flight complete as they are. A message stays on
 the outbox while it is in flight, so a wake in the meantime never delivers
 it twice, and the outbox row has a due time, so a retry with a delay is the
 same row with a later one. What a consumer sees of all this is
-`VARIANCES.md`, *Parked messages are rows* and *Competing consumers share a
+`VARIANCES.md`, *Parked messages are rows: listed, replayed and skipped by
+number* and *Competing consumers share a
 group where it runs*.
 
 `IStoreTail` is the seam for liveness: each subscription waits on the tails
@@ -461,7 +463,8 @@ server's own answer to a full live buffer. A subscription to `$all` under a
 filter catches up through the store's scan, a stretch of positions at a
 time, and then keeps, of what the router brings, what the filter keeps; the
 filter's predicates, its window and its checkpoints are `VARIANCES.md`,
-*Regular-expression filters*. One router per tenant is the one shape that
+*Regular-expression filters are applied after the read*. One router per tenant
+is the one shape that
 fits both tenant modes: a stream name is per tenant, and under a sequence
 per tenant so is the tail.
 
@@ -473,7 +476,8 @@ initializer reads the database's collation and what it ignores,
 builds the nearest comparer, which the router matches with: ordinal and
 exact under a binary collation, the default, and under a linguistic one the
 same flags on .NET's engine rather than SQL Server's, whose weights differ
-in corners (`VARIANCES.md`, *Names are compared by the database*). Should
+in corners (`VARIANCES.md`, *Names are compared by the database, under a UTF-8
+collation*). Should
 that corner ever matter, the exact alternative keeps its shape here: hand
 the store every followed name in one query, a table-valued parameter or an
 `OPENJSON` list joined to the range on stream, category and type, and let it
@@ -542,7 +546,8 @@ event leaves a numbered hole the reader skips and the sequencer never reuses,
 which is what a link whose event is gone does in the reference.
 
 The sequencer is running, disabled or faulted, and a client never waits on
-one that is not running (`VARIANCES.md`, *The ordinals stop together*).
+one that is not running (`VARIANCES.md`, *The ordinals stop together, and
+refuse while stopped*).
 Disabled is the operator's switch, `Nightingale:Store:OrdinalSequencerEnabled`,
 each instance's own: off, the instance runs no host and stops the numbering
 of every sequence it follows with the reason; on again, the sequencer goes
@@ -564,7 +569,8 @@ delivered; a persistent-subscription group chooses once, when it is created,
 and keeps it for life, since its start, its checkpoint and the key of a
 parked message are all in that numbering (`VARIANCES.md`, *Positions of
 virtual streams are the global sequence*; *Updating a group changes its
-tunables*). A bounded read is a snapshot of what is numbered and needs no
+tunables, not where it stands*). A bounded read is a snapshot of what is
+numbered and needs no
 head, because a batch is atomic. A subscription waits on the tail like every
 other, then looks for newly numbered rows; while the sequencer is behind the
 head it woke for, it waits for the numbering to reach that head rather than
@@ -777,7 +783,8 @@ failed here. Credentials are rows hashed by `PasswordHasher`, the built-in
 administrator is configuration, and a verified name and password are
 remembered per instance for a short while, keyed by a digest of what was
 presented; the scheme, the hash and the roles are `VARIANCES.md`,
-*Authentication is Basic*. The scope is what a call resolves its stores
+*Authentication is Basic, roles are three, and a credential has a tenant*. The
+scope is what a call resolves its stores
 through: `ITenantStores` hands out the stream store, the group store and the
 tail of the tenant, one of each per tenant served, made on first use over
 the one document store and the one set of gateway tables: the Polecat stream

@@ -30,8 +30,8 @@ public interface IStoreSettings
     /// <summary>
     /// Gets a value indicating whether the virtual streams are numbered: each event's dense,
     /// zero-based place within its category stream and its event-type stream, assigned after
-    /// commit by one sequencer per cluster. Fixed at initialization because the columns and their
-    /// indexes shape the table.
+    /// commit by one sequencer per cluster, as links of the gateway's own. Fixed at initialization
+    /// because a store initialized without them has no backfill yet.
     /// </summary>
     bool AssignOrdinals { get; }
 }
