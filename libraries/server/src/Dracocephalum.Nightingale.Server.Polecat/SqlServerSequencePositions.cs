@@ -72,9 +72,7 @@ internal sealed class SqlServerSequencePositions(IDbContextFactory<EventsDbConte
     private IQueryable<EventRow> Rows(EventsDbContext context) =>
         lockingReads
 #pragma warning disable EF1003 // The one value is the configured schema's name, quoted as an identifier; a table hint has no parameterized form.
-            ? context.EventRows.FromSqlRaw("SELECT * FROM " + Quote(context.Schema) + ".[pc_events] WITH (READCOMMITTEDLOCK)")
+            ? context.EventRows.FromSqlRaw("SELECT * FROM " + SqlIdentifier.Quote(context.Schema) + ".[pc_events] WITH (READCOMMITTEDLOCK)")
 #pragma warning restore EF1003
             : context.EventRows;
-
-    private static string Quote(string identifier) => "[" + identifier.Replace("]", "]]", StringComparison.Ordinal) + "]";
 }

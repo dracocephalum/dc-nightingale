@@ -58,9 +58,9 @@ public sealed class OrdinalTests : IAsyncLifetime
     {
         // Arrange
         var sut = Store;
-        await sut.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed"), Event("order_paid")], TestContext.Current.CancellationToken);
-        await sut.AppendAsync("shipments-1", StreamState.NoStream, [Event("shipment_dispatched")], TestContext.Current.CancellationToken);
-        var last = await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event("order_placed"), TestEvents.Event("order_paid")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("shipments-1", StreamState.NoStream, [TestEvents.Event("shipment_dispatched")], TestContext.Current.CancellationToken);
+        var last = await sut.AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
         await NumberedAsync(last.Position);
 
         // Act
@@ -87,15 +87,15 @@ public sealed class OrdinalTests : IAsyncLifetime
     {
         // Arrange: three orders numbered 0, 1, 2; the middle one is deleted, then a fourth arrives.
         var sut = Store;
-        await sut.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
-        await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
-        var third = await sut.AppendAsync("orders-3", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
+        var third = await sut.AppendAsync("orders-3", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
         await NumberedAsync(third.Position);
         await sut.ArchiveAsync("orders-2", StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
         var withHole = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
-        var fourth = await sut.AppendAsync("orders-4", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        var fourth = await sut.AppendAsync("orders-4", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
         await NumberedAsync(fourth.Position);
         var afterFourth = await sut.ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
         await sut.DeleteAsync("orders-1", StreamState.Any, TestContext.Current.CancellationToken);
@@ -119,8 +119,8 @@ public sealed class OrdinalTests : IAsyncLifetime
         var sut = Store;
         await sut.AppendAsync("orders-1", StreamState.NoStream, [Correlated("order_placed", "checkout-1"), Correlated("order_paid", "checkout-1")], TestContext.Current.CancellationToken);
         await sut.AppendAsync("shipments-1", StreamState.NoStream, [Correlated("shipment_dispatched", "checkout-1")], TestContext.Current.CancellationToken);
-        await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
-        var last = await sut.AppendAsync("orders-1", StreamState.Any, [Event("order_shipped")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
+        var last = await sut.AppendAsync("orders-1", StreamState.Any, [TestEvents.Event("order_shipped")], TestContext.Current.CancellationToken);
         await NumberedAsync(last.Position);
         var workflow = new VirtualStreamName(VirtualStreamKind.Correlation, "checkout-1");
         var streams = new VirtualStreamName(VirtualStreamKind.Streams, string.Empty);
@@ -156,14 +156,14 @@ public sealed class OrdinalTests : IAsyncLifetime
         // Arrange: three order streams listed 0, 1, 2; the middle one is deleted and begun again.
         var sut = Store;
         var orderStreams = new VirtualStreamName(VirtualStreamKind.CategoryStreams, "orders");
-        await sut.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
-        await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
-        var third = await sut.AppendAsync("orders-3", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
+        var third = await sut.AppendAsync("orders-3", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
         await NumberedAsync(third.Position);
         await sut.DeleteAsync("orders-2", StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
-        var again = await sut.AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        var again = await sut.AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
         await NumberedAsync(again.Position);
         var listed = await sut.ReadByOrdinalAsync(orderStreams, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
         var bounds = await sut.OrdinalHeadAsync(orderStreams, TestContext.Current.CancellationToken);
@@ -212,13 +212,13 @@ public sealed class OrdinalTests : IAsyncLifetime
         {
             using var first = await TestDatabases.StartProvisionedHostAsync(name, Ordinals);
             using var second = await TestDatabases.StartHostAsync(name, TestDatabases.FastBoot(Ordinals));
-            var before = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed"), Event("order_paid")], TestContext.Current.CancellationToken);
+            var before = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event("order_placed"), TestEvents.Event("order_paid")], TestContext.Current.CancellationToken);
             await NumberedAsync(first.Tail(), before.Position);
 
             // Act: the first instance stops, by itself numbering or not; whatever is appended
             // from then on is the second's to number.
             await first.StopAsync(TestContext.Current.CancellationToken);
-            var after = await second.Store().AppendAsync("orders-2", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+            var after = await second.Store().AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
             await NumberedAsync(second.Tail(), after.Position);
             var byCategory = await second.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
             var byType = await second.Store().ReadByOrdinalAsync(Placed, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
@@ -263,7 +263,7 @@ public sealed class OrdinalTests : IAsyncLifetime
             using var host = await TestDatabases.StartHostAsync(name, TestDatabases.FastBoot(Ordinals));
 
             // Act
-            var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+            var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
             var whileHeld = host.Tail().Numbered;
             await NumberedAsync(host.Tail(), appended.Position);
             var byCategory = await host.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
@@ -288,7 +288,7 @@ public sealed class OrdinalTests : IAsyncLifetime
         try
         {
             // Act: appended through the first instance, numbered by it, and seen by the second.
-            var appended = await Store.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+            var appended = await Store.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
             await NumberedAsync(appended.Position);
             var theirs = await NumberedAsync(other.Tail(), appended.Position);
             var byCategory = await other.Store().ReadByOrdinalAsync(Orders, Direction.Forwards, 0, 10, TestContext.Current.CancellationToken);
@@ -309,9 +309,9 @@ public sealed class OrdinalTests : IAsyncLifetime
         // Arrange: an append the database refuses inside the insert, an event type longer than its
         // column, takes position 2 and never commits it; the next append lands at 3.
         var sut = Store;
-        await sut.AppendAsync("orders-1", StreamState.NoStream, [Event("order_placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event("order_placed")], TestContext.Current.CancellationToken);
         await Should.ThrowAsync<ValueTooLongException>(async () => await sut.AppendAsync("orders-1", StreamState.StreamRevision(0), [new EventData(Guid.NewGuid(), new string('x', 501), "{}"u8.ToArray())], TestContext.Current.CancellationToken));
-        var pastTheGap = await sut.AppendAsync("shipments-1", StreamState.NoStream, [Event("shipment_sent"), Event("shipment_sent")], TestContext.Current.CancellationToken);
+        var pastTheGap = await sut.AppendAsync("shipments-1", StreamState.NoStream, [TestEvents.Event("shipment_sent"), TestEvents.Event("shipment_sent")], TestContext.Current.CancellationToken);
 
         // Act
         await NumberedAsync(pastTheGap.Position);
@@ -328,8 +328,6 @@ public sealed class OrdinalTests : IAsyncLifetime
     }
 
     private IStreamStore Store => _host!.Store();
-
-    private static EventData Event(string type) => new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     private static EventData Correlated(string type, string correlationId) =>
         new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"), new JsonObject { [MetadataKeys.CorrelationId] = correlationId });

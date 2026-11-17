@@ -22,11 +22,11 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // Arrange: one stream that exists, one that does not.
         var sut = database.Store;
         var (orders, payments) = (NewName("orders"), NewName("payments"));
-        await sut.AppendAsync(orders, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(orders, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         var results = await sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(payments, StreamState.NoStream, [Event(), Event()]), new StreamAppend.OfEvents(orders, StreamState.StreamRevision(0), [Event()])],
+            [new StreamAppend.OfEvents(payments, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()]), new StreamAppend.OfEvents(orders, StreamState.StreamRevision(0), [TestEvents.Event()])],
             [],
             TestContext.Current.CancellationToken);
         var paid = (await sut.ReadAsync(payments, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldNotBeNull().Events;
@@ -51,7 +51,7 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // here, and the limit must then bind the total.
         var sut = database.Store;
         var (orders, payments) = (NewName("orders"), NewName("payments"));
-        List<EventData> Full() => Enumerable.Range(0, PolecatStreamStore.MaxEventsPerAppend).Select(_ => Event()).ToList();
+        List<EventData> Full() => Enumerable.Range(0, PolecatStreamStore.MaxEventsPerAppend).Select(_ => TestEvents.Event()).ToList();
 
         // Act
         var results = await sut.AppendToStreamsAsync(
@@ -70,15 +70,15 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // that is fine.
         var sut = database.Store;
         var (behind, existing, fine) = (NewName("orders"), NewName("orders"), NewName("orders"));
-        await sut.AppendAsync(behind, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
-        await sut.AppendAsync(existing, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(behind, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(existing, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         var refused = await Should.ThrowAsync<StreamConflictsException>(() => sut.AppendToStreamsAsync(
             [
-                new StreamAppend.OfEvents(fine, StreamState.NoStream, [Event()]),
-                new StreamAppend.OfEvents(behind, StreamState.StreamRevision(0), [Event()]),
-                new StreamAppend.OfEvents(existing, StreamState.NoStream, [Event()]),
+                new StreamAppend.OfEvents(fine, StreamState.NoStream, [TestEvents.Event()]),
+                new StreamAppend.OfEvents(behind, StreamState.StreamRevision(0), [TestEvents.Event()]),
+                new StreamAppend.OfEvents(existing, StreamState.NoStream, [TestEvents.Event()]),
             ],
             [],
             TestContext.Current.CancellationToken));
@@ -94,15 +94,15 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // Arrange: a ledger at revision 0, and a name nobody has used.
         var sut = database.Store;
         var (ledger, unused, written) = (NewName("ledger"), NewName("ledger"), NewName("orders"));
-        await sut.AppendAsync(ledger, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(ledger, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         var holding = await sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(written, StreamState.NoStream, [Event()])],
+            [new StreamAppend.OfEvents(written, StreamState.NoStream, [TestEvents.Event()])],
             [new StreamCheck(ledger, StreamState.StreamRevision(0)), new StreamCheck(unused, StreamState.NoStream)],
             TestContext.Current.CancellationToken);
         var refused = await Should.ThrowAsync<StreamConflictsException>(() => sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(written, StreamState.StreamRevision(0), [Event()])],
+            [new StreamAppend.OfEvents(written, StreamState.StreamRevision(0), [TestEvents.Event()])],
             [new StreamCheck(ledger, StreamState.StreamExists), new StreamCheck(unused, StreamState.StreamExists), new StreamCheck(ledger + "-x", StreamState.StreamRevision(4))],
             TestContext.Current.CancellationToken));
 
@@ -120,7 +120,7 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // Arrange: another transaction holds the checked stream's row as an append to it would.
         var sut = database.Store;
         var (ledger, written) = (NewName("ledger"), NewName("orders"));
-        await sut.AppendAsync(ledger, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(ledger, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await using var other = new SqlConnection(database.ConnectionString);
         await other.OpenAsync(TestContext.Current.CancellationToken);
         await using var transaction = (SqlTransaction)await other.BeginTransactionAsync(TestContext.Current.CancellationToken);
@@ -133,7 +133,7 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
 
         // Act: the append waits for the row; released, it goes through.
         var appending = sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(written, StreamState.NoStream, [Event()])],
+            [new StreamAppend.OfEvents(written, StreamState.NoStream, [TestEvents.Event()])],
             [new StreamCheck(ledger, StreamState.StreamRevision(0))],
             TestContext.Current.CancellationToken);
         var waited = await Task.WhenAny(appending, Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken)) != appending;
@@ -155,7 +155,7 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
 
         // Act: the metadata keeps two events, given before the three events it applies to.
         var results = await sut.AppendToStreamsAsync(
-            [new StreamAppend.OfMetadata(orders, StreamState.Any, new StreamMetadata { MaxCount = 2 }), new StreamAppend.OfEvents(orders, StreamState.NoStream, [Event(), Event(), Event()])],
+            [new StreamAppend.OfMetadata(orders, StreamState.Any, new StreamMetadata { MaxCount = 2 }), new StreamAppend.OfEvents(orders, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event(), TestEvents.Event()])],
             [],
             TestContext.Current.CancellationToken);
         var read = (await sut.ReadAsync(orders, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldNotBeNull();
@@ -173,12 +173,12 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // Arrange: a stream reset at revision 1, which continues from 2.
         var sut = database.Store;
         var (orders, payments) = (NewName("orders"), NewName("payments"));
-        await sut.AppendAsync(orders, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(orders, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.ResetAsync(orders, StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
         var results = await sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(payments, StreamState.NoStream, [Event()]), new StreamAppend.OfEvents(orders, StreamState.NoStream, [Event()])],
+            [new StreamAppend.OfEvents(payments, StreamState.NoStream, [TestEvents.Event()]), new StreamAppend.OfEvents(orders, StreamState.NoStream, [TestEvents.Event()])],
             [],
             TestContext.Current.CancellationToken);
         var read = (await sut.ReadAsync(orders, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldNotBeNull();
@@ -194,8 +194,8 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // Arrange: an answer lost on the way, so the caller sends the same events again.
         var sut = database.Store;
         var (orders, payments) = (NewName("orders"), NewName("payments"));
-        await sut.AppendAsync(orders, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        StreamAppend[] appends = [new StreamAppend.OfEvents(orders, StreamState.StreamRevision(0), [Event(), Event()]), new StreamAppend.OfEvents(payments, StreamState.NoStream, [Event()])];
+        await sut.AppendAsync(orders, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        StreamAppend[] appends = [new StreamAppend.OfEvents(orders, StreamState.StreamRevision(0), [TestEvents.Event(), TestEvents.Event()]), new StreamAppend.OfEvents(payments, StreamState.NoStream, [TestEvents.Event()])];
         var first = await sut.AppendToStreamsAsync(appends, [], TestContext.Current.CancellationToken);
 
         // Act
@@ -212,12 +212,12 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
         // Arrange
         var sut = database.Store;
         var (archived, fine) = (NewName("orders"), NewName("orders"));
-        await sut.AppendAsync(archived, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(archived, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.ArchiveAsync(archived, StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
         var refused = await Should.ThrowAsync<StreamDeletedException>(() => sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(fine, StreamState.NoStream, [Event()]), new StreamAppend.OfEvents(archived, StreamState.Any, [Event()])],
+            [new StreamAppend.OfEvents(fine, StreamState.NoStream, [TestEvents.Event()]), new StreamAppend.OfEvents(archived, StreamState.Any, [TestEvents.Event()])],
             [],
             TestContext.Current.CancellationToken));
 
@@ -235,7 +235,7 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
 
         // Act
         await sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(orders, StreamState.NoStream, [Event() with { BinaryData = new byte[] { 1 } }]), new StreamAppend.OfEvents(payments, StreamState.NoStream, [Event(), Event() with { BinaryData = new byte[] { 2, 2 } }])],
+            [new StreamAppend.OfEvents(orders, StreamState.NoStream, [TestEvents.Event() with { BinaryData = new byte[] { 1 } }]), new StreamAppend.OfEvents(payments, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event() with { BinaryData = new byte[] { 2, 2 } }])],
             [],
             TestContext.Current.CancellationToken);
         var ordered = (await sut.ReadAsync(orders, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldNotBeNull().Events;
@@ -255,7 +255,7 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
 
         // Act
         var refused = await Should.ThrowAsync<ArgumentException>(() => sut.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents(orders, StreamState.NoStream, [Event()]), new StreamAppend.OfEvents(orders, StreamState.Any, [Event()])],
+            [new StreamAppend.OfEvents(orders, StreamState.NoStream, [TestEvents.Event()]), new StreamAppend.OfEvents(orders, StreamState.Any, [TestEvents.Event()])],
             [],
             TestContext.Current.CancellationToken));
 
@@ -265,6 +265,4 @@ public sealed class AppendToStreamsTests(SqlServerTestDatabase database)
     }
 
     private static string NewName(string category) => category + "-" + Guid.NewGuid().ToString("N");
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }

@@ -49,8 +49,6 @@ internal sealed class BinaryDataWriter(string schema, string tenantId, string st
             ? segment.Array
             : bytes.ToArray();
 
-    private static string Quote(string identifier) => "[" + identifier.Replace("]", "]]", StringComparison.Ordinal) + "]";
-
     private string BuildSql()
     {
         // One statement whatever the number of events. Each row is found by its position, which
@@ -58,7 +56,7 @@ internal sealed class BinaryDataWriter(string schema, string tenantId, string st
         // key, in the tenant's partition on a store partitioned by tenant; its id, tenant and
         // stream are checked on the row found.
         var sql = new StringBuilder();
-        sql.Append(CultureInfo.InvariantCulture, $"UPDATE e SET bdata = v.bdata FROM {Quote(schema)}.[pc_events] AS e JOIN (VALUES ");
+        sql.Append(CultureInfo.InvariantCulture, $"UPDATE e SET bdata = v.bdata FROM {SqlIdentifier.Quote(schema)}.[pc_events] AS e JOIN (VALUES ");
         for (var i = 0; i < events.Count; i++)
         {
             sql.Append(CultureInfo.InvariantCulture, $"{(i == 0 ? string.Empty : ", ")}(@seq{i}, @id{i}, @bdata{i})");
@@ -67,7 +65,7 @@ internal sealed class BinaryDataWriter(string schema, string tenantId, string st
         sql.Append(") AS v (seq_id, id, bdata) ON e.seq_id = v.seq_id AND e.id = v.id WHERE e.tenant_id = @tenant AND e.stream_id = @stream AND e.is_archived = 0");
         if (partitionedByTenant)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" AND e.[{Data.EventsDbContext.TenantPartitionColumn}] = (SELECT p.ordinal FROM {Quote(schema)}.[pc_tenant_partitions] AS p WHERE p.tenant_id = @tenant)");
+            sql.Append(CultureInfo.InvariantCulture, $" AND e.[{Data.EventsDbContext.TenantPartitionColumn}] = (SELECT p.ordinal FROM {SqlIdentifier.Quote(schema)}.[pc_tenant_partitions] AS p WHERE p.tenant_id = @tenant)");
         }
 
         sql.Append(CultureInfo.InvariantCulture, $"; IF @@ROWCOUNT <> {events.Count} THROW {RowsNotFound}, 'The binary data of an append found fewer of its rows than it has events; the append is rolled back.', 1;");

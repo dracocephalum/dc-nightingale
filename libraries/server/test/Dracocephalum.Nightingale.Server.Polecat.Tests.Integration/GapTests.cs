@@ -27,11 +27,11 @@ public sealed class GapTests
             var stores = host.Services.GetRequiredService<ITenantStores>();
             var tail = stores.GetTail(TenantScope.Default);
             var store = stores.GetStreams(TenantScope.Default);
-            var before = await store.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            var before = await store.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
             await TestDatabases.ExecuteAsync(name, "DECLARE @reseed nvarchar(200) = N'DBCC CHECKIDENT (''dbo.pc_events'', RESEED, ' + CAST(CAST(IDENT_CURRENT('dbo.pc_events') AS bigint) + 5 AS nvarchar(20)) + N')'; EXEC (@reseed);");
 
             // Act
-            var after = await store.AppendAsync("orders-2", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            var after = await store.AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             var head = tail.Head;
@@ -55,6 +55,4 @@ public sealed class GapTests
             await TestDatabases.DropAsync(name);
         }
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }

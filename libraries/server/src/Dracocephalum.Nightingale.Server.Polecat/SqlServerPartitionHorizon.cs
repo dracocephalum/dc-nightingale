@@ -72,11 +72,11 @@ internal sealed class SqlServerPartitionHorizon : ITransactionHorizon
     public static SqlServerPartitionHorizon OverStore(string connectionString, string schema, bool partitionedByTenant)
     {
         ArgumentException.ThrowIfNullOrEmpty(schema);
-        WatchedTable Watch(string table) => new(Quote(schema) + "." + Quote(table), partitionedByTenant ? "pf_" + table + "_tenant_ordinal" : null);
+        WatchedTable Watch(string table) => new(SqlIdentifier.Quote(schema) + "." + SqlIdentifier.Quote(table), partitionedByTenant ? "pf_" + table + "_tenant_ordinal" : null);
         return new SqlServerPartitionHorizon(
             SqlServerHorizon.Connect(connectionString),
             [Watch("pc_streams"), Watch("pc_events")],
-            partitionedByTenant ? Quote(schema) + ".[pc_tenant_partitions]" : null);
+            partitionedByTenant ? SqlIdentifier.Quote(schema) + ".[pc_tenant_partitions]" : null);
     }
 
     /// <inheritdoc/>
@@ -190,7 +190,7 @@ internal sealed class SqlServerPartitionHorizon : ITransactionHorizon
         for (var i = 0; i < tables.Count; i++)
         {
             sql.Append(tables[i].PartitionFunction is { } function
-                ? $", CASE WHEN r.ordinal IS NULL THEN NULL ELSE $PARTITION.{Quote(function)}(r.ordinal) END"
+                ? $", CASE WHEN r.ordinal IS NULL THEN NULL ELSE $PARTITION.{SqlIdentifier.Quote(function)}(r.ordinal) END"
                 : ", NULL");
         }
 
@@ -206,8 +206,6 @@ internal sealed class SqlServerPartitionHorizon : ITransactionHorizon
             .Append(" JOIN (").Append(WritersWithStart).Append(") w ON w.transaction_id = h.owner;");
         return sql.ToString();
     }
-
-    private static string Quote(string identifier) => "[" + identifier.Replace("]", "]]", StringComparison.Ordinal) + "]";
 
     private async Task<(DateTime Now, HorizonHolder? Oldest)> ReadOldestWriterAsync(CancellationToken cancellationToken)
     {

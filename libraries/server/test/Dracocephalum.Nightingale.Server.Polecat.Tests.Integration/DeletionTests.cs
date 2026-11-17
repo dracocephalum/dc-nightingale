@@ -12,22 +12,20 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class DeletionTests(SqlServerTestDatabase database)
 {
-    private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
-
     [Fact]
     public async Task Archive_ShouldHideTheStreamFromEveryReadAndRefuseAppends()
     {
         // Arrange
         var (stream, category) = Names();
         var sut = database.Store;
-        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         await sut.ArchiveAsync(stream, StreamState.StreamRevision(1), TestContext.Current.CancellationToken);
 
         // Assert
         await Should.ThrowAsync<StreamDeletedException>(() => sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken));
-        await Should.ThrowAsync<StreamDeletedException>(() => sut.AppendAsync(stream, StreamState.Any, [Event()], TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<StreamDeletedException>(() => sut.AppendAsync(stream, StreamState.Any, [TestEvents.Event()], TestContext.Current.CancellationToken));
         (await sut.ReadAllAsync(Direction.Forwards, appended.Position - 1, appended.Position, 10, TestContext.Current.CancellationToken)).ShouldBeEmpty();
         (await sut.VirtualHeadAsync(new VirtualStreamName(VirtualStreamKind.Category, category), appended.Position, TestContext.Current.CancellationToken)).ShouldBeNull();
         await Should.ThrowAsync<StreamDeletedException>(() => sut.ArchiveAsync(stream, StreamState.Any, TestContext.Current.CancellationToken));
@@ -39,7 +37,7 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
         // Arrange
         var (stream, _) = Names();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         var conflict = await Should.ThrowAsync<RevisionConflictException>(() => sut.ArchiveAsync(stream, StreamState.StreamRevision(0), TestContext.Current.CancellationToken));
@@ -68,7 +66,7 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
         // Arrange: a deleted stream can be tombstoned too.
         var (stream, _) = Names();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.ArchiveAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
@@ -76,7 +74,7 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
 
         // Assert
         (await sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken)).ShouldBeNull();
-        var revived = await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var revived = await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         revived.Revision.ShouldBe(0);
     }
 
@@ -85,6 +83,4 @@ public sealed class DeletionTests(SqlServerTestDatabase database)
         var category = "del" + Guid.NewGuid().ToString("N")[..8];
         return (category + "-1", category);
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
 }

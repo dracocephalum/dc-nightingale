@@ -39,7 +39,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -100,7 +100,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
 
@@ -175,7 +175,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -192,7 +192,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -231,7 +231,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var stream = request.Stream.Length == 0 ? null : RequireReadableStreamName(request.Stream);
         var response = new ListResponse();
@@ -258,7 +258,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var stream = RequireReadableStreamName(request.Stream);
         var group = RequireGroupName(request.Group);
@@ -302,7 +302,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         var by = GetNumberKind(definition);
@@ -329,7 +329,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         var by = GetNumberKind(definition);
@@ -356,7 +356,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.Ops, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         // Parked messages are rows and no running group holds them in memory, so any instance
         // removes them; there is no consumer to wake and nowhere to send the caller.
@@ -378,7 +378,7 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
         ArgumentNullException.ThrowIfNull(requestStream);
         ArgumentNullException.ThrowIfNull(responseStream);
         ArgumentNullException.ThrowIfNull(context);
-        var groups = stores.GetGroups(await context.AuthorizeAsync(CredentialRole.User, TenantAccess.Write).ConfigureAwait(false));
+        var groups = await AuthorizeGroupsAsync(context, CredentialRole.User).ConfigureAwait(false);
 
         var cancellationToken = context.CancellationToken;
         if (!await requestStream.MoveNext(cancellationToken).ConfigureAwait(false)
@@ -787,6 +787,10 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
             }
         }
     }
+
+    /// <summary>Authorizes the caller to write in its tenant under the role the call requires, ops to manage a group and user to consume one, and returns that tenant's group store.</summary>
+    private async Task<ISubscriptionGroupStore> AuthorizeGroupsAsync(ServerCallContext context, CredentialRole role) =>
+        stores.GetGroups(await context.AuthorizeAsync(role, TenantAccess.Write).ConfigureAwait(false));
 
     /// <summary>The stream store of a group's own tenant, for its runtime; the call that started it may be another tenant's admin.</summary>
     private IStreamStore GetStreams(SubscriptionGroupDefinition definition) => stores.GetStreams(TenantScope.OfStoreTenant(definition.TenantId));

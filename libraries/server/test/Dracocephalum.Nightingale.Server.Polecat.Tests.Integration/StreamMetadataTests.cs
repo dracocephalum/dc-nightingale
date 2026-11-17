@@ -17,8 +17,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class StreamMetadataTests(SqlServerTestDatabase database)
 {
-    private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
-
     [Fact]
     public async Task Set_BeforeTheStreamExists_ShouldBeReadBackWithItsRevisionAndReplacedAsAWhole()
     {
@@ -51,7 +49,7 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
     {
         // Arrange
         var stream = NewStream();
-        await database.Store.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await database.Store.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         var read = await database.Store.GetStreamMetadataAsync(stream, TestContext.Current.CancellationToken);
@@ -85,7 +83,7 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         var set = await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 5 }, TestContext.Current.CancellationToken);
         var data = new VirtualStreamName(VirtualStreamKind.DataEvents, string.Empty);
         StreamNames.TryParseVirtual(StreamNames.MetadataEvents, out var metadata).ShouldBeTrue();
@@ -111,7 +109,7 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 3 }, TestContext.Current.CancellationToken);
 
         // Act
@@ -127,7 +125,7 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 3 }, TestContext.Current.CancellationToken);
 
         // Act
@@ -146,7 +144,7 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
         // Arrange: six events; four kept by count would start at 2, the truncation at 3 is later.
         var stream = NewStream();
         var sut = database.Store;
-        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event(), Event(), Event(), Event(), Event()], TestContext.Current.CancellationToken);
+        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event(), TestEvents.Event(), TestEvents.Event(), TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 4, TruncateBefore = 3 }, TestContext.Current.CancellationToken);
         var category = new VirtualStreamName(VirtualStreamKind.Category, stream[..stream.IndexOf('-', StringComparison.Ordinal)]);
 
@@ -172,7 +170,7 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { TruncateBefore = 100 }, TestContext.Current.CancellationToken);
 
         // Act
@@ -190,7 +188,7 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
         // clock, and that clock is what decides.
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event(), Event(), Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event(), TestEvents.Event(), TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await using (var connection = new SqlConnection(database.ConnectionString))
         {
             await connection.OpenAsync(TestContext.Current.CancellationToken);
@@ -211,6 +209,4 @@ public sealed class StreamMetadataTests(SqlServerTestDatabase database)
     }
 
     private static string NewStream() => "meta" + Guid.NewGuid().ToString("N")[..8] + "-1";
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
 }

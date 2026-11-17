@@ -36,8 +36,8 @@ public sealed class StreamRouterTests
 
             // Act: the other tenant's event of the name, then one of my own tenant on another
             // stream, so that my router is known to have routed past both.
-            var appended = await stores.GetStreams(acme).AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-            var marker = await stores.GetStreams(TenantScope.Default).AppendAsync("shipments-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            var appended = await stores.GetStreams(acme).AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+            var marker = await stores.GetStreams(TenantScope.Default).AppendAsync("shipments-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
             var toTheirs = await theirs.Events.ReadAsync(timeout.Token);
@@ -60,6 +60,4 @@ public sealed class StreamRouterTests
             await TestDatabases.DropAsync(name);
         }
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }

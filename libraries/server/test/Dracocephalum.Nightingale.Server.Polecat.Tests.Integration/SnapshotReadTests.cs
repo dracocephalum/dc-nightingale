@@ -59,7 +59,7 @@ public sealed class SnapshotReadTests : IAsyncLifetime
         // Arrange: an append held open, then one committed above it.
         var tail = Host.Tail();
         await using var held = await HoldAppendAsync("held-1");
-        var above = await Host.Store().AppendAsync("held-2", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var above = await Host.Store().AppendAsync("held-2", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         await Task.Delay(HeldFor, TestContext.Current.CancellationToken);
@@ -79,7 +79,7 @@ public sealed class SnapshotReadTests : IAsyncLifetime
         // Arrange
         var tail = Host.Tail();
         var held = await HoldAppendAsync("held-1");
-        var above = await Host.Store().AppendAsync("held-2", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var above = await Host.Store().AppendAsync("held-2", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         var clock = Stopwatch.StartNew();
@@ -106,7 +106,7 @@ public sealed class SnapshotReadTests : IAsyncLifetime
         var tail = tails.For(SequenceKey.Shared);
         await tails.StartAsync(TestContext.Current.CancellationToken);
         await using var held = await HoldAppendAsync("held-1");
-        var above = await Host.Store().AppendAsync("held-2", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var above = await Host.Store().AppendAsync("held-2", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         await Task.Delay(HeldFor, TestContext.Current.CancellationToken);
@@ -126,7 +126,7 @@ public sealed class SnapshotReadTests : IAsyncLifetime
         // Arrange: in one category, an append held open past the threshold, one committed above it.
         var tail = Host.Tail();
         var held = await HoldAppendAsync("late-1");
-        var above = await Host.Store().AppendAsync("late-2", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var above = await Host.Store().AppendAsync("late-2", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await Task.Delay(HeldFor, TestContext.Current.CancellationToken);
 
         // Act
@@ -155,8 +155,6 @@ public sealed class SnapshotReadTests : IAsyncLifetime
 
         return head;
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>Inserts an event row in a transaction left open: a position taken, not committed.</summary>
     private async Task<HeldAppend> HoldAppendAsync(string stream)
