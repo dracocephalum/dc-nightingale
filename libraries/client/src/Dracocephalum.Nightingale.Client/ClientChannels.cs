@@ -17,7 +17,6 @@ internal static class ClientChannels
     private const string ClusterAuthority = "nightingale";
 
     /// <summary>Opens the channel to the instances in the settings.</summary>
-    /// <param name="settings">The settings.</param>
     /// <returns>The channel, which owns its handler.</returns>
     public static GrpcChannel Open(NightingaleClientSettings settings)
     {
@@ -49,7 +48,6 @@ internal static class ClientChannels
     }
 
     /// <summary>Opens a channel to one instance, such as the one a server said runs a group.</summary>
-    /// <param name="settings">The settings.</param>
     /// <param name="address">The instance's address.</param>
     /// <returns>The channel, which owns its handler.</returns>
     public static GrpcChannel OpenTo(NightingaleClientSettings settings, Uri address) =>

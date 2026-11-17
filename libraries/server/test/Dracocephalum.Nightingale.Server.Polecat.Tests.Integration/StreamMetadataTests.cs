@@ -13,7 +13,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// <c>$all</c> and <c>$mde</c> and left out of <c>$de</c>, kept by a delete and removed by a
 /// tombstone; and applied to a read of the stream, by the database, and to nothing else.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class StreamMetadataTests(SqlServerTestDatabase database)

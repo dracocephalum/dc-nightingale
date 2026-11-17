@@ -30,7 +30,6 @@ internal static class SqlServerHorizon
     private static readonly int[] Unanswered = [7983, 2571, 297, 300, 50000];
 
     /// <summary>Opens connections to the journal a connection string names.</summary>
-    /// <param name="connectionString">The connection string.</param>
     /// <returns>Opens a connection.</returns>
     public static Func<CancellationToken, Task<SqlConnection>> Connect(string connectionString)
     {
@@ -58,7 +57,6 @@ internal static class SqlServerHorizon
 
     /// <summary>Marks the present moment on the server's UTC clock.</summary>
     /// <param name="connections">Opens a connection to the journal.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The marker.</returns>
     public static async ValueTask<HorizonMarker> MarkAsync(Func<CancellationToken, Task<SqlConnection>> connections, CancellationToken cancellationToken)
     {
@@ -71,7 +69,6 @@ internal static class SqlServerHorizon
 
     /// <summary>Whether a transaction that began at a start may have taken a position before a marker: an unreadable start counts as before.</summary>
     /// <param name="startedAt">When the transaction began, in UTC, when it could be read.</param>
-    /// <param name="marker">The marker.</param>
     /// <returns>Whether it began before the marker, within the rounding.</returns>
     public static bool BeganBefore(DateTimeOffset? startedAt, HorizonMarker marker) => startedAt is not { } started || started.UtcTicks <= marker.Value + Rounding.Ticks;
 
@@ -83,7 +80,6 @@ internal static class SqlServerHorizon
     /// <summary>Reads a holder from a session id, a login and a start, at an ordinal of a row.</summary>
     /// <param name="reader">The reader, on the row.</param>
     /// <param name="ordinal">The ordinal of the session id; the login and the start follow it.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The holder.</returns>
     public static async Task<HorizonHolder> ReadHolderAsync(SqlDataReader reader, int ordinal, CancellationToken cancellationToken) => new(
         await reader.IsDBNullAsync(ordinal, cancellationToken).ConfigureAwait(false) ? null : reader.GetInt32(ordinal),

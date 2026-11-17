@@ -12,7 +12,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// answers, with the concurrency tokens that settle a lease doing so on SQL Server. Built with a
 /// clock the test moves, so lease expiry is a fact rather than a wait.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class SubscriptionGroupStoreTests(SqlServerTestDatabase database)

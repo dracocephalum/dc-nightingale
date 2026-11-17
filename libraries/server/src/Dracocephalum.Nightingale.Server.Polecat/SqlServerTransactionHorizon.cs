@@ -34,7 +34,6 @@ internal sealed class SqlServerTransactionHorizon(Func<CancellationToken, Task<S
     public TimeSpan MinimumAge => TimeSpan.Zero;
 
     /// <summary>A horizon over the journal a connection string names.</summary>
-    /// <param name="connectionString">The connection string.</param>
     /// <returns>The horizon.</returns>
     public static SqlServerTransactionHorizon Over(string connectionString) => new(SqlServerHorizon.Connect(connectionString));
 

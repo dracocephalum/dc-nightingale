@@ -41,6 +41,7 @@
   <Rules AnalyzerId="Microsoft.CodeAnalysis.CSharp.Compilers" RuleNamespace="Microsoft.CodeAnalysis.CSharp">
     <Rule Id="CS0618" Action="None" /> <!-- CS0618: Member is obsolete. Off: review judges an [Obsolete] call, not the build -->
     <Rule Id="CS1591" Action="None" /> <!-- CS1591: Missing XML comment on a public member. Off: documentation is not mandatory here, see SA1600 -->
+    <Rule Id="CS1573" Action="None" /> <!-- CS1573: A parameter has no param tag while others do. Off: SA1611 asks for every tag where a member is public, and elsewhere a tag is written only when it says something the name does not -->
   </Rules>
 
   <!-- ==================== DocumentationRules (SA1600-SA1652) ==================== -->

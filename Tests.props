@@ -23,8 +23,14 @@
       $(NoWarn); keeps whatever was already suppressed. This is the only
       AnalysisMode=Recommended rule that conflicts with the toolkit's own rules;
       if another appears, add it here rather than lowering AnalysisMode.
+
+      SA1611, SA1615, SA1618 (a tag for every parameter, result and type
+      parameter of a documented public member) are for a published API. A test
+      class is public only because the runner requires it, so the tags they
+      force there, on a fixture's constructor say, document nothing. A summary
+      on a test class or a helper is still welcome; its tags are a choice.
     -->
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <NoWarn>$(NoWarn);CA1707;SA1611;SA1615;SA1618</NoWarn>
 
     <!--
       xunit v3 runs on Microsoft.Testing.Platform: every test project is an

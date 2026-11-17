@@ -12,7 +12,6 @@ internal interface IStoreSchema
     /// tables. It says the tables were applied from the script this server would apply; it
     /// cannot say nothing has touched them since.
     /// </param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The report.</returns>
     Task<SchemaReport> ReportAsync(bool trustStoreHash, CancellationToken cancellationToken);
 
@@ -21,12 +20,10 @@ internal interface IStoreSchema
     /// additions, and the gateway's own with its migrations history. Read from the definitions,
     /// not the database.
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The tables, by schema and name.</returns>
     Task<IReadOnlySet<TableName>> ListOwnTablesAsync(CancellationToken cancellationToken);
 
     /// <summary>Applies what the tables are behind on: the event store's first, then the gateway's migrations. Writes no row of the store's record.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the tables are current.</returns>
     Task ApplyAsync(CancellationToken cancellationToken);
 
@@ -36,7 +33,6 @@ internal interface IStoreSchema
     /// missing. What a start writes after applying changes, and again when it finds the record
     /// behind this server's.
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the rows are written.</returns>
     Task RecordStoreAsync(CancellationToken cancellationToken);
 
@@ -48,12 +44,10 @@ internal interface IStoreSchema
     /// <param name="settings">The settings, with the database's actual collation.</param>
     /// <param name="createdAt">When the store was initialized.</param>
     /// <param name="createdBy">The version of the server that initialized it.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the rows are written.</returns>
     Task WriteInitializationAsync(IStoreSettings settings, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken);
 
     /// <summary>Reads which server version initialized the store.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The version, or "unknown" when the store does not say.</returns>
     Task<string> ReadCreatedByAsync(CancellationToken cancellationToken);
 }

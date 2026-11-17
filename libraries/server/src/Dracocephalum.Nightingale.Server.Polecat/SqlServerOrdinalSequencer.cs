@@ -17,7 +17,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="connectionString">The connection string the store uses.</param>
 /// <param name="schemaName">The schema the event store's tables live in.</param>
 /// <param name="progressSchemaName">The schema the gateway's own tables live in, the progress rows and the ordinal links among them.</param>
-/// <param name="logger">The logger.</param>
 internal sealed partial class SqlServerOrdinalSequencer(string connectionString, string schemaName, string progressSchemaName, ILogger<SqlServerOrdinalSequencer> logger) : IOrdinalSequencer
 {
     /// <summary>How many positions one batch numbers at most.</summary>

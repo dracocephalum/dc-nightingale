@@ -13,7 +13,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// and the two guards the design relies on, the sticky type name and the idempotent schema. Every
 /// test uses its own stream name, so the shared database keeps them independent.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class PolecatStreamStoreTests(SqlServerTestDatabase database)

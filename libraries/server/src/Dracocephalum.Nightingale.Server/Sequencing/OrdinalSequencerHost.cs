@@ -18,8 +18,6 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// <param name="registry">The instance id the lease is taken under.</param>
 /// <param name="sequencer">Sequences a batch, in the backend's own statement.</param>
 /// <param name="faults">Where a sequence is recorded as faulted, and as numbering again, for every instance.</param>
-/// <param name="timeProvider">The clock.</param>
-/// <param name="logger">The logger.</param>
 /// <param name="leaseDuration">How long the lease lasts without renewal; <see cref="OrdinalSequencing.LeaseDuration"/> when not given. The renewal follows from it.</param>
 internal sealed partial class OrdinalSequencerHost(
     ISubscriptionGroupStore leases,

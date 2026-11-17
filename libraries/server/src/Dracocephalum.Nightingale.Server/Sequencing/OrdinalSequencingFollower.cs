@@ -15,8 +15,6 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// </summary>
 /// <param name="sequences">The sequences, of which those followed here are kept current.</param>
 /// <param name="progress">Where the ordinal sequencer's progress rows are read.</param>
-/// <param name="timeProvider">The clock.</param>
-/// <param name="logger">The logger.</param>
 /// <param name="interval">How long the follower waits between reads while a sequence is behind; <see cref="Interval"/> when not given.</param>
 internal sealed partial class OrdinalSequencingFollower(INumberedSequences sequences, IOrdinalSequencingProgressReader progress, TimeProvider timeProvider, ILogger<OrdinalSequencingFollower> logger, TimeSpan? interval = null)
 {
@@ -27,7 +25,6 @@ internal sealed partial class OrdinalSequencingFollower(INumberedSequences seque
 
     /// <summary>Follows the numbering for a time, then returns; the caller asks for the lease in between.</summary>
     /// <param name="atMost">How long to follow before returning.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the time is up.</returns>
     public async Task FollowAsync(TimeSpan atMost, CancellationToken cancellationToken)
     {
@@ -64,7 +61,6 @@ internal sealed partial class OrdinalSequencingFollower(INumberedSequences seque
 
     /// <summary>One read of the progress rows of the sequences behind, each published to its numbering.</summary>
     /// <param name="behind">The sequences whose head is past their numbering.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when what the rows say is published.</returns>
     internal async Task LookAsync(IReadOnlyList<NumberedSequence> behind, CancellationToken cancellationToken)
     {

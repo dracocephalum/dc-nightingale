@@ -14,7 +14,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// it. The shared database has other tests' events in it, so assertions are relative to what this
 /// test appends.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class SequenceTailsTests(SqlServerTestDatabase database)

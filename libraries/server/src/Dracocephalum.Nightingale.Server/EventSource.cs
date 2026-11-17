@@ -19,15 +19,12 @@ internal static class EventSource
     public const int ScanWindow = 4096;
 
     /// <summary>Follows a stream, <c>$all</c> or a virtual stream from a position, inclusive, forever.</summary>
-    /// <param name="store">The store.</param>
-    /// <param name="tail">The tail.</param>
     /// <param name="router">The router a plain stream's events come through once the feed has caught up.</param>
     /// <param name="stream">The stream name.</param>
     /// <param name="from">Where to begin, inclusive: a revision for a stream, a position otherwise, an ordinal under ordinal numbering.</param>
     /// <param name="pageSize">How many events one store call asks for.</param>
     /// <param name="numbering">How <paramref name="from"/> and the feed are numbered; ordinal only for a virtual stream.</param>
     /// <param name="filter">What to keep of <c>$all</c>; <see langword="null"/> for everything, and for any other stream.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events, in order, without end; under a filter, the stretches examined that held none for it as well.</returns>
     public static IAsyncEnumerable<FeedItem> FollowAsync(IStreamStore store, IStoreTail tail, StreamRouter router, string stream, long from, int pageSize, Numbering numbering, EventFilter? filter, CancellationToken cancellationToken)
     {
@@ -60,10 +57,8 @@ internal static class EventSource
     /// the question: the read missed it, the reader then waits for the tail to move, and on a
     /// store nothing more is appended to it waits for good with the row never delivered.
     /// </remarks>
-    /// <param name="tail">The tail.</param>
     /// <param name="numberedBeforeRead">How far the sequencer had numbered when the reader began the read it has just finished.</param>
     /// <param name="observed">The head the reader last took from the tail.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The head to observe next: a new one after an advance, the same one once it is numbered.</returns>
     public static async Task<long> AwaitNumberingAsync(IStoreTail tail, long numberedBeforeRead, long observed, CancellationToken cancellationToken)
     {

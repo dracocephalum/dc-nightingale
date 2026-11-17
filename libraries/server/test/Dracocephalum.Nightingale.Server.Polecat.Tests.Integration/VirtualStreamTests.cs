@@ -12,7 +12,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// and event type here carries a suffix of its own, and the guard the design relies on is asserted
 /// here: a virtual stream's head is its own last event, never the global head.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class VirtualStreamTests(SqlServerTestDatabase database)

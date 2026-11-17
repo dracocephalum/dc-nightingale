@@ -19,7 +19,6 @@ internal sealed class NightingaleDbContextFactory : IDesignTimeDbContextFactory<
 
     /// <summary>Configures the context's options for SQL Server.</summary>
     /// <param name="builder">The options builder.</param>
-    /// <param name="connectionString">The connection string.</param>
     /// <param name="schema">The schema the gateway's tables live in.</param>
     public static void Configure(DbContextOptionsBuilder builder, string connectionString, string schema)
     {

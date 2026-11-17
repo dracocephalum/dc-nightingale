@@ -30,7 +30,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="store">The store whose tenancy answers the patched database.</param>
 /// <param name="contexts">Makes the gateway's own context, whose connection the statements run on.</param>
 /// <param name="database">The database the tables are in.</param>
-/// <param name="options">The host's options.</param>
 /// <param name="time">The clock, for the default tenant's dates and the wait before a retry.</param>
 /// <param name="logger">Where each batch is logged as it starts, ends or fails.</param>
 internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactory<NightingaleDbContext> contexts, IStoreDatabase database, NightingaleOptions options, TimeProvider time, ILogger<StoreSchema> logger) : IStoreSchema
@@ -128,7 +127,6 @@ internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactor
     /// tables in one value, the store library's version, the schema library's under it, the
     /// gateway's additions and the settings. Building the script reads no database.
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The hash, in hexadecimal.</returns>
     public async Task<string> ComputeStoreHashAsync(CancellationToken cancellationToken)
     {
@@ -194,7 +192,6 @@ internal sealed partial class StoreSchema(IDocumentStore store, IDbContextFactor
     /// does. Writes no row; the record is <see cref="WriteInitializationAsync"/>'s and
     /// <see cref="RecordStoreAsync"/>'s.
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the migrations are applied.</returns>
     internal async Task MigrateAsync(CancellationToken cancellationToken)
     {

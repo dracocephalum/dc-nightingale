@@ -12,7 +12,6 @@ internal interface INumberedSequences
     long Advances { get; }
 
     /// <summary>Lists the sequences as they are now: every one there is, for the sequencer that numbers them all.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The sequences.</returns>
     ValueTask<IReadOnlyList<NumberedSequence>> ListAsync(CancellationToken cancellationToken);
 
@@ -22,7 +21,6 @@ internal interface INumberedSequences
 
     /// <summary>Waits until any sequence's head has moved since a count was read.</summary>
     /// <param name="seen">The count the caller has already acted on.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The count, greater than <paramref name="seen"/>.</returns>
     Task<long> WaitForAnyAdvanceAsync(long seen, CancellationToken cancellationToken);
 }
