@@ -25,13 +25,10 @@ to the statuses the contract promises. A host calls two extension methods:
 own.
 
 Its `Sequencing` namespace holds what every backend supplies or shares for
-its sequences: `SequenceTails`, the one poller of a process that keeps a
-sequence head per sequence and the gateway's `SequenceHead` rows; the ports a
-backend implements, the transaction horizon over its database and the reads
-of its events table, which together are its head strategy; the checkpoint
-the tails judge a gap by; and the ordinal sequencer, its lease, loop and
-follower, registered by `AddNightingaleOrdinalSequencer` over the one port a
-backend implements for it, `IOrdinalSequencer`, a batch in its own statement.
+its sequences: `SequenceTails`, the one tail of a process that keeps every
+sequence head, and the ordinal sequencer, registered by
+`AddNightingaleOrdinalSequencer`; each over the ports a backend implements,
+its head strategy and `IOrdinalSequencer` (`DESIGN.md`, seams 4 and 6).
 `test/Dracocephalum.Nightingale.Server.Contracts` holds those ports'
 contracts as abstract tests, a library and not a test project: a backend's
 integration project derives a class from each and supplies its database,
@@ -61,7 +58,7 @@ minute. It stalls rather than skip an event that may still commit. The PostgreSQ
 
 | Tier | SQL Server (Polecat) | PostgreSQL (Marten, planned) |
 |---|---|---|
-| **Core**: appends, reads and subscriptions, groups, metadata, appends to several streams, the virtual streams by position | SQL Server 2025 or later, for its native `json` type; a UTF-8 collation, `Latin1_General_100_BIN2_UTF8` by default; any edition, Express for development only. `VIEW SERVER PERFORMANCE STATE` for the gateway's login is recommended, not required: with it the sequence heads are kept by the horizon of each store partition, which never skips an append that commits late, gives a rolled-back one up at once, and lets no transaction outside a partition hold its head; with `VIEW DATABASE STATE` alone by the transaction horizon of the whole database, which any open writer holds; without either by the best-effort strategy, a 3-second wait over reads that wait on an open append's row; chosen at start, a step down logged (`DESIGN.md`, seam 4) | PostgreSQL 13 or later, Marten's own floor |
+| **Core**: appends, reads and subscriptions, groups, metadata, appends to several streams, the virtual streams by position | SQL Server 2025 or later, for its native `json` type; a UTF-8 collation, `Latin1_General_100_BIN2_UTF8` by default; any edition, Express for development only. Two grants for the gateway's login are recommended, not required, and decide how the sequence heads are kept: with `VIEW SERVER PERFORMANCE STATE`, by the horizon of each store partition, which only a writer in that partition can hold; with `VIEW DATABASE STATE` alone, by the horizon of the whole database, which any open writer holds; with neither, by the best-effort strategy, a 3-second wait over locking reads, the one that can miss an append committing late. Chosen at start, a step down logged with the grant that would avoid it (`DESIGN.md`, seam 4) | PostgreSQL 13 or later, Marten's own floor |
 | **Ordinals**: the virtual streams by number | nothing more: the sequencer numbers up to the sequence head, so ordinals are as exact as the head | nothing more: the transaction horizon reads what every role may (`PENDING.md`, *The PostgreSQL horizon*) |
 | **Read replicas** | an availability group with a readable secondary, an Enterprise feature, or Azure | a streaming replica |
 | **Partitioning** by tenant or by archived stream | table partitioning, in every edition since 2016 SP1; one store partitioned by tenant per database (`UNSUPPORTED.md`) | declarative partitioning |
@@ -88,8 +85,8 @@ so a pipeline runs them once and the servers start in the default mode:
 |---|---|
 | `--export-schema schema.sql` | writes the creation script of a new store: the event store's tables with the gateway's additions, then the gateway's own tables; connects to nothing |
 | `--schema-report` | prints what the configured database needs: that it is not initialized yet, or changes to the event store's tables, the gateway's pending migrations, and settings the configuration contradicts; exit code 0 when it is current, 1 when it is not |
-| `--apply-schema` | applies what an initialized database is behind on, the event store's tables first and the gateway's after, as `Migrate` would; a database that is missing or not initialized is refused |
-| `--initialize` | creates the database when it is missing, initializes it when it is empty, finishes an initialization that died half-way, and applies what it is behind on, as `Initialize` would; idempotent |
+| `--apply-schema` | `Migrate`'s work, once: applies what an initialized database is behind on; a database that is missing or not initialized is refused |
+| `--initialize` | `Initialize`'s work, once: creates the database when it is missing, initializes it when it is empty or half-initialized, and applies what it is behind on; idempotent |
 
 The gateway's own tables are created by EF Core migrations, generated from
 the model in the server library into the backend that owns the provider.
@@ -130,6 +127,7 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:ReadOnlyConnectionStringName` | none | which entry under `ConnectionStrings` the read-only connection uses, exactly as written; unset, the main string with `ApplicationIntent=ReadOnly`, which a listener with read-only routing sends to a secondary |
 | `Nightingale:ReadStreamsFromReadOnlyConnection` | `false` | serve bounded reads of plain streams from the read-only connection too; they are then eventually consistent, and an append made on a read that was behind is refused with a revision conflict |
 | `Nightingale:Deletion:Allowed` | `None` | how far a stream may be taken away: `None` refuses `Archive` and `Delete`, `Archive` allows archiving, a stream's events leaving every read and its appends refused with the rows kept, and `Delete` allows that and deleting, a stream and its events removed for good and the name free again. `Reset`, the reference client's delete, is allowed at every level: it writes one metadata event and removes nothing. A value that is not one of the three refuses to start |
+| `Nightingale:Cluster:AdvertisedAddress` | none | the address clients reach this instance at, an absolute `http` or `https` URI; unset, derived from what the server listens on, a wildcard host replaced by this machine's name, which in a container or a pod is the routable one. Set it where that derivation is wrong for the network, such as behind address translation: an instance asked for a group another runs refuses with that instance's address (`VARIANCES.md`, *A group's info comes from its own instance, and a listing from the store*) |
 | `Nightingale:Auth:Enabled` | `true` | authenticate every call but the features call from the `authorization` header; off, every caller is the administrator, for a private network or a test |
 | `Nightingale:Auth:AdminPassword` | none | the built-in administrator's password; required while authentication is on and the administrator is not disabled, so that nothing done through the API can lock everyone out |
 | `Nightingale:Auth:AdminDisabled` | `false` | refuse the built-in administrator, once other administrators exist |
@@ -146,6 +144,7 @@ way, for example with the environment variable `ConnectionStrings__Nightingale`.
 | `Nightingale:Store:Collation` | `Latin1_General_100_BIN2_UTF8` | the collation the database is created with, and the one a database provisioned by hand must have. It must be a UTF-8 collation: any other is refused, because names in another script would collide. The default is binary, so names that differ in case are different names; a case-insensitive UTF-8 collation makes them one, on reads exactly and on live delivery as near as the server can match in process (`VARIANCES.md`, *Names are compared by the database*) |
 | `Nightingale:Store:IgnoreCollationCompatibility` | `false` | work with a collation that is not UTF-8, for a database that already has one or a server older than SQL Server 2019. The host's own choice and consequence: a character of a name outside the collation's code page is stored as a question mark, so two such names can become one. Not recorded with the store; the server logs a warning at every start |
 | `Nightingale:Store:Partitioning` | `None` | `Tenant` partitions the events table by tenant, each with its own sequence and its own sequence head, which the server keeps for every tenant it serves, and the wildcard tenant is then refused; `ArchivedStream` partitions it by the archived flag, so deleted streams' events sit apart; one mode, because a table has one partition scheme |
+| `Nightingale:Store:AssignOrdinals` | `false` | number the virtual streams: a link per event in each numbered virtual stream, written after commit by the ordinal sequencer, so a read or subscription of a virtual stream may ask for dense, zero-based ordinals instead of positions; off, such a request is refused with `ORDINALS_NOT_ENABLED`. Fixed with the store, since there is no backfill yet (`PENDING.md`, *Adopting ordinals on a store initialized without them*; `VARIANCES.md`, *Positions of virtual streams are the global sequence*) |
 | `Nightingale:Store:OrdinalSequencerEnabled` | `true` | on a store with ordinals, whether this instance runs the ordinal sequencer. Off, it numbers nothing and refuses every read and subscription by ordinal with `SEQUENCER_DISABLED`; on again, the sequencer goes on from where it stopped. The operator's choice of the moment, so it is not fixed with the store and each instance follows its own |
 
 The settings under `Nightingale:Store` are fixed when the store is
@@ -165,21 +164,21 @@ unset, the same local default applies. Every database they create is named
 The store is configured once, in `AddNightingalePolecat`: string stream
 identity, conjoined tenancy with the default tenant, the partitioning the
 settings ask for, the metadata columns the contract maps, and the store's own
-schema management off. The initializer applies the schema through the
-gateway's own database class, which declares a computed `category` column,
-two filtered indexes on the events table, and the `nightingale_store` marker
-table; the type comments say why each is the way it is. References Core as a
-project until a package feed exists; see TODO.md.
+schema management off. `StoreSchema` reports and applies both halves of the
+schema; the gateway's additions to the events table, a persisted computed
+`category` column and the filtered indexes the virtual streams seek, are
+declared on the store's own feature by `PatchedEventStoreFeature`, and the
+store's record is rows of the gateway's `StoreProperty` table; the type
+comments say why each is the way it is. References Core as a project until a
+package feed exists; see TODO.md.
 
-What a start applies is logged, each half under its own category and at the
-same levels. The gateway's migrations are logged by Entity Framework:
-`Microsoft.EntityFrameworkCore.Migrations` says which migration, and
-`Microsoft.EntityFrameworkCore.Database.Command` carries each statement, both
-at `Information`. The event store's script is logged under
-`Dracocephalum.Nightingale.Server.Polecat.StoreSchema`, one entry per table
-or schema it changes at `Information`, and one that fails at `Error`. The
-keys under `Logging:LogLevel` turn either on or off. Note that
-`Database.Command` also carries every query the gateway runs, so a host that
-lowers it to `Warning` for production silences the gateway's migration DDL
-with it; the migration names and the store's script stay. Raise it for a
-start that applies changes when the statements matter.
+What a start applies is logged under one category,
+`Dracocephalum.Nightingale.Server.Polecat.StoreSchema`: each batch of either
+half as it starts, with its statements, and as it ends, with how long it
+took, at `Information`; a batch waiting on a lock another session holds at
+`Warning`; one that fails at `Error`, with its statements. Nothing of the
+migrations passes through Entity Framework's logging, because the server
+runs the generated script itself (`DESIGN.md`, seam 3), so a host that
+lowers `Microsoft.EntityFrameworkCore.Database.Command`, which carries every
+query the gateway runs, to `Warning` for production keeps the schema log
+whole.
