@@ -5,7 +5,7 @@
 
 toolkit:
   url: https://github.com/dracocephalum/dc-agentics
-  commit: "3d6a5dade47f"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
+  commit: "5318142a29b1"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
   payload-path: "repo/payload"         # where the payload lived AT that commit - the toolkit restructures, and an upgrade diffing the wrong root sees every file as new. Fixed value, not a placeholder
   initialized: "2026-09-14"            # yyyy-mm-dd
   by: "Claude Code / claude-fable-5-1" # e.g. Claude Code / claude-fable-5-1
@@ -29,9 +29,9 @@ repository:
 
 coverage:
   # Line coverage per test run - agentics/rules/coding/csharp/csharp-unit-tests-rules.md, "Coverage".
-  # Nothing enforces these yet: the coverage extension measures, the agent reports the line rate against
-  # them, and a pipeline can read them later. Below minimum is a failure; at or above target is green;
-  # between the two is a warning.
+  # The collector measures and the agent reports the line rate against them; a pipeline enforces the
+  # minimum by passing it to the collector's threshold option. Below minimum is a failure; at or above
+  # target is green; between the two is a warning.
   minimum: 85                          # percent - the hard limit
   target: 90                           # percent - green
 

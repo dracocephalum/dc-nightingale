@@ -156,28 +156,32 @@ reads `total:` rather than `Passed!`.
 
 ### Coverage
 
-    dotnet test --solution <solution>.slnx -- --coverage --coverage-output-format cobertura --coverage-output TestResults/coverage.cobertura.xml --coverage-settings coverage.config
+    rm -rf TestResults
+    dotnet test --solution <solution>.slnx -- --coverlet --coverlet-output-format cobertura --coverlet-exclude-by-file "**/obj/**" --results-directory TestResults
 
-The collector is the platform's own, `Microsoft.Testing.Extensions.CodeCoverage`,
-in every test project through `Tests.props`; `coverage.config` at the
-repository root is its settings and is passed each time — it is not found on
-its own. It excludes only code nobody writes by hand: test assemblies, anything
-compiled from `obj/` (generated code, which carries no attribute the collector
-would see), and the generated and excluded-member attributes. Measured: with
-defaults the report counted the test assembly and the generated gRPC code;
-with the file, only hand-written sources. Add an exclusion there for the same
-reason only; a class that is hard to test is a finding about the class, not an
-exclusion. Obsolete code is not excluded either: it is still in the build and
-still runs, so it is measured until it is deleted.
+The collector is `coverlet.MTP`, coverlet's extension for the platform, in
+every test project through `Tests.props`, and it has no settings file: the
+command is the whole configuration. It excludes only code nobody writes by
+hand. The test assembly and the generated and excluded-member attributes are
+left out by the collector's own defaults; anything compiled from `obj/`
+(generated code, which carries no attribute the collector would see) by the
+one exclusion the command names. Measured: without it a report counted the
+generated gRPC code and read half of what it reads with it. Add an exclusion
+to the command for the same reason only; a class that is hard to test is a
+finding about the class, not an exclusion. Obsolete code is not excluded
+either: it is still in the build and still runs, so it is measured until it
+is deleted. A `testconfig.json` with a coverlet section would replace the
+collector's defaults whole, so do not add one for an exclusion.
 
-Each run overwrites the output path you name; give it a path under
-`TestResults/`, which is ignored, and read the line rate from the root element
-rather than opening a viewer:
+Each test project writes one report, `coverage.cobertura.<timestamp>.xml`,
+and a run never overwrites an earlier one, which is why the command empties
+`TestResults/`, an ignored folder, first. Read the line rate from each root
+element rather than opening a viewer:
 
-    grep -om1 'line-rate="[0-9.]*"' TestResults/coverage.cobertura.xml
+    grep -om1 'line-rate="[0-9.]*"' TestResults/coverage.cobertura.*.xml
 
 Report the line rate against the two numbers under `coverage:` in
 `.agentics.yaml`: below `minimum` is a failure and is said so plainly, at or
-above `target` is green, and between the two is a warning. The collector
-cannot enforce them — it cannot fail a run on a threshold — so the report is
-where they bite until a pipeline reads the same numbers.
+above `target` is green, and between the two is a warning. A pipeline
+enforces the first by adding `--coverlet-threshold <minimum>` to the command,
+which fails the run when a module's line rate is below it.
