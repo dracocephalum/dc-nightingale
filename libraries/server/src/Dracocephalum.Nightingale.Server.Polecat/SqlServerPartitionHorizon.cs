@@ -8,23 +8,13 @@ using Microsoft.Data.SqlClient;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// The transaction horizon of each store partition of a SQL Server journal: a sequence is held
-/// only by an open transaction that has written to the database since before its marker and holds
-/// a lock in the sequence's partition of the store's tables. An append writes its stream's row
-/// before it draws a position, and holds the row's lock to its end, so a transaction that may
-/// still commit a position holds a lock in its partition of the streams table from before it took
-/// it. A transaction open elsewhere in the database, in another tenant's partition or on tables
-/// that are not the store's, holds nothing back. Both of its views need
-/// <c>VIEW SERVER PERFORMANCE STATE</c>, on the whole server, which answers
-/// <see cref="SqlServerTransactionHorizon"/>'s query too.
-/// It asks in two stages. The database's writers first, one cheap read: when none began before a
-/// marker, the marker has passed, as the transaction horizon would say. The locks only while a
-/// writer older than a marker is open and the marker is past <see cref="LockReadDelay"/>: reading
-/// them walks every lock on the server, and the writer is most often the append a moment from its
-/// commit, which the next look finds gone. Until then the oldest writer holds the sequence. One
-/// read of the locks answers every sequence asked. A sequence whose partition the store's registry
-/// does not name, the shared sequence or a tenant not yet in it, is held by a lock anywhere in the
-/// tables.
+/// The transaction horizon of each store partition of a SQL Server journal: a sequence is held only
+/// by an open transaction that has written to the database since before its marker and holds a lock
+/// in the sequence's partition of the store's tables; a transaction open elsewhere holds nothing
+/// back. A sequence whose partition the store's registry does not name, the shared sequence or a
+/// tenant not yet in it, is held by a lock anywhere in the tables. Its views need <c>VIEW SERVER
+/// PERFORMANCE STATE</c>, which answers <see cref="SqlServerTransactionHorizon"/>'s query too. Why
+/// a lock in the partition is enough, and the two stages it asks in, are <c>DESIGN.md</c>, seam 4.
 /// </summary>
 internal sealed class SqlServerPartitionHorizon : ITransactionHorizon
 {

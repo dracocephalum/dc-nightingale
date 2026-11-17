@@ -5,19 +5,14 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 namespace Dracocephalum.Nightingale.Server.Polecat.Data;
 
 /// <summary>
-/// A read-only mirror of the tables the store owns: its events, with the columns the gateway
-/// adds to them, its streams, and, partitioned by tenant, the registry of each tenant's partition
-/// key; and of the two gateway tables read beside them, the ordinal links and the sequence heads.
-/// The store creates and
-/// migrates them; this context only reads, and refuses to save, so the gateway's reads of a
-/// stream, by category, by event type and by position are LINQ a unit test can run on the
-/// in-memory provider. The column
-/// types are the store's exactly, and the string ones matter: a parameter sent as Unicode to a
-/// column that is not makes the database convert the column and scan the index it should seek.
-/// A unit test holds every mapped column to the store's own definition. A query selects the
-/// columns it needs by name, never a whole row, because the partition key exists only on a
-/// store partitioned by tenant. This type reads over the main connection;
-/// <see cref="ReadOnlyEventsDbContext"/> is the same mirror over the read-only one.
+/// A read-only mirror of the tables the store owns, its events with the columns the gateway adds,
+/// its streams and, partitioned by tenant, the registry of each tenant's partition key, and of the
+/// two gateway tables read beside them, the ordinal links and the sequence heads. The store creates
+/// and migrates them; this context only reads, and refuses to save. A query selects the columns it
+/// needs by name, never a whole row, because the partition key exists only on a store partitioned
+/// by tenant. This type reads over the main connection; <see cref="ReadOnlyEventsDbContext"/> is
+/// the same mirror over the read-only one. Why the column types are the store's exactly, and what
+/// the mirror serves, are <c>DESIGN.md</c>, seam 7.
 /// </summary>
 internal class EventsDbContext : DbContext, ISchemaScoped
 {

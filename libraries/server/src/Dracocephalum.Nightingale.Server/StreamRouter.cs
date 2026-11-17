@@ -2,31 +2,18 @@ namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
 /// Hands the events of streams to the subscriptions that follow them, reading each advance of the
-/// tail once for all of them rather than once per subscription. An advance costs one read of
-/// where the new events are, their stream, revision, type and correlation id without their
-/// bodies, matched in process against every followed stream, category, type and correlation, and
-/// against the streams' and categories' listings for an event that begins its stream, and one read of the events of each
-/// stream that matched something; when <c>$all</c> is followed, one read of the range with its
-/// bodies serves everyone instead. So the cost follows the events, not the subscriptions, nor the
-/// number of names followed. Names are matched with the comparer the backend compares them by,
-/// so that a name matches live as it matches on a read; the category of a stream is the one rule
-/// the store's category column computes, <see cref="StreamNames.CategoryOf"/>. One router per
-/// tenant's store: a stream name is per tenant, and under a sequence per tenant so is the tail.
-/// The router starts at the head as it stands and routes every range the tail advances through;
-/// a subscription follows before it reads for the catch-up, so an event the catch-up does not see
-/// is one the router brings. A plain stream's follower delivers only in revision order,
-/// re-reading its stream when what the router brings is ahead of what it has delivered, which an
-/// append whose number landed above a gap can do; a follower by position skips what it has
-/// delivered already.
+/// tail once for all of them rather than once per subscription, so the cost follows the events and
+/// not the subscriptions nor the names followed. One router per tenant's store. A follower is
+/// handed every event from the moment it follows: a plain stream's in revision order, one by
+/// position without repeats. How an advance is read and matched, and why in process, are
+/// <c>DESIGN.md</c>, seam 5.
 /// </summary>
 /// <remarks>
-/// A follower that leaves <see cref="FollowerBuffer"/> events unread lapses: the router does not
-/// wait for it, so that a slow subscriber never holds up the others, and the subscriber reads its
-/// stream itself from where it stands, the way the reference server drops a live subscription to
-/// catching up when its buffer overflows. A range the router cannot read fails every follower
-/// present with the cause, as reading its own stream would have failed each of them, and the
-/// router goes on to the next advance; a tail that has stopped following the head ends the router,
-/// which then refuses to be followed with the same cause.
+/// A follower that leaves <see cref="FollowerBuffer"/> events unread lapses and reads its stream
+/// itself from where it stands: the router never waits for a slow one. A range the router cannot
+/// read fails every follower present with the cause, and the router goes on to the next advance; a
+/// tail that has stopped following the head ends the router, which then refuses to be followed with
+/// the same cause.
 /// </remarks>
 public sealed class StreamRouter : IAsyncDisposable
 {

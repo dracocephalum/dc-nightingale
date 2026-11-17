@@ -15,22 +15,13 @@ using Polecat.Linq;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// The port implementation over the store. It does every conversion once, at this boundary: the
+/// The port implementation over the store, and the one place its conversions are made: the
 /// contract's zero-based revisions to the store's one-based versions, the named expected states to
 /// the store's append variants, and the store's exceptions to the domain's. The store detects a
-/// revision conflict itself, at commit, in the same transaction as the write; only the retry
-/// comparison is done here, the reference way: on a conflict with an explicit expectation, the
-/// events from that revision onward are compared with the batch by id, and an exact match means
-/// the append already happened.
-/// <para>
-/// Every read goes through the gateway's mirror of the store's tables: a plain stream's with its
-/// metadata applied (<see cref="PlainStreamReader"/>), <c>$all</c> and the virtual streams by
-/// position or ordinal (<see cref="VirtualStreamReader"/>). With a read-only connection, a page of
-/// <c>$all</c> or of a virtual stream by position is taken from it as far as it reaches and from
-/// the main connection beyond, so the answer is the one the main connection alone would give; a
-/// bounded read of a plain stream is taken from it only when the host asks, and may then lag.
-/// Everything else uses the main connection.
-/// </para>
+/// revision conflict itself, at commit; only the comparison that recognises a retried append is
+/// done here. Every read goes through the gateway's mirror of the store's tables (<see
+/// cref="PlainStreamReader"/>, <see cref="VirtualStreamReader"/>), never the store's own readers;
+/// which connection serves which read is <c>DESIGN.md</c>, seam 8.
 /// </summary>
 /// <param name="store">The store.</param>
 /// <param name="tenantId">The tenant every session is opened for, or <see langword="null"/> for all tenants, under the wildcard: then <c>$all</c> and the virtual streams read across tenants and a stream name, which is per tenant, is refused.</param>

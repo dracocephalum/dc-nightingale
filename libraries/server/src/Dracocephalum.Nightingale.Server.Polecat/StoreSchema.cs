@@ -20,20 +20,12 @@ using Weasel.SqlServer.Tables;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// The one place that knows what a database needs, and applies it. There are two mechanisms
-/// underneath and they are kept in one order: the event store's tables, with the gateway's
-/// additions to them, are compared by the store's own schema tooling, which works from the
-/// difference between the real tables and what this version of the store expects; the gateway's
-/// own tables are compared by its migrations, whose history says which have run. The store's go
-/// first, because the gateway's tables are about a store that exists. Neither tool applies: each
-/// writes the statements it would run, and the server runs them itself, one batch at a time, the
-/// store's per object as the tooling itself would and the migrations' per <c>GO</c>, so that each
-/// batch is logged as it starts and when it ends, a batch that builds an index runs under the
-/// host's index timeout rather than the connection's, and a failure names the batch. What is
-/// applied is exactly what the report shows. A connection that fails under the apply, as the
-/// store's tooling judges failures, has the whole apply run again from the top, which is safe
-/// because both tools apply only what is missing. Startup, the host's switches and a host's own
-/// code all come through here, so they agree.
+/// The one place that knows what a database needs, and applies it: the event store's tables by the
+/// store's schema tooling and the gateway's own by its migrations, the store's first, every batch
+/// run by the server itself and logged as it starts and as it ends. What is applied is exactly what
+/// the report shows. Startup, the host's switches and a host's own code all come through here, so
+/// they agree. The two mechanisms, the timeouts and what a failed connection does are
+/// <c>DESIGN.md</c>, seam 3.
 /// </summary>
 /// <param name="store">The store whose tenancy answers the patched database.</param>
 /// <param name="contexts">Makes the gateway's own context, whose connection the statements run on.</param>
