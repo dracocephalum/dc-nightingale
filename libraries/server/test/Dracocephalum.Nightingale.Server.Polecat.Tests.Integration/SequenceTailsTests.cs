@@ -18,8 +18,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class SequenceTailsTests(SqlServerTestDatabase database)
 {
-    private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
-
     [Fact]
     public async Task Head_AfterAnAppend_ShouldReachTheAppendedPositionWithinThePollingInterval()
     {
@@ -28,7 +26,7 @@ public sealed class SequenceTailsTests(SqlServerTestDatabase database)
         var before = tail.Head;
 
         // Act
-        var appended = await database.Store.AppendAsync(NewStream(), StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        var appended = await database.Store.AppendAsync(NewStream(), StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
         var head = tail.Head;
@@ -48,7 +46,7 @@ public sealed class SequenceTailsTests(SqlServerTestDatabase database)
         // Arrange
         var tails = database.Services.GetRequiredService<SequenceTails>();
         var contexts = database.Services.GetRequiredService<IDbContextFactory<NightingaleDbContext>>();
-        var appended = await database.Store.AppendAsync(NewStream(), StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var appended = await database.Store.AppendAsync(NewStream(), StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act: the row is written at the look after the one that reached the append, or at it.
         var kept = 0L;
@@ -70,8 +68,8 @@ public sealed class SequenceTailsTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        var first = await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        var last = await sut.AppendAsync(stream, StreamState.StreamRevision(0), [Event(), Event()], TestContext.Current.CancellationToken);
+        var first = await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        var last = await sut.AppendAsync(stream, StreamState.StreamRevision(0), [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         var forwards = await sut.ReadAllAsync(Direction.Forwards, first.Position, last.Position, 2, TestContext.Current.CancellationToken);
@@ -87,6 +85,4 @@ public sealed class SequenceTailsTests(SqlServerTestDatabase database)
     }
 
     private static string NewStream() => "tail-" + Guid.NewGuid().ToString("N");
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
 }

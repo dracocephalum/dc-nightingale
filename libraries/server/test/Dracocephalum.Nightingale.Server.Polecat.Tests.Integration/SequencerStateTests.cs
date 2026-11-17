@@ -30,7 +30,7 @@ public sealed class SequencerStateTests
             }))
             {
                 // Act
-                appended = (await disabled.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken)).Position;
+                appended = (await disabled.Store().AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken)).Position;
                 await disabled.Tail().RefreshAsync(TestContext.Current.CancellationToken);
                 var stopped = disabled.Tail().NumberingStopped;
                 var waited = await Should.ThrowAsync<OrdinalSequencerDisabledException>(() => disabled.Tail().WaitForNumberedAsync(appended, TestContext.Current.CancellationToken).AsTask());
@@ -68,12 +68,12 @@ public sealed class SequencerStateTests
                 options.OrdinalSequencerLeaseDuration = TimeSpan.FromMilliseconds(900);
             });
             var tail = host.Tail();
-            var first = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            var first = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
             await NumberedAsync(tail, first.Position);
 
             // Act: the links' table goes away, so every batch fails; then it comes back.
             await TestDatabases.ExecuteAsync(name, "EXEC sp_rename 'nightingale.OrdinalLink', 'OrdinalLinkAway';");
-            var second = await host.Store().AppendAsync("orders-2", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            var second = await host.Store().AppendAsync("orders-2", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
             await UntilAsync(() => tail.NumberingStopped is not null);
             var stopped = tail.NumberingStopped;
             await UntilAsync(async () => await TestDatabases.ScalarAsync<int>(name, "SELECT COUNT(*) FROM nightingale.OrdinalSequencingProgress WHERE [TenantId] IS NULL AND [Fault] IS NOT NULL") == 1);
@@ -94,8 +94,6 @@ public sealed class SequencerStateTests
             await TestDatabases.DropAsync(name);
         }
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     private static async Task<long> NumberedAsync(IStoreTail tail, long position)
     {

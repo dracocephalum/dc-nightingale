@@ -53,8 +53,8 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         var acmes = stores.GetStreams(acme);
 
         // Act
-        var first = await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
-        var second = await acmes.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var first = await defaults.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
+        var second = await acmes.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         var defaultHead = await ReachAsync(stores.GetTail(TenantScope.Default), first.Position);
         var acmeHead = await ReachAsync(stores.GetTail(acme), second.Position);
         var acmeAll = await acmes.ReadAllAsync(Direction.Forwards, 1, acmeHead, 10, TestContext.Current.CancellationToken);
@@ -84,12 +84,12 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         var acme = await CreateTenantAsync("acme");
         var defaults = stores.GetStreams(TenantScope.Default);
         var acmes = stores.GetStreams(acme);
-        await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await defaults.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await Should.ThrowAsync<ValueTooLongException>(async () => await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [new EventData(Guid.NewGuid(), new string('x', 501), "{}"u8.ToArray())], TestContext.Current.CancellationToken));
 
         // Act
-        var pastTheGap = await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [Event()], TestContext.Current.CancellationToken);
-        var theirs = await acmes.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var pastTheGap = await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [TestEvents.Event()], TestContext.Current.CancellationToken);
+        var theirs = await acmes.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         var acmeHead = await ReachAsync(stores.GetTail(acme), theirs.Position, TimeSpan.FromSeconds(5));
         var defaultHead = await ReachAsync(stores.GetTail(TenantScope.Default), pastTheGap.Position, StaleThresholdHorizon.DefaultThreshold + TimeSpan.FromSeconds(10));
 
@@ -112,9 +112,9 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         // partition functions, which waits on every open transaction on them.
         var stores = Stores;
         var acme = await CreateTenantAsync("acme");
-        await stores.GetStreams(acme).AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await stores.GetStreams(acme).AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         var defaults = stores.GetStreams(TenantScope.Default);
-        await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await defaults.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await using var connection = new SqlConnection(TestDatabases.ConnectionStringFor(_name));
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(TestContext.Current.CancellationToken);
@@ -125,7 +125,7 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         }
 
         await Should.ThrowAsync<ValueTooLongException>(async () => await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [new EventData(Guid.NewGuid(), new string('x', 501), "{}"u8.ToArray())], TestContext.Current.CancellationToken));
-        var pastTheGap = await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [Event()], TestContext.Current.CancellationToken);
+        var pastTheGap = await defaults.AppendAsync("orders-1", StreamState.StreamRevision(0), [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act: well inside the store's threshold, which the best effort would wait out.
         var head = await ReachAsync(stores.GetTail(TenantScope.Default), pastTheGap.Position, TimeSpan.FromSeconds(2.5));
@@ -144,8 +144,8 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         var acme = await CreateTenantAsync("acme");
         var defaults = stores.GetStreams(TenantScope.Default);
         var acmes = stores.GetStreams(acme);
-        var mine = await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
-        var theirs = await acmes.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var mine = await defaults.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
+        var theirs = await acmes.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         await NumberedAsync(stores.GetTail(TenantScope.Default), mine.Position);
         await NumberedAsync(stores.GetTail(acme), theirs.Position);
 
@@ -196,16 +196,16 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
         var acme = await CreateTenantAsync("acme");
         var defaults = stores.GetStreams(TenantScope.Default);
         var acmes = stores.GetStreams(acme);
-        await defaults.AppendAsync("ledger-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        await defaults.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await defaults.AppendAsync("ledger-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        await defaults.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act: in acme the ledger has no events and orders-1 does not exist.
         var refused = await Should.ThrowAsync<StreamConflictsException>(() => acmes.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents("orders-1", StreamState.StreamRevision(0), [Event()])],
+            [new StreamAppend.OfEvents("orders-1", StreamState.StreamRevision(0), [TestEvents.Event()])],
             [new StreamCheck("ledger-1", StreamState.StreamExists)],
             TestContext.Current.CancellationToken));
         var written = await acmes.AppendToStreamsAsync(
-            [new StreamAppend.OfEvents("orders-1", StreamState.NoStream, [Event()])],
+            [new StreamAppend.OfEvents("orders-1", StreamState.NoStream, [TestEvents.Event()])],
             [new StreamCheck("ledger-1", StreamState.NoStream)],
             TestContext.Current.CancellationToken);
 
@@ -219,8 +219,6 @@ public sealed class TenantPartitioningTests : IAsyncLifetime
 
     private static EventData Correlated(string correlationId) =>
         new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"), new JsonObject { [MetadataKeys.CorrelationId] = correlationId });
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     private async Task<TenantScope> CreateTenantAsync(string name)
     {

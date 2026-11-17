@@ -24,10 +24,10 @@ public sealed class AllFilterTests(SqlServerTestDatabase database)
         // begins with the category's letters.
         var category = "flt" + Suffix();
         var sut = database.Store;
-        var first = await sut.AppendAsync(category + "-1", StreamState.NoStream, [Event("placed")], TestContext.Current.CancellationToken);
-        await sut.AppendAsync(category, StreamState.NoStream, [Event("placed")], TestContext.Current.CancellationToken);
-        await sut.AppendAsync(category + "x-1", StreamState.NoStream, [Event("placed")], TestContext.Current.CancellationToken);
-        var last = await sut.AppendAsync(category + "-2", StreamState.NoStream, [Event("placed")], TestContext.Current.CancellationToken);
+        var first = await sut.AppendAsync(category + "-1", StreamState.NoStream, [TestEvents.Event("placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(category, StreamState.NoStream, [TestEvents.Event("placed")], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(category + "x-1", StreamState.NoStream, [TestEvents.Event("placed")], TestContext.Current.CancellationToken);
+        var last = await sut.AppendAsync(category + "-2", StreamState.NoStream, [TestEvents.Event("placed")], TestContext.Current.CancellationToken);
         var head = await ReachAsync(last.Position);
 
         // Act
@@ -44,8 +44,8 @@ public sealed class AllFilterTests(SqlServerTestDatabase database)
         // Arrange: an underscore in the prefix, which LIKE reads as any one character unless escaped.
         var stem = "flt" + Suffix();
         var sut = database.Store;
-        var literal = await sut.AppendAsync(stem + "_a-1", StreamState.NoStream, [Event("placed")], TestContext.Current.CancellationToken);
-        var lookalike = await sut.AppendAsync(stem + "xa-1", StreamState.NoStream, [Event("placed")], TestContext.Current.CancellationToken);
+        var literal = await sut.AppendAsync(stem + "_a-1", StreamState.NoStream, [TestEvents.Event("placed")], TestContext.Current.CancellationToken);
+        var lookalike = await sut.AppendAsync(stem + "xa-1", StreamState.NoStream, [TestEvents.Event("placed")], TestContext.Current.CancellationToken);
         var head = await ReachAsync(lookalike.Position);
 
         // Act
@@ -61,8 +61,8 @@ public sealed class AllFilterTests(SqlServerTestDatabase database)
         // Arrange
         var suffix = Suffix();
         var sut = database.Store;
-        var a = await sut.AppendAsync("flt" + suffix + "-1", StreamState.NoStream, [Event("placed_" + suffix), Event("paid_" + suffix)], TestContext.Current.CancellationToken);
-        var b = await sut.AppendAsync("flt" + suffix + "-2", StreamState.NoStream, [Event("placed_" + suffix)], TestContext.Current.CancellationToken);
+        var a = await sut.AppendAsync("flt" + suffix + "-1", StreamState.NoStream, [TestEvents.Event("placed_" + suffix), TestEvents.Event("paid_" + suffix)], TestContext.Current.CancellationToken);
+        var b = await sut.AppendAsync("flt" + suffix + "-2", StreamState.NoStream, [TestEvents.Event("placed_" + suffix)], TestContext.Current.CancellationToken);
         var head = await ReachAsync(b.Position);
         var from = a.Position - 1;
 
@@ -79,8 +79,6 @@ public sealed class AllFilterTests(SqlServerTestDatabase database)
     }
 
     private static string Suffix() => Guid.NewGuid().ToString("N")[..8];
-
-    private static EventData Event(string type) => new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>Waits for the tail to reach a position, so a scan bounded by the head sees the event.</summary>
     private async Task<long> ReachAsync(long position)

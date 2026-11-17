@@ -16,22 +16,20 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class ResetTests(SqlServerTestDatabase database)
 {
-    private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
-
     [Fact]
     public async Task Reset_ShouldHideTheStreamUntilTheNextAppendWhichContinuesItsRevisions()
     {
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event(), Event()], TestContext.Current.CancellationToken);
+        var appended = await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         var category = new VirtualStreamName(VirtualStreamKind.Category, Category(stream));
 
         // Act
         await sut.ResetAsync(stream, StreamState.StreamRevision(2), TestContext.Current.CancellationToken);
         var whileReset = await sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken);
         var kept = await sut.ReadVirtualAsync(category, Direction.Forwards, 1, appended.Position, 10, TestContext.Current.CancellationToken);
-        var recreated = await sut.AppendAsync(stream, StreamState.Any, [Event()], TestContext.Current.CancellationToken);
+        var recreated = await sut.AppendAsync(stream, StreamState.Any, [TestEvents.Event()], TestContext.Current.CancellationToken);
         var afterwards = await sut.ReadAsync(stream, Direction.Forwards, null, 10, TestContext.Current.CancellationToken);
         var metadata = await sut.GetStreamMetadataAsync(stream, TestContext.Current.CancellationToken);
 
@@ -51,7 +49,7 @@ public sealed class ResetTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 5, Custom = new JsonObject { ["owner"] = "billing" } }, TestContext.Current.CancellationToken);
 
         // Act
@@ -75,14 +73,14 @@ public sealed class ResetTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.ResetAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
-        var recreation = Event();
+        var recreation = TestEvents.Event();
 
         // Act
         var first = await sut.AppendAsync(stream, StreamState.NoStream, [recreation], TestContext.Current.CancellationToken);
         var retried = await sut.AppendAsync(stream, StreamState.NoStream, [recreation], TestContext.Current.CancellationToken);
-        var conflict = await Should.ThrowAsync<RevisionConflictException>(() => sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken));
+        var conflict = await Should.ThrowAsync<RevisionConflictException>(() => sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken));
 
         // Assert: as the reference numbers it, from the revision the stream continues from; the
         // same events again are the same append, and other events find a stream that exists.
@@ -98,7 +96,7 @@ public sealed class ResetTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.ResetAsync(stream, StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act: the reference's way back, in two calls.
@@ -125,7 +123,7 @@ public sealed class ResetTests(SqlServerTestDatabase database)
         // Arrange
         var stream = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(stream, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Act
         await sut.SetStreamMetadataAsync(stream, StreamState.NoStream, new StreamMetadata { MaxCount = 5, TruncateBefore = long.MaxValue }, TestContext.Current.CancellationToken);
@@ -150,7 +148,7 @@ public sealed class ResetTests(SqlServerTestDatabase database)
         // Act
         await sut.ResetAsync(stream, StreamState.NoStream, TestContext.Current.CancellationToken);
         var metadata = await sut.GetStreamMetadataAsync(stream, TestContext.Current.CancellationToken);
-        var first = await sut.AppendAsync(stream, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var first = await sut.AppendAsync(stream, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Assert: nothing to hide, so the reset clears the metadata, and the first append is 0.
         metadata.Revision.ShouldBe(1);
@@ -167,8 +165,8 @@ public sealed class ResetTests(SqlServerTestDatabase database)
         var archived = NewStream();
         var stale = NewStream();
         var sut = database.Store;
-        await sut.AppendAsync(archived, StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        await sut.AppendAsync(stale, StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(archived, StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        await sut.AppendAsync(stale, StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await sut.ArchiveAsync(archived, StreamState.Any, TestContext.Current.CancellationToken);
 
         // Act
@@ -184,6 +182,4 @@ public sealed class ResetTests(SqlServerTestDatabase database)
     private static string NewStream() => "reset" + Guid.NewGuid().ToString("N")[..8] + "-1";
 
     private static string Category(string stream) => stream[..stream.IndexOf('-', StringComparison.Ordinal)];
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
 }

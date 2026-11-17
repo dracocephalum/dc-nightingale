@@ -20,7 +20,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed partial class StorePartitioningTests : IAsyncLifetime
 {
-    private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
     private static readonly byte[] Binary = [0x00, 0xFF, 0x80];
     private readonly string _name = TestDatabases.NewName();
 
@@ -36,7 +35,7 @@ public sealed partial class StorePartitioningTests : IAsyncLifetime
         var store = host.Store();
 
         // Act: the first append provisions the default tenant's partition and sequence.
-        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event() with { BinaryData = Binary }], TestContext.Current.CancellationToken);
+        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event(), TestEvents.Event() with { BinaryData = Binary }], TestContext.Current.CancellationToken);
         var slice = await store.ReadAsync("orders-1", Direction.Forwards, null, 10, TestContext.Current.CancellationToken);
 
         // Assert
@@ -55,7 +54,7 @@ public sealed partial class StorePartitioningTests : IAsyncLifetime
         var store = host.Store();
 
         // Act
-        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event() with { BinaryData = Binary }], TestContext.Current.CancellationToken);
+        var appended = await store.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event(), TestEvents.Event() with { BinaryData = Binary }], TestContext.Current.CancellationToken);
         var slice = await store.ReadAsync("orders-1", Direction.Backwards, null, 1, TestContext.Current.CancellationToken);
 
         // Assert
@@ -77,7 +76,7 @@ public sealed partial class StorePartitioningTests : IAsyncLifetime
         // read sent before it named the key.
         using var host = await TestDatabases.StartProvisionedHostAsync(_name, options => options.Store.Partitioning = PartitioningMode.Tenant);
         var store = host.Store();
-        await store.AppendAsync("orders-1", StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+        await store.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
         await store.SetStreamMetadataAsync("orders-1", StreamState.NoStream, new StreamMetadata { MaxCount = 1 }, TestContext.Current.CancellationToken);
         await using var context = await host.Services.GetRequiredService<IDbContextFactory<EventsDbContext>>().CreateDbContextAsync(TestContext.Current.CancellationToken);
         var tenant = JasperFx.StorageConstants.DefaultTenantId;
@@ -126,6 +125,4 @@ public sealed partial class StorePartitioningTests : IAsyncLifetime
 
     [GeneratedRegex(@"FROM \[\w+\]\.\[pc_events\] AS \[\w+\]")]
     private static partial Regex EventsTable();
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
 }

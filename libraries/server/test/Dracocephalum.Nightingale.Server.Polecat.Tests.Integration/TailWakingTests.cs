@@ -36,7 +36,7 @@ public sealed class TailWakingTests
             var store = stores.GetStreams(TenantScope.Default);
 
             // Act
-            var appended = await store.AppendAsync("orders-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [Event(), Event()], TestContext.Current.CancellationToken);
+            var appended = await store.AppendAsync("orders-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [TestEvents.Event(), TestEvents.Event()], TestContext.Current.CancellationToken);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
             var head = tail.Head;
@@ -59,6 +59,4 @@ public sealed class TailWakingTests
             await TestDatabases.DropAsync(name);
         }
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 }

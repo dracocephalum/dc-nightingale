@@ -22,9 +22,9 @@ public sealed class VirtualStreamTests(SqlServerTestDatabase database)
         // Arrange: two events in the category, then one somewhere else that moves the global head on.
         var (orders, _, placed) = Names();
         var sut = database.Store;
-        var first = await sut.AppendAsync(orders + "-1", StreamState.NoStream, [Event(placed)], TestContext.Current.CancellationToken);
-        var last = await sut.AppendAsync(orders + "-2", StreamState.NoStream, [Event(placed)], TestContext.Current.CancellationToken);
-        var elsewhere = await sut.AppendAsync("other-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [Event("unrelated")], TestContext.Current.CancellationToken);
+        var first = await sut.AppendAsync(orders + "-1", StreamState.NoStream, [TestEvents.Event(placed)], TestContext.Current.CancellationToken);
+        var last = await sut.AppendAsync(orders + "-2", StreamState.NoStream, [TestEvents.Event(placed)], TestContext.Current.CancellationToken);
+        var elsewhere = await sut.AppendAsync("other-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [TestEvents.Event("unrelated")], TestContext.Current.CancellationToken);
         var head = await ReachAsync(elsewhere.Position);
 
         // Act
@@ -41,9 +41,9 @@ public sealed class VirtualStreamTests(SqlServerTestDatabase database)
         // Arrange
         var (orders, shipments, placed) = Names();
         var sut = database.Store;
-        var a = await sut.AppendAsync(orders + "-1", StreamState.NoStream, [Event(placed), Event("paid_" + placed)], TestContext.Current.CancellationToken);
-        var b = await sut.AppendAsync(orders + "-2", StreamState.NoStream, [Event(placed)], TestContext.Current.CancellationToken);
-        var c = await sut.AppendAsync(shipments + "-1", StreamState.NoStream, [Event(placed)], TestContext.Current.CancellationToken);
+        var a = await sut.AppendAsync(orders + "-1", StreamState.NoStream, [TestEvents.Event(placed), TestEvents.Event("paid_" + placed)], TestContext.Current.CancellationToken);
+        var b = await sut.AppendAsync(orders + "-2", StreamState.NoStream, [TestEvents.Event(placed)], TestContext.Current.CancellationToken);
+        var c = await sut.AppendAsync(shipments + "-1", StreamState.NoStream, [TestEvents.Event(placed)], TestContext.Current.CancellationToken);
         var head = await ReachAsync(c.Position);
         var category = new VirtualStreamName(VirtualStreamKind.Category, orders);
         var type = new VirtualStreamName(VirtualStreamKind.EventType, placed);
@@ -110,8 +110,6 @@ public sealed class VirtualStreamTests(SqlServerTestDatabase database)
         var suffix = Guid.NewGuid().ToString("N")[..8];
         return ("vso" + suffix, "vss" + suffix, "placed_" + suffix);
     }
-
-    private static EventData Event(string type) => new(Guid.NewGuid(), type, Encoding.UTF8.GetBytes("{\"orderId\":1}"));
 
     /// <summary>Waits for the tail to reach a position, so a virtual read bounded by the head sees the event.</summary>
     private async Task<long> ReachAsync(long position)

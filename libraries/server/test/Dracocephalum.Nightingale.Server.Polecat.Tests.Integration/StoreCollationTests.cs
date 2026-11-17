@@ -16,7 +16,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class StoreCollationTests : IAsyncLifetime
 {
-    private static readonly byte[] Body = Encoding.UTF8.GetBytes("{\"orderId\":1}");
     private readonly string _name = TestDatabases.NewName();
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -29,10 +28,10 @@ public sealed class StoreCollationTests : IAsyncLifetime
         // Arrange & Act: the default collation is binary and UTF-8.
         using var host = await TestDatabases.StartProvisionedHostAsync(_name);
         var store = host.Store();
-        await store.AppendAsync("Orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        var lower = await store.AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        await store.AppendAsync("订单-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        var otherScript = await store.AppendAsync("账单-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        await store.AppendAsync("Orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        var lower = await store.AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        await store.AppendAsync("订单-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        var otherScript = await store.AppendAsync("账单-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         var read = await store.ReadAsync("账单-1", Direction.Forwards, null, 10, TestContext.Current.CancellationToken);
 
         // Assert: four streams. Under a collation that is not UTF-8 the last two would be one,
@@ -55,8 +54,8 @@ public sealed class StoreCollationTests : IAsyncLifetime
         // Act
         using var host = await TestDatabases.StartProvisionedHostAsync(_name, options => options.Store.Collation = collation);
         var store = host.Store();
-        await store.AppendAsync("Orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
-        var lower = await store.AppendAsync("orders-1", StreamState.Any, [Event()], TestContext.Current.CancellationToken);
+        await store.AppendAsync("Orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
+        var lower = await store.AppendAsync("orders-1", StreamState.Any, [TestEvents.Event()], TestContext.Current.CancellationToken);
 
         // Assert: one stream, and the record says which collation the database has.
         lower.Revision.ShouldBe(1);
@@ -95,7 +94,7 @@ public sealed class StoreCollationTests : IAsyncLifetime
         // Act: served with it, and a second start finds it as it was left.
         using (var first = await TestDatabases.StartProvisionedHostAsync(_name, Ignoring))
         {
-            var appended = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+            var appended = await first.Store().AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
             appended.Revision.ShouldBe(0);
             await first.StopAsync(TestContext.Current.CancellationToken);
         }
@@ -141,6 +140,4 @@ public sealed class StoreCollationTests : IAsyncLifetime
         exception.Message.ShouldContain("fn_helpcollations");
         (await TestDatabases.ScalarAsync<object>("master", $"SELECT ISNULL(DB_ID('{_name}'), -1)")).ShouldBe(-1);
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
 }

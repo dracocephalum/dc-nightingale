@@ -81,7 +81,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         // start said what it found.
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.__EFMigrationsHistory")).ShouldBeGreaterThan(0);
-        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         appended.Revision.ShouldBe(0);
         host.Logged().ShouldContain(entry => entry.Level == LogLevel.Warning && entry.Message.Contains("initializing it the rest of the way", StringComparison.Ordinal));
         await host.StopAsync(TestContext.Current.CancellationToken);
@@ -102,7 +102,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         verifying.Message.ShouldContain("--initialize");
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.StoreProperty")).ShouldBe(SettingRowCount);
         (await TestDatabases.ScalarAsync<int>(_name, "SELECT COUNT(*) FROM nightingale.Tenant")).ShouldBe(1);
-        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+        var appended = await host.Store().AppendAsync("orders-1", StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
         appended.Revision.ShouldBe(0);
         host.Logged().ShouldContain(entry => entry.Level == LogLevel.Warning && entry.Message.Contains("initializing it the rest of the way", StringComparison.Ordinal));
         await host.StopAsync(TestContext.Current.CancellationToken);
@@ -122,7 +122,7 @@ public sealed class StoreInitializerTests : IAsyncLifetime
             hosts.Count(host => StoreSchemaEntries(host).Count > 0).ShouldBe(1);
             foreach (var host in hosts)
             {
-                var appended = await host.Store().AppendAsync("orders-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [Event()], TestContext.Current.CancellationToken);
+                var appended = await host.Store().AppendAsync("orders-" + Guid.NewGuid().ToString("N"), StreamState.NoStream, [TestEvents.Event()], TestContext.Current.CancellationToken);
                 appended.Revision.ShouldBe(0);
                 await host.StopAsync(TestContext.Current.CancellationToken);
             }
@@ -257,6 +257,4 @@ public sealed class StoreInitializerTests : IAsyncLifetime
         refused.Message.ShouldContain("29990101000000_FromTheFuture");
         evenWhenAllowedToChange.Message.ShouldContain("newer than this server");
     }
-
-    private static EventData Event() => new(Guid.NewGuid(), "order_placed", Body);
 }
