@@ -9,11 +9,8 @@ in [`VARIANCES.md`](VARIANCES.md); what was weighed and set aside is in
 
 ## Authentication: what is left
 
-Basic authentication is in: a user name and password on every call, the
-built-in administrator from configuration, credentials and tenants in the
-gateway's tables and managed through the `Credentials` and `Tenants`
-services, roles, and the tenant header; see `VARIANCES.md`. What is left,
-in order:
+Basic authentication is in (`VARIANCES.md`, *Authentication is Basic*). What
+is left, in order:
 
 - **The Bearer scheme.** External tokens first, validated against an identity
   provider's published keys with a claim mapping onto the same principal;
@@ -29,7 +26,7 @@ in order:
 ## Protocols beyond gRPC
 
 The server is an application core with gRPC as one adapter over it
-(`DESIGN.md` §10), so a second protocol is a sibling, not a rewrite. The
+(`DESIGN.md`, seam 10), so a second protocol is a sibling, not a rewrite. The
 shape, decided so nothing here is re-derived:
 
 - **The ladder, by the reason a sibling exists.** Before any second stack,
@@ -136,11 +133,8 @@ that client calls unconditionally is in: stream metadata, `$maxAge`,
 `$acl` waiting on the authentication that is left (above); binary event
 bodies (`VARIANCES.md`, *An event has two bodies*); `$bc-`, `$streams` and
 `$category-`, by position and by ordinal; and multi-stream and conditional
-appends, as `AppendToStreams`. Parity is never bought with the core's speed:
-features come in the three tiers `GLOSSARY.md` defines, and a behaviour that
-would add a read, a write or a lock to every append, read or subscription is
-served on a path of its own, paid for by its callers alone, or written down
-as a variance with the client-side way around it.
+appends, as `AppendToStreams`. Parity is never bought with the core's speed
+(`GLOSSARY.md`, *Tier*).
 
 What the gateway has that the reference does not, deferred delivery, a
 client that resubscribes on its own, server-computed lag counts, waits for a
@@ -196,9 +190,9 @@ here is re-derived:
   variance to write when the adapter ships. The core's own client gets its
   one number per record differently, if ever (`UNSUPPORTED.md`, *A record's
   locus*).
-- **Deletes and metadata.** The reference's delete is the gateway's `Reset`
-  and its tombstone the gateway's `Delete`, one call each; the gateway's
-  `Archive` has no reference call to map. That client reads metadata as the
+- **Deletes and metadata.** `Reset` and `Delete` map one call each
+  (`VARIANCES.md`, *Reset, archive and delete*); the gateway's `Archive` has
+  no reference call to map. That client reads metadata as the
   last event of `$$<stream>` and its parser throws on a negative `$tb`, so
   the adapter translates the stored reset mark on every `$$` page it serves:
   on the last metadata event, `$tb` at its largest while the mark is beyond
@@ -225,8 +219,8 @@ here is re-derived:
   served as they are; a reference client reads links, so `$streams` serves
   each stream's first event as the resolved link, and `$category-` builds a
   `$@` event per stream from the first event, its body the stream's name.
-  The category rule is the gateway's, so a stream named just the category is
-  in it, which a reference client sees too (`VARIANCES.md`). Their numbers
+  The category rule is the gateway's, which a reference client sees too
+  (`VARIANCES.md`, *A name without a hyphen is its own category*). Their numbers
   are the link revisions a reference client counts on a store with
   ordinals, and positions on one without, the same variance as `$ce-` there.
 - **Multi-stream appends.** The v2 `AppendSession` maps onto
@@ -242,9 +236,7 @@ here is re-derived:
   deleted stream; its byte limits on a record and a transaction have no
   counterpart beside the event count.
 - **Group nacks.** The reference client's `Stop` is served as the consumer
-  leaving: its call ends, and its events in flight go back to the group,
-  not counted as a retry. The reference server skips them instead
-  (`VARIANCES.md`, *A group's nack has no Stop*).
+  leaving (`VARIANCES.md`, *A group's nack has no Stop*).
 - **Not carried, answered `Unimplemented` until the core has them:**
   projections, operations such as scavenge, and user management beyond what
   the credentials table covers. The client refuses what the feature table
@@ -412,13 +404,13 @@ its link stays. Not until a store's links are worth the space.
 
 ## Workers per store partition
 
-A journal runs one head detector, the tails' poller, and one ordinal
-sequencer, each serving every store partition in it: the shared sequence, or
-each tenant's under partitioning by tenant. The partition is already the unit
-of everything they keep, a head, a checkpoint, a progress row and a fault each,
-so running a worker per partition is a step rather than a redesign: a lease per
-partition (`ordinals:<tenant>`), a host per partition, and looks that do not
-wait on one another.
+A journal has one tail per instance and one ordinal sequencer, each serving
+every store partition in it, the shared sequence or each tenant's under
+partitioning by tenant (`DESIGN.md`, seams 4 and 6). The partition is already
+the unit of everything they keep, a head, a checkpoint, a progress row and a
+fault each, so running a worker per partition is a step rather than a
+redesign: a lease per partition (`ordinals:<tenant>`), a host per partition,
+and looks that do not wait on one another.
 
 What it buys is latency, and settings of a partition's own:
 
@@ -453,8 +445,8 @@ before it draws a position. Built with the Marten backend.
 
 A re-check of a range for events without a type link, an anti-join of the
 events against the links, for where the head can be wrong: the best-effort
-strategy, whose wait can skip a position whose row is not yet in the table when
-it ends, and a writer no horizon sees, as Marten's rich append mode. Three, by
+strategy (`DESIGN.md`, seam 4), and a writer no horizon sees, as Marten's rich
+append mode. Three, by
 window and meaning, each numbering what it finds with the next ordinal of its
 keys, so by ordinal a late event follows what was appended after it:
 
@@ -558,10 +550,9 @@ position, so a consumer sees one unbroken enumeration across reconnects.
 
 ## Moving a group's position
 
-The reference lets an update change where a group starts, which resets it.
-Here a group's start and its numbering are fixed when it is created, an
-update changes its other settings only, and a consumer that wants another
-position deletes the group and creates it again.
+A group's start and its numbering are fixed when it is created, and an update
+changes its tunables only (`VARIANCES.md`, *Updating a group changes its
+tunables*).
 Moving a group in place, back to replay a stretch or forward to skip one, is
 wanted and parked: it has to say what becomes of the parked messages and the
 outbox on either side of the new position, of events in flight, and of a
@@ -570,11 +561,10 @@ consumer is connected.
 
 ## A relay inside the cluster
 
-A persistent-subscription group runs in exactly one instance at a time, the
-one holding its lease, and the lease carries that instance's address: an
-instance asked for a group another runs refuses with the address, and the
-client goes there itself, as the reference client does. That needs clients
-to reach each instance directly, which holds inside one network. A client
+An instance asked for a group another runs refuses with the owner's address,
+and the client goes there itself (`VARIANCES.md`, *A group's info comes from
+its own instance, and a listing from the store*). That needs clients to reach
+each instance directly, which holds inside one network. A client
 that can reach one load-balanced address only would need the instance it
 reached to open the same call to the owner and relay both directions, one
 hop, with a header that stops a second hop. It sits on the same lease-carried
@@ -700,9 +690,9 @@ re-derived:
   makes the choice in the statement itself, as dynamic SQL, since it runs on a
   server the gateway has not seen.
 - **The lock wait inside the statement.** An online build still takes the
-  table's schema lock briefly at its start and its end, and a build queued for
-  it behind a long reader queues everything after it, the reason
-  `Nightingale:SchemaLockWaitTimeout` exists. An online statement carries its
+  table's schema lock briefly at its start and its end, so
+  `Nightingale:SchemaLockWaitTimeout` applies to it (`DESIGN.md`, seam 3). An
+  online statement carries its
   own low-priority wait from the same setting, `WAIT_AT_LOW_PRIORITY
   (MAX_DURATION = …, ABORT_AFTER_WAIT = SELF)`, which waits without holding
   anyone up; its duration counts whole minutes, and which versions accept it
@@ -734,7 +724,7 @@ regular-expression functions can move the filter into the query.
 ## Marten backend
 
 The same gateway over Marten on PostgreSQL. The event wrapper, the feed
-abstraction and the tailer are backend-neutral by design; the wake-up
+abstraction and the tails are backend-neutral by design; the wake-up
 (PostgreSQL has notifications) is a backend's own. Read against Marten's
 source and tried on PostgreSQL, nothing stops it, and the store is taken as it
 ships:
