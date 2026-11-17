@@ -634,7 +634,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
             foreach (var record in page.Events)
             {
-                await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
             }
 
             remaining -= (ulong)page.Events.Count;
@@ -678,7 +678,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                 var slice = await store.ScanAllAsync(filter, direction, from, head, ScanWindow, (int)Math.Min(remaining, PageSize), cancellationToken).ConfigureAwait(false);
                 foreach (var record in slice.Events)
                 {
-                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                 }
 
                 remaining -= (ulong)slice.Events.Count;
@@ -699,7 +699,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             var page = await store.ReadAllAsync(direction, from, head, pageSize, cancellationToken).ConfigureAwait(false);
             foreach (var record in page)
             {
-                await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
             }
 
             remaining -= (ulong)page.Count;
@@ -751,7 +751,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
                     foreach (var record in page.Events)
                     {
-                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                     }
 
                     if (page.Events.Count > 0)
@@ -792,7 +792,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                             break;
                         }
 
-                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                         next = record.Revision + 1;
                         head = record.Revision;
                         delivered = true;
@@ -844,12 +844,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             // From the end means after now, so the head is brought up to date first; from anywhere
             // else the catch-up reads whatever the poller has seen and the router delivers the rest.
             var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
-            var next = request.FromCase switch
-            {
-                ReadRequest.FromOneofCase.Position => request.Position,
-                ReadRequest.FromOneofCase.End => head + 1,
-                _ => 0,
-            };
+            var next = request.GetStartPosition(head);
             await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = head } }, cancellationToken).ConfigureAwait(false);
 
             while (true)
@@ -866,7 +861,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
                     foreach (var record in page)
                     {
-                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                     }
 
                     next = page.Count < PageSize ? head + 1 : page[^1].Position + 1;
@@ -884,7 +879,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                             continue;
                         }
 
-                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                         next = record.Position + 1;
                         head = record.Position;
                         delivered = true;
@@ -923,12 +918,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
         try
         {
             var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
-            var next = request.FromCase switch
-            {
-                ReadRequest.FromOneofCase.Position => request.Position,
-                ReadRequest.FromOneofCase.End => head + 1,
-                _ => 0,
-            };
+            var next = request.GetStartPosition(head);
             await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = head } }, cancellationToken).ConfigureAwait(false);
 
             // Positions examined since the last event delivered or checkpoint sent.
@@ -940,7 +930,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                     var slice = await store.ScanAllAsync(filter, Direction.Forwards, next, head, ScanWindow, PageSize, cancellationToken).ConfigureAwait(false);
                     foreach (var record in slice.Events)
                     {
-                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                     }
 
                     quiet = slice.Events.Count > 0 ? slice.Through - slice.Events[^1].Position : quiet + slice.Through - next + 1;
@@ -968,7 +958,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                         head = record.Position;
                         if (filter.Matches(record.Stream, record.Type))
                         {
-                            await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                            await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                             delivered = true;
                             quiet = 0;
                         }
@@ -1030,7 +1020,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             var page = await store.ReadVirtualAsync(stream, direction, from, head, pageSize, cancellationToken).ConfigureAwait(false);
             foreach (var record in page)
             {
-                await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
             }
 
             remaining -= (ulong)page.Count;
@@ -1058,12 +1048,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             var head = request.FromCase == ReadRequest.FromOneofCase.End ? await tail.RefreshAsync(cancellationToken).ConfigureAwait(false) : tail.Head;
             var bounds = await store.VirtualHeadAsync(stream, head, cancellationToken).ConfigureAwait(false);
             var own = bounds?.Last ?? -1;
-            var next = request.FromCase switch
-            {
-                ReadRequest.FromOneofCase.Position => request.Position,
-                ReadRequest.FromOneofCase.End => head + 1,
-                _ => 0,
-            };
+            var next = request.GetStartPosition(head);
             await responseStream.WriteAsync(new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = id, Head = own } }, cancellationToken).ConfigureAwait(false);
 
             // The first catch-up always says it is done, even with nothing to deliver; a catch-up
@@ -1087,7 +1072,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
                     foreach (var record in page)
                     {
-                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                         own = record.Position;
                         delivered = true;
                     }
@@ -1110,7 +1095,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
                             continue;
                         }
 
-                        await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                        await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                         own = record.Position;
                         next = record.Position + 1;
                         delivered = true;
@@ -1169,7 +1154,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
             var page = await store.ReadByOrdinalAsync(stream, direction, from, pageSize, cancellationToken).ConfigureAwait(false);
             foreach (var record in page)
             {
-                await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
             }
 
             remaining -= (ulong)page.Count;
@@ -1232,7 +1217,7 @@ public sealed class StreamsService(ITenantStores stores, StreamRouters routers, 
 
                 foreach (var record in page)
                 {
-                    await responseStream.WriteAsync(new ReadResponse { Event = record.ToRecordedEvent() }, cancellationToken).ConfigureAwait(false);
+                    await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
                     own = GetOrdinal(record);
                     delivered = true;
                 }
