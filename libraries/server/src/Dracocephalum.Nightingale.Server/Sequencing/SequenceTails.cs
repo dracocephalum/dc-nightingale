@@ -9,22 +9,11 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
 /// The tails of a journal: a sequence head per sequence, the shared one or each tenant's, kept by
-/// one poller for the process, every backend's. A head is the last position up to which every
-/// event of its sequence is final, found by extending it through the positions that follow it one
-/// by one. A gap, a position taken by a transaction not yet committed or one that never will be,
-/// is judged by a <see cref="HorizonCheckpoint"/> over the highest position seen when it was first
-/// seen; once the checkpoint is final the head moves to its ceiling at once, the whole span with
-/// it, and extends from there. The strategy that judges is chosen once, when the tails start: the
-/// database's transaction horizon where it answers, the stale threshold where it does not, and it
-/// holds for the life of the process. One round trip per look finds which sequences moved, and
-/// only those are read; the interval is the fast one while a look moved a head and left it short
-/// of positions already seen past it, a head catching up, or while a gap waits on its checkpoint,
-/// and the slow one once every head has caught up. An append
-/// made through this process cuts either short: the poller waits on the append signal. A sequence
-/// is followed from the first time its tail is asked for, for the life of the process, beginning
-/// at the head kept for it in the gateway's own table, which every look raises and stamps. A look
-/// that fails is logged and taken again at the next interval: the heads stay where they were, and
-/// whoever waits on them waits on.
+/// one poller for the process, every backend's. A sequence is followed from the first time its tail
+/// is asked for, for the life of the process, beginning at the head kept for it in the gateway's
+/// own table. A look that fails is logged and taken again at the next interval: the heads stay
+/// where they were, and whoever waits on them waits on. How a head moves, how a gap is judged and
+/// when the poller looks are <c>DESIGN.md</c>, seam 4.
 /// </summary>
 public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
 {

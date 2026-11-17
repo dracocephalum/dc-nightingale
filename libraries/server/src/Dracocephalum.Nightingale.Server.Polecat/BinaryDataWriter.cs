@@ -9,26 +9,12 @@ using Microsoft.Data.SqlClient;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// Writes the binary data of an append's events beside their JSON, in the append's own
-/// transaction. The store writes every event as JSON, with its binary column null, because the
-/// gateway registers no binary serializer: the store's binary path takes one body or the other
-/// and needs a serializer per event type. This participant then sets the binary column of the
-/// rows the store inserted, after all of the store's statements and before its commit, which is
-/// the store's promise to a transaction participant, so a reader never sees the JSON without
-/// its binary data and a failure here rolls the whole append back.
-/// <para>
-/// One statement whatever the number of events, its own command with its own parameters, so the
-/// store's limit on events in one append is untouched. Each row is found by its position, which
-/// the store has read back by now, and checked by its id, tenant and stream; the store's key
-/// leads with the position, so it is a seek of the key, in the tenant's partition on a store
-/// partitioned by tenant. Fewer rows than events refuses the append rather than store an event
-/// without the data it was sent with.
-/// </para>
-/// <para>
-/// The store's own readers take a row with both columns for a binary event and refuse it for
-/// want of a serializer. The gateway never reads events through them; it reads the table
-/// through its own mirror.
-/// </para>
+/// Writes the binary data of an append's events beside their JSON, in the append's own transaction:
+/// a participant the store runs after all of its statements and before its commit, so a reader
+/// never sees the JSON without its binary data, and a failure here rolls the whole append back.
+/// Fewer rows than events refuses the append rather than store an event without the data it was
+/// sent with. Why the store's own binary path is not used, and what its readers make of such a row,
+/// are <c>DESIGN.md</c>, seam 1.
 /// </summary>
 /// <param name="schema">The schema of the store's tables.</param>
 /// <param name="tenantId">The tenant the append writes in.</param>
@@ -67,6 +53,10 @@ internal sealed class BinaryDataWriter(string schema, string tenantId, string st
 
     private string BuildSql()
     {
+        // One statement whatever the number of events. Each row is found by its position, which
+        // the store has read back by now and which leads the store's key, so it is a seek of the
+        // key, in the tenant's partition on a store partitioned by tenant; its id, tenant and
+        // stream are checked on the row found.
         var sql = new StringBuilder();
         sql.Append(CultureInfo.InvariantCulture, $"UPDATE e SET bdata = v.bdata FROM {Quote(schema)}.[pc_events] AS e JOIN (VALUES ");
         for (var i = 0; i < events.Count; i++)

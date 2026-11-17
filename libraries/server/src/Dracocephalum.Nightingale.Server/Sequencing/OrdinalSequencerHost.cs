@@ -4,21 +4,13 @@ using Microsoft.Extensions.Logging;
 namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>
-/// The host of the ordinal sequencer: one per cluster, on the same lease persistent-subscription
-/// groups use, walking every sequence behind its head in batches, each sequenced by the backend's
-/// <see cref="IOrdinalSequencer"/>, which gives every event of the range its place, as links in the
-/// gateway's own table, and records the progress in the same transaction. The append path is
-/// untouched, because numbering at append time would serialize every append to a category; the
-/// price is that ordinals lag the head by this loop's cadence, which is the tails'. Nothing commits
-/// below the head once it has passed, since the tails pass a missing position only once it is
-/// final, by the transaction horizon, or by the best-effort strategy's wait over reads that wait on
-/// an open row; so a range numbered is never looked at again (<c>PENDING.md</c>, *Scrubs*, for
-/// what that wait can miss). Under a sequence per tenant there is a sequence, a head and a
-/// progress row per tenant, and the sequencer walks each in turn. How far each sequence is
-/// numbered is published in process as each batch commits, for the subscriptions that wait on
-/// it; while another instance holds the lease, the follower publishes it from the progress rows
-/// instead, between one ask for the lease and the next. Every backend runs this host; only the
-/// sequencer, a batch, is its own.
+/// The host of the ordinal sequencer: one per journal in the cluster, on the same lease
+/// persistent-subscription groups use, walking every sequence behind its head in batches, each
+/// sequenced by the backend's <see cref="IOrdinalSequencer"/>. How far each sequence is numbered is
+/// published in process as each batch commits, for the subscriptions that wait on it; while another
+/// instance holds the lease, the follower publishes it from the progress rows instead. Every
+/// backend runs this host; only the batch is its own. Why after commit, why a numbered range is
+/// never looked at again, and the disabled and faulted states are <c>DESIGN.md</c>, seam 6.
 /// </summary>
 /// <param name="leases">Where the lease is taken.</param>
 /// <param name="sequences">The sequences to number, each with the head the sequencer never passes.</param>

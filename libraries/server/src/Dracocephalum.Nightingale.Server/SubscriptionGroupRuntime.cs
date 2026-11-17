@@ -6,25 +6,15 @@ using Dracocephalum.Nightingale;
 namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
-/// A persistent-subscription group while consumers are connected to it, in memory in the
-/// instance that owns its lease. It reads the group's stream from the checkpoint, delivers each
-/// event to one consumer, the one the group's strategy picks among those with room, and keeps
-/// every delivered event in flight until it is acknowledged, refused, or times out. The
-/// checkpoint is the last position every delivered event up to which is done, acknowledged,
-/// skipped or parked, and is written, whenever it has moved, on the group's policy and when the
-/// group stops. A group over a stream counts in revisions; one over <c>$all</c> or a virtual
-/// stream in positions, or in ordinals when it was created under ordinal numbering, which then
-/// keys its checkpoint and its parked messages too. Delivery has the reference's shape: a list
-/// of retries served before the live buffer. What is due on the outbox joins the retries, when
-/// the group starts and whenever it is woken, which a replay does, so a replayed message goes
-/// out ahead of the next event the stream would have sent; a refused event that may be tried
-/// again goes straight back, ahead of anything new. What a consumer asks for, an acknowledgement,
-/// a refusal, is applied to the store to completion even when the consumer leaves the moment it
-/// asked: its departure ends its deliveries, never the bookkeeping, and what it had in flight
-/// goes back to be delivered to the consumers that remain, not counted against the event.
-/// Every write to the store is fenced by the group's lease; one the store refuses, because the
-/// lease is no longer this instance's, ends every consumer's call with who owns the group now,
-/// the same answer a refused renewal gives.
+/// A persistent-subscription group while consumers are connected to it, in memory in the instance
+/// that owns its lease: it reads the group's stream from the checkpoint, delivers each event to one
+/// consumer by the group's strategy, and keeps it in flight until it is acknowledged, refused or
+/// timed out. What a consumer asks for is applied to the store to completion even when the consumer
+/// leaves the moment it asked: its departure ends its deliveries, never the bookkeeping, and what
+/// it had in flight goes back to the consumers that remain, not counted against the event. Every
+/// write is fenced by the group's lease, and one the store refuses ends every consumer's call with
+/// who owns the group now. The checkpoint, the order of delivery and the lease are
+/// <c>DESIGN.md</c>, seam 5.
 /// </summary>
 internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
 {

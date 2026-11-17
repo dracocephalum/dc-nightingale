@@ -157,8 +157,8 @@ without a hyphen is its own category*.
 `AugmentedPolecatDatabase` is that seam. It is the store's database class with one
 override: when the store builds its feature schemas, the event-store feature
 is wrapped in `PatchedEventStoreFeature`, which adds the column and indexes to
-the events table, and on a store initialized with ordinals the two ordinal
-columns and their filtered indexes (seam 6), and the gateway's own tables are
+the events table, the same on a store with ordinals and without (seam 6), and
+the gateway's own tables are
 added as a feature beside it. `SingleTenancy` exists only to hand this database class
 to the store, because the store's default tenancy always builds the plain one.
 
@@ -420,7 +420,11 @@ client that can reach one load-balanced address only, would sit on the same
 lease-carried address and is not built.
 
 The checkpoint is the last position every delivered event up to which is
-done: acknowledged, skipped, or parked. A group over `$all` may carry a
+done: acknowledged, skipped, or parked; it is written, whenever it has moved,
+on the group's policy and when the group stops. A group over a stream counts
+in revisions, one over `$all` or a virtual stream in positions, or in
+ordinals when it was created under ordinal numbering (seam 6). A group over
+`$all` may carry a
 filter, fixed at creation; its feed then comes from the store's scan a
 stretch at a time, and a stretch the filter keeps nothing of travels through
 the feed as a marker, after the events before it, so the runtime moves the
@@ -448,15 +452,18 @@ store one poll per interval. A subscription confirms with the head, catches
 up in pages, says so, then delivers whatever each advance brings, through
 `StreamRouter`, one per tenant's store, which reads each advance once for
 every subscription that follows it. It reads where the advanced range's
-events are once, their stream, revision and type without their bodies,
-matches them in process against every followed stream, category and type,
-and reads the events of each stream that matched something; when `$all` is
+events are once, their stream, revision, type and correlation id without
+their bodies, matches them in process against every followed stream,
+category, type and correlation, and against the listings for an event that
+begins its stream, and reads the events of each stream that matched
+something; when `$all` is
 followed, one read of the range with its bodies serves everyone instead. So
 an advance costs reads in the number of events, not of subscriptions nor of
 names followed. A subscription follows the router before its catch-up reads,
 so an event the reads do not see yet is one the router brings. A plain
 stream's subscription delivers only in revision order, reading its stream
-again when the router brings something ahead of its next revision; one by
+again when the router brings something ahead of its next revision, which an
+append whose position landed above a gap can do; one by
 position skips what it delivered already. A follower that leaves too much
 unread lapses and catches up itself from where it stands, the reference
 server's own answer to a full live buffer. A subscription to `$all` under a

@@ -7,30 +7,13 @@ using Microsoft.Extensions.Logging;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// Owns the database, at startup and before any request is served, as far as the host's
-/// <see cref="SchemaMode"/> lets it. The rule: the server initializes only a database that is
-/// empty, and never changes a store while serving it unless told to. In <see cref="SchemaMode.Verify"/>
-/// it changes nothing and refuses whatever is not what this server expects, naming the mode or
-/// the switch that would fix it; in <see cref="SchemaMode.Migrate"/> it applies what an initialized
-/// store is behind on; in <see cref="SchemaMode.Initialize"/> it creates a missing database, with
-/// the configured collation, initializes an empty one, created here or provisioned by hand, and
-/// finishes an initialization that died half-way. Initializing is the event store's tables and
-/// then the gateway's own, while every table is empty, and then every row of the store's record
-/// in one transaction, the row saying who initialized it last: the next start reads that row as
-/// "initialized", so a record is either complete or absent. An initialized database is refused
-/// when it is newer than this server, or when the configuration contradicts the settings it was
-/// initialized with. A database with tables that the gateway never initialized is refused
-/// outright, it is not ours, unless the tables are all the server's own and all empty but for the
-/// migrations' history, which is what an initialization that died leaves: that one is initialized
-/// the rest of the way. Every start takes the schema lock, shared to verify and exclusive to
-/// change, after the database exists and before it reads anything of it, so instances starting
-/// together do the work once and never see it half-done; creating the database is the one step no
-/// lock can cover, and a database another instance created first is taken as made. The store's
-/// own schema management stays off throughout, because its table ensurer would rebuild the events
-/// table from the unpatched definition on first use. What is pending and how it is applied is
-/// <see cref="IStoreSchema"/>'s, and the database itself is <see cref="IStoreDatabase"/>'s; this
-/// decides when, and holds no connection of its own, so every decision in it is tested without a
-/// database.
+/// Decides, at startup and before any request is served, what the host's <see cref="SchemaMode"/>
+/// lets the server do to its database: verify it, apply what an initialized store is behind on, or
+/// create and initialize it; and refuses a database that is not this server's, or is newer than it,
+/// or was initialized with other settings. What is pending and how it is applied is <see
+/// cref="IStoreSchema"/>'s, and the database itself is <see cref="IStoreDatabase"/>'s; this decides
+/// when, and holds no connection of its own, so every decision in it is tested without a database.
+/// The rule, the modes, the schema lock and what is refused are <c>DESIGN.md</c>, seam 3.
 /// </summary>
 /// <param name="database">The database: whether it is there, making it, its collation, its lock.</param>
 /// <param name="schema">Reports what the database needs, and applies it.</param>

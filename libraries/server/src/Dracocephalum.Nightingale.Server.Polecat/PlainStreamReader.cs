@@ -5,22 +5,13 @@ using Microsoft.Extensions.Logging;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// Reads a plain stream from the events table through the mirror of it, with the stream's
-/// metadata applied as the reference applies it to a read of a stream. Two statements, as the
-/// store's own fetch took: the first finds the stream's row and, beside it in the same statement,
-/// the last event of its metadata stream, a <c>TOP 1</c> seek backwards on the store's unique
-/// index of a stream's versions, so a stream whose metadata was never set pays a probe of a few
-/// index pages and no round trip. The second reads the page, with the lower bound of
-/// <c>$maxCount</c> and <c>$tb</c> as the start of its seek on that index and <c>$maxAge</c> as a
-/// check of each row's timestamp against the database's clock, the clock that stamped it. Neither
-/// is cached: every instance appends and sets metadata, so a cache would serve what a change has
-/// hidden until it learned of the change.
-/// <para>
-/// A metadata stream is read as it is stored, its whole history: the reference reads only its
-/// last event, under a <c>$maxCount</c> of one of its own, which is a variance. So is a read of
-/// the stream as stored, which the router asks for: what an append brought goes to the followers
-/// of the stream's category and event type too, which metadata does not concern.
-/// </para>
+/// Reads a plain stream from the events table through the mirror of it, with the stream's metadata
+/// applied as the reference applies it to a read of a stream, in the two statements the read takes
+/// and with nothing cached. A metadata stream is read as it is stored, its whole history, which is
+/// a variance; so is the read of a stream as stored that the router asks for, since what an append
+/// brought goes to the followers of the stream's category and event type too, which metadata does
+/// not concern. The statements, their indexes and why there is no cache are <c>DESIGN.md</c>, seam
+/// 7.
 /// </summary>
 /// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
 /// <param name="tenantId">The tenant every read is scoped to; a stream name is per tenant.</param>
