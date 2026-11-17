@@ -29,7 +29,7 @@ work from memory.
 | `publish` | put a local repository that has no remote on the host | host file, *Publishing a repository* |
 | `start <#issue \| "description">` | ensure a ticket exists (`/change-tracking new` when it does not), create the linked branch, switch to it | change tracking, *Before any work*; tracker file, *Tickets* |
 | `commit` | stage what the user indicates and commit | source control, *Commits* |
-| `pr` | open a draft pull request from the template | source control, *Opening a change request*; host file, *Pull requests* |
+| `pr` | open a draft pull request, its body shaped to the change | source control, *Opening a change request*; host file, *Pull requests* |
 | `setup` | apply the merge settings and the default-branch ruleset once | host file, *Repository settings* |
 
 ## Always

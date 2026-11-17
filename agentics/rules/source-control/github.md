@@ -75,7 +75,7 @@ history lacks, and the push is rejected).
 | Step | Command |
 |---|---|
 | open, as a draft | `gh pr create --draft --title "#<ticket> <type>(<scope>): <summary>" --body-file <file>` |
-| the body | from `.github/PULL_REQUEST_TEMPLATE.md`, written to a file, opening with `Closes #<ticket>` |
+| the body | written to a file, opening with `Closes #<ticket>`, shaped as [`source-control.md`](source-control.md), *Opening a change request*, says; `.github/PULL_REQUEST_TEMPLATE.md` prefills the web form only, and a body sent with `--body-file` never passes through it |
 | update the description | `gh pr edit <n> --body-file <file>` |
 | ready for review | `gh pr ready <n>`, then `gh pr edit <n> --add-reviewer <login>` |
 | see it whole | `gh pr view <n> --json title,body,files,reviews,comments` |

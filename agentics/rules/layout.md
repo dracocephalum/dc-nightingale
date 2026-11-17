@@ -417,7 +417,7 @@ accident.
 | Package | Role |
 |---|---|
 | `xunit.v3` | the framework, and with it Microsoft.Testing.Platform — every test project is an executable |
-| `Microsoft.Testing.Extensions.CodeCoverage` | coverage, cobertura out, settings in `coverage.config` |
+| `coverlet.MTP` | coverage, cobertura out, asked for on the command line |
 | `FakeItEasy` | faking |
 | `FakeItEasy.Analyzer.CSharp` | catches FakeItEasy misuse at compile time |
 | `AutoFixture` | test data generation |
@@ -448,8 +448,9 @@ actually referenced by the application:
 
 `xunit.v3` pairs with `Xunit.Combinatorial` **2.x** (1.x is the xunit 2 line)
 and brings Microsoft.Testing.Platform with it, which is why the coverage
-collector is the platform's own extension and not coverlet — a VSTest data
-collector cannot run there. Taking "latest" for each package independently
+collector is `coverlet.MTP` and not `coverlet.collector` — a VSTest data
+collector cannot run there, and the extension is built against one platform
+version, so it moves with `xunit.v3`. Taking "latest" for each package independently
 produces exactly those mismatches. Move the whole set together, and run
 `dotnet test` afterwards to confirm.
 

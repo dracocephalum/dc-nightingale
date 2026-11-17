@@ -30,9 +30,9 @@
       xunit v3 runs on Microsoft.Testing.Platform: every test project is an
       executable that runs its own tests, and on .NET 10 SDK the old VSTest path
       is refused outright. These three make `dotnet test` use the platform;
-      global.json at the root opts the command itself in. Coverage is the
-      platform's own extension (referenced below), configured by coverage.config
-      at the root and passed on the command line - the unit-test rules say how.
+      global.json at the root opts the command itself in. Coverage is coverlet's
+      extension for the platform (referenced below), asked for on the command
+      line - the unit-test rules say how.
     -->
     <OutputType>Exe</OutputType>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
@@ -55,7 +55,7 @@
   -->
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="coverlet.MTP" />
 
     <!-- [CombinatorialData] / [PairwiseData] theories; 2.x is the xunit v3 line. -->
     <PackageReference Include="Xunit.Combinatorial" />

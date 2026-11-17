@@ -74,9 +74,11 @@
                               global.json carry the opt-in)
       xunit.v3            <-> Xunit.Combinatorial 2.x
                               (1.x is the xunit 2 line)
-      coverage            <-> Microsoft.Testing.Extensions.CodeCoverage
-                              (coverlet.collector is a VSTest data collector
-                              and does not run under the platform)
+      coverage            <-> coverlet.MTP
+                              (coverlet's extension for the platform, built
+                              against the Microsoft.Testing.Platform version
+                              xunit.v3 brings; coverlet.collector is a VSTest
+                              data collector and does not run there)
       Mvc.Testing 10.0.x  <-> net10.0
                               (tracks the ASP.NET Core version of the TFM)
   -->
@@ -86,7 +88,7 @@
          abstract tests that test projects derive from; the same release as xunit.v3. -->
     <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.3" />
     <PackageVersion Include="Xunit.Combinatorial" Version="2.1.43" />
-    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0" />
+    <PackageVersion Include="coverlet.MTP" Version="10.1.1" />
 
     <PackageVersion Include="FakeItEasy" Version="9.0.1" />
     <PackageVersion Include="FakeItEasy.Analyzer.CSharp" Version="6.1.1" />
