@@ -15,6 +15,11 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// over the threshold is refused for the lockout duration; the administrator's count is kept
 /// here, per instance. Every refusal is the same refusal: which part was wrong is not said.
 /// </summary>
+/// <param name="settings">The authentication settings: the administrator, the cache and the lockout.</param>
+/// <param name="hasher">Hashes a password and verifies one against a hash.</param>
+/// <param name="credentials">The credentials table.</param>
+/// <param name="time">The clock.</param>
+/// <param name="logger">The logger.</param>
 public sealed partial class BasicAuthenticator(NightingaleOptionsBase.AuthSettings settings, PasswordHasher hasher, ICredentialStore credentials, TimeProvider time, ILogger<BasicAuthenticator> logger)
 {
     /// <summary>The scheme, as it appears in the header.</summary>

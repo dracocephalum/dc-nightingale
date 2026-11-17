@@ -495,9 +495,11 @@ public sealed class PersistentSubscriptionsService(ITenantStores stores, Subscri
     /// under ordinal numbering.
     /// </summary>
     private static SubscriptionParkedNumber GetNumberKind(SubscriptionGroupDefinition definition) =>
-        definition.Settings.Numbering == Numbering.Ordinal ? SubscriptionParkedNumber.Ordinal
-        : StreamNames.IsReserved(definition.Stream) ? SubscriptionParkedNumber.Position
-        : SubscriptionParkedNumber.Revision;
+        definition.Settings.Numbering == Numbering.Ordinal
+            ? SubscriptionParkedNumber.Ordinal
+            : StreamNames.IsReserved(definition.Stream)
+                ? SubscriptionParkedNumber.Position
+                : SubscriptionParkedNumber.Revision;
 
     private static long PickNumber(SubscriptionParkedNumber by, long position, long revision, long? ordinal) => by switch
     {

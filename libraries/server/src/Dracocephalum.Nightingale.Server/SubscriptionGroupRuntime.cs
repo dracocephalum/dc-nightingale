@@ -93,10 +93,13 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
         // a virtual stream by position means after the head as it is at this moment. A plain stream
         // from its end needs the stream's own head, and a virtual stream by ordinal its last
         // ordinal, which are reads the reader does.
-        _from = definition.Checkpoint >= 0 ? definition.Checkpoint + 1
-            : !definition.Settings.Start.IsEnd ? definition.Settings.Start.Value
-            : _byPosition ? tail.Head + 1
-            : null;
+        _from = definition.Checkpoint >= 0
+            ? definition.Checkpoint + 1
+            : !definition.Settings.Start.IsEnd
+                ? definition.Settings.Start.Value
+                : _byPosition
+                    ? tail.Head + 1
+                    : null;
 
         _reader = Task.Run(() => ReadAsync(_stopping.Token));
         _dispatcher = Task.Run(() => DispatchAsync(_stopping.Token));
@@ -425,9 +428,11 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     }
 
     private long GetKey(EventRecord record) =>
-        _byOrdinal ? record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.")
-        : _byPosition ? record.Position
-        : record.Revision;
+        _byOrdinal
+            ? record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.")
+            : _byPosition
+                ? record.Position
+                : record.Revision;
 
     private void MarkDone(long key)
     {

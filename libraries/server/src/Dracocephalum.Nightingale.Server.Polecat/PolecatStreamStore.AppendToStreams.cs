@@ -4,7 +4,7 @@ using Polecat.Exceptions;
 
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
-/// <summary>
+/// <content>
 /// The append to several streams. One session holds every stream's append, so the store writes
 /// them in one transaction, each checked against its expected state as a single append is, and
 /// positions them stream by stream in the order given. Checks on streams not written are the
@@ -14,7 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// not hold is reported; what a single append would retry, a metadata set expecting any revision,
 /// an append expecting no stream to a stream that is reset, is decided again and the whole append
 /// written again.
-/// </summary>
+/// </content>
 internal sealed partial class PolecatStreamStore
 {
     /// <summary>SQL Server's error for a transaction chosen as a deadlock's victim: two appends that each check what the other writes.</summary>

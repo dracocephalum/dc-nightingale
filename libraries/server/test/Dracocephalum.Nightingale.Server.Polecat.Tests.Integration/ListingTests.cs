@@ -13,6 +13,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// on <c>$all</c>. The shared database has other tests' events in it, so every read is bounded by
 /// these tests' own positions and checked against these tests' own streams.
 /// </summary>
+/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class ListingTests(SqlServerTestDatabase database)

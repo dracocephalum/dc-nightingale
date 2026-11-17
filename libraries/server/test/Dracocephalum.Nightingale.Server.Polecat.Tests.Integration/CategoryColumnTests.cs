@@ -12,6 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// the router matches categories from the name, and a read by category matches the column, so the
 /// two rules must be one. The shared database has other tests' events in it; only these streams are read.
 /// </summary>
+/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class CategoryColumnTests(SqlServerTestDatabase database)

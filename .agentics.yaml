@@ -5,7 +5,7 @@
 
 toolkit:
   url: https://github.com/dracocephalum/dc-agentics
-  commit: "a69ef1e59b42"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
+  commit: "3d6a5dade47f"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
   payload-path: "repo/payload"         # where the payload lived AT that commit - the toolkit restructures, and an upgrade diffing the wrong root sees every file as new. Fixed value, not a placeholder
   initialized: "2026-09-14"            # yyyy-mm-dd
   by: "Claude Code / claude-fable-5-1" # e.g. Claude Code / claude-fable-5-1
@@ -55,8 +55,8 @@ guidelines:
   # over from the toolkit at initialization. Not a requirement: another model
   # works, but rules it does not infer by default are the ones it will miss.
   # Fixed values, not placeholders - they describe the toolkit, not this repo.
-  model-baseline: "claude-opus-5, claude-fable-5-1"
-  verified: "2026-09-07"               # last end-to-end initialization trial on that line
+  model-baseline: "claude-opus-5, claude-fable-5-1, claude-fable-5-2"
+  verified: "2026-11-17"               # last end-to-end initialization trial on that line
 rules:
   # What the toolkit owns and what this repository adds - agentics/rules/layout.md,
   # "The toolkit's rules and the repository's". agentics/ and the toolkit's shims under

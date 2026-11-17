@@ -30,7 +30,11 @@ internal sealed class JsonEvent : Event<JsonElement>, IEvent
     /// <inheritdoc/>
     string IEvent.EventTypeName
     {
-        get => _typeName;
+        get
+        {
+            return _typeName;
+        }
+
         set
         {
             // The store assigns its CLR-derived name here on every append. The client's name wins.

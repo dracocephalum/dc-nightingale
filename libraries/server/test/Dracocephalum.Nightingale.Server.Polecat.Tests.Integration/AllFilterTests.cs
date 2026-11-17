@@ -13,6 +13,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// scan backwards. The shared database holds other tests' events, so every name here carries a
 /// suffix of its own and the scans are bounded to the positions appended here.
 /// </summary>
+/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class AllFilterTests(SqlServerTestDatabase database)

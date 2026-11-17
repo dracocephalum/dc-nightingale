@@ -116,9 +116,11 @@ public sealed class EventFilter
 
     /// <inheritdoc/>
     public override string ToString() =>
-        Regex is not null ? $"{Target} matches /{Regex}/"
-        : Exact.Count > 0 ? $"{(Target == EventFilterTarget.StreamName ? "Category" : Target.ToString())} is {string.Join(" | ", Exact)}"
-        : $"{Target} begins with {string.Join(" | ", Prefixes)}";
+        Regex is not null
+            ? $"{Target} matches /{Regex}/"
+            : Exact.Count > 0
+                ? $"{(Target == EventFilterTarget.StreamName ? "Category" : Target.ToString())} is {string.Join(" | ", Exact)}"
+                : $"{Target} begins with {string.Join(" | ", Prefixes)}";
 
     private static string[] RequireValues(string[] values, string what)
     {
