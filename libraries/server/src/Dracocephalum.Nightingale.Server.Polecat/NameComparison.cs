@@ -5,14 +5,9 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <summary>
 /// How the database compares names, as near as the process can: the comparer the router matches
 /// stream names, categories and event types with, so that a name matches live as it matches on a
-/// read. Under a binary collation, the default, the database compares code points and so does
-/// <see cref="StringComparer.Ordinal"/>: exact. Under a linguistic collation the comparer is built
-/// from what the collation says it ignores, case, accents, kana, width, and its locale, which is
-/// the same flags on a different engine: SQL Server's weights and .NET's are not the same in every
-/// corner, so a name could match on one and not the other there, which <c>VARIANCES.md</c> records.
-/// Ordinal until the initializer has read the database's collation, which it does before anything
-/// is served. Matching by the database itself, every followed name handed to one query, stays the
-/// exact alternative should that corner matter; <c>DESIGN.md</c> keeps its shape.
+/// read. Ordinal until the initializer has read the database's collation, which it does before
+/// anything is served. How the comparer follows the collation, where the two engines can differ and
+/// the exact alternative are <c>DESIGN.md</c>, seam 5.
 /// </summary>
 public sealed class NameComparison
 {

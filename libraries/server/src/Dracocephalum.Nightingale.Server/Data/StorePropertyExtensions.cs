@@ -7,16 +7,11 @@ using Microsoft.Extensions.Configuration;
 namespace Dracocephalum.Nightingale.Server.Data;
 
 /// <summary>
-/// What is known about the store, as rows: a name and a value each, one level, no nesting. Some
-/// are the settings the store was initialized with, <c>Partitioning</c>, <c>Collation</c>; the
-/// rest are facts, who initialized it and when, which store library its tables are for. The
-/// settings are written one row per value under the value's own name and read back by the
-/// configuration binder, the one that turns <c>appsettings.json</c> into options, so what a
-/// store was initialized with binds into the type the configuration binds into and the two are
-/// compared through one interface. The binder's defaults suit a store older or newer than the
-/// server reading it: a setting with no row takes its default, and a row the type has no member
-/// for is ignored, which is also how the facts stay out of the settings. A setting is a value,
-/// never an object or a list: a row's name is then the member's name and nothing more.
+/// What is known about the store, as rows: a name and a value each, one level. Some are the
+/// settings the store was initialized with, read back by the configuration binder into the type the
+/// configuration binds into; the rest are facts about it. A setting with no row takes its default,
+/// and a row the type has no member for is ignored. Why rows, and why a setting is never an object
+/// or a list, are <c>DESIGN.md</c>, seam 3.
 /// </summary>
 public static class StorePropertyExtensions
 {

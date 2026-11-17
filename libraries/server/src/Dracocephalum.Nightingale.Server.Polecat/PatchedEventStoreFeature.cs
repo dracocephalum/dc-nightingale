@@ -6,17 +6,12 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
 /// The store's event-store feature with the gateway's additions declared on the events table: a
-/// persisted computed <c>category</c> column, the stream name's category by
-/// <see cref="StreamNames.CategoryOf"/>; filtered indexes that make a read of a category, an event
-/// type or a correlation a seek instead of a scan, the correlation's holding only the events that
-/// carry one; two more holding one row a stream, its first event, for <c>$streams</c> and
-/// <c>$category-</c>. The ordinals are not here: they are the gateway's own links
-/// (<c>OrdinalLink</c>), so the table is the same with them and without. They are
-/// declared rather than applied by hand because the migration drops any column or index it does
-/// not know; declared, they are created when missing and left alone afterwards, and the store's own
-/// changes to the table still flow through the same definition. Every index leads with the tenant
-/// column so it holds under conjoined tenancy. A test applies the schema twice and asserts the
-/// second delta is empty.
+/// persisted computed <c>category</c> column, the stream name's category by <see
+/// cref="StreamNames.CategoryOf"/>, and the filtered indexes the virtual streams and the listings
+/// seek, every one leading with the tenant column so it holds under conjoined tenancy. The ordinals
+/// are not here: they are the gateway's own links (<c>OrdinalLink</c>), so the table is the same
+/// with them and without. Why declared rather than applied by hand, and which index serves what,
+/// are <c>DESIGN.md</c>, seam 2.
 /// </summary>
 /// <param name="inner">The store's own event-store feature.</param>
 internal sealed class PatchedEventStoreFeature(IFeatureSchema inner) : IFeatureSchema

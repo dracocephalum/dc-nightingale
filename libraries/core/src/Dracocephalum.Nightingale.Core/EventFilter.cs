@@ -5,14 +5,14 @@ namespace Dracocephalum.Nightingale;
 /// <summary>
 /// What a read or subscription of <c>$all</c> keeps: the events whose stream name, or whose event
 /// type, begins with one of some prefixes, or matches a regular expression; or whose stream is in
-/// one of some categories, or whose type is one of some types. Made through
-/// <see cref="StreamFilter"/> and <see cref="EventTypeFilter"/>, the first two kinds named as the
-/// reference client names them. One target and one kind per filter, as the reference protocol has it; <c>$all</c>
-/// only, since a stream and a virtual stream are already a selection. The regular expression runs without backtracking, so
-/// a pattern from a client can take only time linear in what it reads; the constructs that need
-/// backtracking, lookarounds and backreferences, are refused. Names are matched ordinally, as the
-/// server matches them in process: the database compares them under its own collation, which a
-/// host may have chosen case-insensitive; see <c>VARIANCES.md</c>.
+/// one of some categories, or whose type is one of some types. Made through <see
+/// cref="StreamFilter"/> and <see cref="EventTypeFilter"/>, the first two kinds named as the
+/// reference client names them. One target and one kind per filter, and <c>$all</c> only, since a
+/// stream and a virtual stream are already a selection. The regular expression runs without
+/// backtracking, so lookarounds and backreferences are refused, and names are matched ordinally.
+/// Why, and what the database's collation changes, are <c>VARIANCES.md</c>, *Regular-expression
+/// filters are applied after the read* and *Names are compared by the database, under a UTF-8
+/// collation*.
 /// </summary>
 public sealed class EventFilter
 {

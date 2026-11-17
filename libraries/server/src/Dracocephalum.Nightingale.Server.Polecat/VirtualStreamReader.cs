@@ -10,16 +10,11 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
 /// Reads the virtual streams, and <c>$all</c> below the mark, from the events table through the
-/// read-only mirror of it. The store's own query surface knows nothing of the persisted
-/// <c>category</c> column, and its type column is only reachable through its event-type
-/// registry, so the predicates are written here, as LINQ that the filtered indexes answer with a
-/// seek: tenant, key, then position; or, by ordinal, a seek along the stream's ordinal links. Rows
-/// are hydrated into event records the way the store adapter hydrates the store's events, body
-/// re-serialized through the shared options and the two reserved metadata keys appended last, so
-/// an event reads the same through either path; an integration test holds the two paths to the
-/// same bytes. The queries run on the in-memory provider in unit tests, which is where their
-/// bounds and their paging are held; that the database seeks rather than scans is an integration
-/// test's to say.
+/// read-only mirror of it, as LINQ that the filtered indexes answer with a seek: tenant, key, then
+/// position; or, by ordinal, a seek along the stream's ordinal links. An event reads the same
+/// through this path as through the store adapter's, its body and the two reserved metadata keys
+/// alike. Why the store's own query surface is not used, and the tests that hold the bytes and the
+/// seeks, are <c>DESIGN.md</c>, seams 2 and 7.
 /// </summary>
 /// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
 /// <param name="tenantId">The tenant every read is scoped to, or <see langword="null"/> for all tenants, under the wildcard.</param>

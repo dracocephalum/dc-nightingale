@@ -7,19 +7,12 @@ using Microsoft.Data.SqlClient;
 namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
-/// Checks the streams an append to several streams names without writing them, in the append's
-/// own transaction, after the store's statements and before its commit. The streams' rows are read
-/// under an update lock held to the commit, a range lock where a stream has no row, so no append
-/// to a checked stream, and no stream begun under a checked name, can commit between the check and
-/// the append's commit: the check holds at the commit, not only when it was read. The store's own
-/// check of a stream without events is a read without a lock, which an append landing in between
-/// would pass, and is not used.
-/// <para>
-/// One statement for every check, its own command, over the streams' key, in the tenant's
-/// partition on a store partitioned by tenant. A check that does not hold refuses the whole
-/// append with every check that did not, numbered after the appends, as the caller gave them.
-/// An append without checks adds no participant and pays nothing.
-/// </para>
+/// Checks the streams an append to several streams names without writing them, in the append's own
+/// transaction, after the store's statements and before its commit, under locks held to the commit:
+/// the check holds at the commit, not only when it was read. A check that does not hold refuses the
+/// whole append with every check that did not, numbered after the appends, as the caller gave them.
+/// An append without checks adds no participant and pays nothing. Why the store's own check is not
+/// used is <c>DESIGN.md</c>, seam 1.
 /// </summary>
 /// <param name="schema">The schema of the store's tables.</param>
 /// <param name="tenantId">The tenant the append writes in.</param>
@@ -67,6 +60,10 @@ internal sealed class StreamStateChecker(string schema, string tenantId, bool pa
 
     private string BuildSql()
     {
+        // One statement for every check, its own command, over the streams' key, in the tenant's
+        // partition on a store partitioned by tenant. The update lock is held to the commit, and
+        // is a range lock where a stream has no row, so no stream can be begun under a checked
+        // name either.
         var sql = new StringBuilder();
         sql.Append(CultureInfo.InvariantCulture, $"SELECT s.id, s.version FROM {Quote(schema)}.[pc_streams] AS s WITH (UPDLOCK, HOLDLOCK) WHERE s.tenant_id = @tenant AND s.id IN (");
         for (var i = 0; i < checks.Count; i++)
