@@ -85,6 +85,7 @@ How the tenancy modes fill the levels:
 | **Sequence head** | The position of a store partition's sequence up to which every position is committed or given up; every read and subscription by position stops there. "Head" alone inside a type that already names its sequence. | never a stream's end |
 | **High-water mark** | The store providers' word for a sequence head, and the value they keep of it. | |
 | **Tail** | What follows a sequence head in a process and wakes whoever waits on it to move. | |
+| **Poller** | The one loop of a process, for each journal, that looks at its sequences on an interval, or at once on an append made through the same process, and moves every tail of that journal: `SequenceTails`. | not a tail, which is one sequence's; one poller keeps them all |
 | **Numbered** | How far the sequencer has given ordinals through a sequence. | |
 | **Disabled**, **faulted** | Of the ordinal sequencer: switched off by the operator, every sequence at once; failing, again and again, to number one sequence, and trying again. Either way nothing is read by ordinal meanwhile. | |
 | **Gap** | A position missing below a later one: its transaction is still open, rolled back, or a number the sequence lost. | |
