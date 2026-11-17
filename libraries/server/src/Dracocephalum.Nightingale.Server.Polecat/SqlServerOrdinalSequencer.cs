@@ -120,7 +120,7 @@ internal sealed partial class SqlServerOrdinalSequencer(string connectionString,
 
     // The schema name comes from the store's options, never from a request; it is bracketed as an
     // identifier all the same.
-    private string Schema => "[" + schemaName.Replace("]", "]]", StringComparison.Ordinal) + "]";
+    private string Schema => SqlIdentifier.Quote(schemaName);
 
     private string EventsTable => Schema + ".[pc_events]";
 
@@ -130,7 +130,7 @@ internal sealed partial class SqlServerOrdinalSequencer(string connectionString,
 
     private string LinksTable => GatewayTable(nameof(OrdinalLink));
 
-    private string GatewayTable(string name) => "[" + progressSchemaName.Replace("]", "]]", StringComparison.Ordinal) + "].[" + name + "]";
+    private string GatewayTable(string name) => SqlIdentifier.Quote(progressSchemaName) + "." + SqlIdentifier.Quote(name);
 
     /// <summary>
     /// The tenant as a parameter, typed as both its columns are: a name sent as Unicode to a

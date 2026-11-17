@@ -56,8 +56,6 @@ internal sealed class StreamStateChecker(string schema, string tenantId, bool pa
         }
     }
 
-    private static string Quote(string identifier) => "[" + identifier.Replace("]", "]]", StringComparison.Ordinal) + "]";
-
     private string BuildSql()
     {
         // One statement for every check, its own command, over the streams' key, in the tenant's
@@ -65,7 +63,7 @@ internal sealed class StreamStateChecker(string schema, string tenantId, bool pa
         // is a range lock where a stream has no row, so no stream can be begun under a checked
         // name either.
         var sql = new StringBuilder();
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT s.id, s.version FROM {Quote(schema)}.[pc_streams] AS s WITH (UPDLOCK, HOLDLOCK) WHERE s.tenant_id = @tenant AND s.id IN (");
+        sql.Append(CultureInfo.InvariantCulture, $"SELECT s.id, s.version FROM {SqlIdentifier.Quote(schema)}.[pc_streams] AS s WITH (UPDLOCK, HOLDLOCK) WHERE s.tenant_id = @tenant AND s.id IN (");
         for (var i = 0; i < checks.Count; i++)
         {
             sql.Append(CultureInfo.InvariantCulture, $"{(i == 0 ? string.Empty : ", ")}@stream{i}");
@@ -74,7 +72,7 @@ internal sealed class StreamStateChecker(string schema, string tenantId, bool pa
         sql.Append(')');
         if (partitionedByTenant)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" AND s.[{Data.EventsDbContext.TenantPartitionColumn}] = (SELECT p.ordinal FROM {Quote(schema)}.[pc_tenant_partitions] AS p WHERE p.tenant_id = @tenant)");
+            sql.Append(CultureInfo.InvariantCulture, $" AND s.[{Data.EventsDbContext.TenantPartitionColumn}] = (SELECT p.ordinal FROM {SqlIdentifier.Quote(schema)}.[pc_tenant_partitions] AS p WHERE p.tenant_id = @tenant)");
         }
 
         return sql.ToString();
