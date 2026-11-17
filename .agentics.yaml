@@ -48,7 +48,7 @@ source-control:
   #   manual  asks before every state change, local commits included
   # Absent or unrecognised means manual. "auto for this one", said in conversation, overrides the
   # value for that session and is never written back here.
-  mode: local
+  mode: auto
 
 guidelines:
   # The model line the rules in agentics/ were written and verified against, carried
