@@ -213,7 +213,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     }
 
     /// <summary>Makes a unary call, with the server's failure as the exception the client documents.</summary>
-    private static async Task<T> CallUnaryAsync<T>(Func<Task<T>> call)
+    private static async Task<T> CallWithErrorMappingAsync<T>(Func<Task<T>> call)
     {
         try
         {
@@ -324,7 +324,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     public async Task<AppendResult> ResetStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _streams.ResetAsync(new ResetRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false);
             return new AppendResult(response.Revision, response.Position);
@@ -347,7 +347,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     public Task ArchiveStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return CallUnaryAsync(async () => await _streams.ArchiveAsync(new ArchiveRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallWithErrorMappingAsync(async () => await _streams.ArchiveAsync(new ArchiveRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -365,7 +365,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     public Task DeleteStreamAsync(string stream, StreamState expected, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return CallUnaryAsync(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallWithErrorMappingAsync(async () => await _streams.DeleteAsync(new DeleteRequest { Stream = stream, ExpectedRevision = expected.ToInt64() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -379,7 +379,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     public async Task<StreamMetadataResult> GetStreamMetadataAsync(string stream, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _streams.GetStreamMetadataAsync(new GetStreamMetadataRequest { Stream = stream }, cancellationToken: cancellationToken).ConfigureAwait(false);
             return new StreamMetadataResult(stream, response.Revision, response.Metadata.ToStreamMetadata(), response.Reset);
@@ -404,7 +404,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentNullException.ThrowIfNull(metadata);
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _streams.SetStreamMetadataAsync(
                 new SetStreamMetadataRequest { Stream = stream, ExpectedRevision = expected.ToInt64(), Metadata = metadata.ToWire() },
@@ -424,7 +424,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
-        return CallUnaryAsync(async () => await _persistent.CreateAsync(new CreateRequest { Stream = stream, Group = group, Settings = (settings ?? GroupSettings.Default).ToWire() }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallWithErrorMappingAsync(async () => await _persistent.CreateAsync(new CreateRequest { Stream = stream, Group = group, Settings = (settings ?? GroupSettings.Default).ToWire() }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Deletes a persistent-subscription group, its checkpoint and its parked messages.</summary>
@@ -437,7 +437,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
-        return CallUnaryAsync(async () => await _persistent.DeleteAsync(new DeleteGroupRequest { Stream = stream, Group = group }, cancellationToken: cancellationToken).ConfigureAwait(false));
+        return CallWithErrorMappingAsync(async () => await _persistent.DeleteAsync(new DeleteGroupRequest { Stream = stream, Group = group }, cancellationToken: cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Puts parked messages back in front of a group: all of them, or the one at a position.</summary>
@@ -462,7 +462,7 @@ public sealed class NightingaleClient : IAsyncDisposable
             request.All = new Google.Protobuf.WellKnownTypes.Empty();
         }
 
-        return await CallOwnerAsync(client => ReplayAsync(client, request, cancellationToken)).ConfigureAwait(false);
+        return await CallWithOwnerRedirectAsync(client => ReplayAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -489,7 +489,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         wire.ClearStart();
         wire.Numbering = Protocols.Grpc.V1.Numbering.Unspecified;
         var request = new UpdateRequest { Stream = stream, Group = group, Settings = wire };
-        return await CallOwnerAsync(client => UpdateAsync(client, request, cancellationToken)).ConfigureAwait(false);
+        return await CallWithOwnerRedirectAsync(client => UpdateAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -507,7 +507,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
         var request = new ReplayParkedRequest { Stream = stream, Group = group, Before = before };
-        return await CallOwnerAsync(client => ReplayAsync(client, request, cancellationToken)).ConfigureAwait(false);
+        return await CallWithOwnerRedirectAsync(client => ReplayAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -565,7 +565,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <exception cref="GroupNotFoundException">No such group.</exception>
     public async Task<IReadOnlyList<ParkedMessageInfo>> ListParkedMessagesAsync(string stream, string group, long? after = null, int limit = 100, CancellationToken cancellationToken = default)
     {
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _persistent.ListParkedAsync(BuildPageRequest(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Messages.Select(message => message.ToParkedMessageInfo()).ToList();
@@ -585,7 +585,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <exception cref="GroupNotFoundException">No such group.</exception>
     public async Task<IReadOnlyList<OutboxMessageInfo>> ListOutboxMessagesAsync(string stream, string group, long? after = null, int limit = 100, CancellationToken cancellationToken = default)
     {
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _persistent.ListOutboxAsync(BuildPageRequest(stream, group, after, limit), cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Messages.Select(message => message.ToOutboxMessageInfo()).ToList();
@@ -608,7 +608,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
         var request = new GetInfoRequest { Stream = stream, Group = group };
-        return await CallOwnerAsync(client => InfoAsync(client, request, cancellationToken)).ConfigureAwait(false);
+        return await CallWithOwnerRedirectAsync(client => InfoAsync(client, request, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -622,7 +622,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// <returns>The groups, ordered by stream and then by group.</returns>
     public async Task<IReadOnlyList<PersistentSubscriptionInfo>> ListPersistentSubscriptionsAsync(string? stream = null, CancellationToken cancellationToken = default)
     {
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _persistent.ListAsync(new ListRequest { Stream = stream ?? string.Empty }, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Groups.Select(info => info.ToPersistentSubscriptionInfo()).ToList();
@@ -648,7 +648,7 @@ public sealed class NightingaleClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(stream);
         ArgumentException.ThrowIfNullOrEmpty(group);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bufferSize);
-        return await CallOwnerAsync(client => OpenAsync(client, stream, group, bufferSize, cancellationToken)).ConfigureAwait(false);
+        return await CallWithOwnerRedirectAsync(client => OpenAsync(client, stream, group, bufferSize, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -681,7 +681,7 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private static async Task<GroupSettings> UpdateAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, UpdateRequest request, CancellationToken cancellationToken)
     {
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await client.UpdateAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Settings.ToGroupSettings();
@@ -704,7 +704,7 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private async Task<int> SkipAsync(SkipParkedRequest request, CancellationToken cancellationToken)
     {
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _persistent.SkipParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Skipped;
@@ -713,7 +713,7 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private static async Task<PersistentSubscriptionInfo> InfoAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, GetInfoRequest request, CancellationToken cancellationToken)
     {
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await client.GetInfoAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Info.ToPersistentSubscriptionInfo();
@@ -722,7 +722,7 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private static async Task<int> ReplayAsync(PersistentSubscriptions.PersistentSubscriptionsClient client, ReplayParkedRequest request, CancellationToken cancellationToken)
     {
-        return await CallUnaryAsync(async () =>
+        return await CallWithErrorMappingAsync(async () =>
         {
             var response = await client.ReplayParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return response.Replayed;
@@ -733,7 +733,7 @@ public sealed class NightingaleClient : IAsyncDisposable
     /// Makes a call about a group on this client's server and, when that server answers that
     /// another instance runs the group and says where, once more on that instance.
     /// </summary>
-    private async Task<T> CallOwnerAsync<T>(Func<PersistentSubscriptions.PersistentSubscriptionsClient, Task<T>> call)
+    private async Task<T> CallWithOwnerRedirectAsync<T>(Func<PersistentSubscriptions.PersistentSubscriptionsClient, Task<T>> call)
     {
         try
         {
