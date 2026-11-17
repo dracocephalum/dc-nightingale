@@ -5,21 +5,21 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 
 /// <summary>
 /// The transaction horizon of a SQL Server journal, read through <c>DBCC OPENTRAN</c>: the oldest
-/// transaction still open in the database that has written to it, with its session and when it
-/// began, which holds every sequence alike. Its login is read from the security id the command
-/// reports, which it cuts to 46 characters, too short for a Windows login's, so for those it is
-/// read from the session list, where the permission lets the gateway see it. It needs
-/// <c>VIEW DATABASE STATE</c> on the journal alone; <see cref="SqlServerPartitionHorizon"/> reads
-/// more, by store partition, and needs a permission on the whole server. A transaction that has
-/// only read is not among them; one that has written is, from its first write, and a position is
-/// taken only by the insert of an event, which the store's append makes after writing the
-/// stream's row: no transaction holds a position unseen, so the minimum age is zero.
+/// transaction still open in the database that has written to it, with its session, its login and
+/// when it began, which holds every sequence alike. It needs <c>VIEW DATABASE STATE</c> on the
+/// journal alone; <see cref="SqlServerPartitionHorizon"/> reads more, by store partition, and needs
+/// a permission on the whole server. The minimum age is zero: a position is taken only by the
+/// insert of an event, which the store's append makes after writing the stream's row, so no
+/// transaction holds a position unseen (<c>DESIGN.md</c>, seam 4).
 /// </summary>
 /// <param name="connections">Opens a connection to the journal.</param>
 internal sealed class SqlServerTransactionHorizon(Func<CancellationToken, Task<SqlConnection>> connections) : ITransactionHorizon
 {
     // The oldest open transaction that has written, read into a table variable, so the start is
-    // read here in the same session language it was written in.
+    // read here in the same session language it was written in. Its login is read from the
+    // security id the command reports, which it cuts to 46 characters, too short for a Windows
+    // login's, so for those it is read from the session list, where the permission lets the
+    // gateway see it.
     private static readonly string OldestOpenTransaction =
         "SET NOCOUNT ON;"
         + SqlServerHorizon.TimeZoneCheck

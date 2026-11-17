@@ -21,18 +21,12 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     public string ConnectionStringName { get; set; } = "Nightingale";
 
     /// <summary>
-    /// Gets or sets what a start may do to the database. <see cref="SchemaMode.Verify"/>, the
-    /// default, checks and refuses: the database is expected to be ready, as a service expects
-    /// its migrations to have run elsewhere, and a start against one that is missing, not
-    /// initialized, behind or newer says so and names the mode or the switch that would fix it.
-    /// <see cref="SchemaMode.Migrate"/> also applies what an initialized store is behind on,
-    /// which on a large store can take long. <see cref="SchemaMode.Initialize"/> also creates a
-    /// missing database, with the configured collation, and initializes an empty one; it is
-    /// idempotent, so a host may leave it on. Each mode takes the schema lock, shared to verify
-    /// and exclusive to change, so instances starting together do the work once and never see
-    /// it half-done. The default host's switches do the same work once: <c>--apply-schema</c>
-    /// as <see cref="SchemaMode.Migrate"/> would, <c>--initialize</c> as
-    /// <see cref="SchemaMode.Initialize"/> would.
+    /// Gets or sets what a start may do to the database: <see cref="SchemaMode.Verify"/>, the
+    /// default, checks and refuses; <see cref="SchemaMode.Migrate"/> also applies what an
+    /// initialized store is behind on; <see cref="SchemaMode.Initialize"/> also creates a missing
+    /// database and initializes an empty one, and is idempotent. What each mode refuses, and the
+    /// switch that does the same work once, are the server README's <c>Configuration</c> table;
+    /// why, <c>DESIGN.md</c>, seam 3.
     /// </summary>
     public SchemaMode SchemaMode { get; set; } = SchemaMode.Verify;
 
@@ -59,29 +53,20 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
 
     /// <summary>
     /// Gets or sets a value indicating whether startup takes the event store's tables as current
-    /// when the hash recorded with them is the hash of the creation script this server would
-    /// apply, instead of comparing every table with what the store expects. The hash covers the
-    /// store library, the schema library under it, the gateway's additions and the settings, so
-    /// it changes whenever the expected tables do and the comparison then runs as usual. What it
-    /// cannot see is a change made to the tables outside the server, a dropped index say, which
-    /// the comparison would have refused at startup and which now shows as an error at the first
-    /// statement that needs it. Off by default. The comparison costs seconds the first time the
-    /// database server compiles it and a fraction of one after, so this is for a host that starts
-    /// often against a database it trusts; the schema report and the schema apply always compare.
+    /// when the hash recorded with them is the hash of the creation script this server would apply,
+    /// instead of comparing every table with what the store expects. Off by default: a change made
+    /// to the tables outside the server then goes unseen until the first statement that needs it
+    /// fails. What the hash covers and what the comparison costs are the server README's
+    /// <c>Configuration</c> table and <c>DESIGN.md</c>, seam 3.
     /// </summary>
     public bool FastBoot { get; set; }
 
     /// <summary>
     /// Gets or sets how long the tails rest between looks at the store once they have caught up,
-    /// which is how far behind an append made through another instance a subscriber on this one
-    /// can be: an append made through this instance wakes its own tails at once, the others find
-    /// it at their next look. A second, the store's own slow polling time, unless the host says
-    /// otherwise; a look is one small query per instance, whatever the number of subscriptions,
-    /// so a host that wants a quarter of a second across instances pays four such queries a
-    /// second for it. While a look left a head short of positions already seen past it, a head
-    /// catching up or a gap waiting on its checkpoint, the tails look again after the store's fast
-    /// polling time, a quarter of a second, or after this interval when it is shorter. The rule is the same for the
-    /// shared sequence and for a sequence per tenant.
+    /// which is how far behind an append made through another instance a subscriber on this one can
+    /// be; the same for the shared sequence and for a sequence per tenant. A second by default.
+    /// What a shorter interval costs, and when the tails look sooner, are the server README's
+    /// <c>Configuration</c> table and <c>DESIGN.md</c>, seam 4.
     /// </summary>
     public TimeSpan TailPollingInterval { get; set; } = SequenceTails.SlowInterval;
 
@@ -130,15 +115,10 @@ public sealed partial class NightingaleOptions : NightingaleOptionsBase
     /// <summary>
     /// The store's settings as a host of this backend configures them: the four every store is
     /// initialized with, from the base, and the check that they are values SQL Server and this
-    /// backend can take. The schema is the store's default, <c>dbo</c>, unless said otherwise,
-    /// and is created with the tables when it does not exist. The collation must be a UTF-8 one,
-    /// whichever it is: the event store keeps names in columns that are not Unicode, and under
-    /// any other collation a character outside the code page is stored as a question mark, so
-    /// two names in another script become one. The server refuses to create a database with
-    /// another, and refuses a database provisioned by hand that has another. A database
-    /// provisioned by hand keeps the collation it has, and the setting must match it. Ordinals
-    /// fit partitioning by tenant by construction: the sequencer then numbers each tenant's
-    /// sequence behind that tenant's own sequence head.
+    /// backend can take. The schema is created with the tables when it does not exist; the
+    /// collation must be a UTF-8 one, and a database provisioned by hand keeps the collation it
+    /// has, which the setting must match. What each setting means is the server README's
+    /// <c>Configuration</c> table; why they are fixed with the store, <c>DESIGN.md</c>, seam 3.
     /// </summary>
     public sealed partial class StoreOptions : StoreSettings
     {

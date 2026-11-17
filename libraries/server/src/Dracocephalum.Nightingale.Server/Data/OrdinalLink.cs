@@ -2,15 +2,12 @@ namespace Dracocephalum.Nightingale.Server.Data;
 
 /// <summary>
 /// One event's ordinal in a virtual stream: a category, an event type, a correlation, the listing
-/// of every stream, or the listing of a category's streams. It is an extension of the store's
-/// events table, not an entity of the gateway's: the numbers describe the event's row, and are kept
-/// here rather than in columns of it because a store provider's migrations drop the columns they
-/// do not know, and an update of an event's row writes the whole row again on some databases. So it
-/// is keyed as the store's data is, by what it describes: the stream, by type, tenant and key, and
-/// the ordinal within it. Every event has its type's link and its category's; the sequencer writes
-/// an event's links in one batch, so the type's is the witness that the event is numbered. Nothing
-/// else writes here, and nothing removes a row, so an event archived or deleted after it was
-/// numbered is a hole a read skips, and the last ordinal of a key is never reused.
+/// of every stream, or the listing of a category's streams. An extension of the store's events
+/// table, not an entity of the gateway's, keyed by what it describes: the stream, by type, tenant
+/// and key, and the ordinal within it. Only the sequencer writes here, and nothing removes a row,
+/// so an event archived or deleted after it was numbered is a hole a read skips, and the last
+/// ordinal of a key is never reused. Why links and not columns, and the type's link as the witness
+/// that an event is numbered, are <c>DESIGN.md</c>, seam 6.
 /// </summary>
 [StoreExtension]
 public sealed class OrdinalLink

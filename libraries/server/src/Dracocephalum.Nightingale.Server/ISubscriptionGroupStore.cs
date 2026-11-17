@@ -4,17 +4,14 @@ namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>
 /// The port for what a persistent-subscription group keeps in the store: its definition and
-/// checkpoint, found by stream and group name and from then on known by its id, its parked messages, its outbox of messages due to be delivered again, and the
-/// lease that says which instance runs it. A message is in at most one of parked and outbox: a
-/// replay moves it from parked to the outbox, a delivery that fails again moves it back. The
-/// runtime of a group, its in-flight events and their retries, is in memory in the owning
-/// instance and is not here. What a running group writes, its checkpoint, a parked message, a
-/// message off the outbox, how it stands, is fenced by its lease: the write names the instance
-/// making it and lands only while that instance holds the group's lease, unexpired, at the
-/// moment the write commits, and answers false otherwise, so an instance that stalled past its
-/// lease while another took the group over writes nothing when it wakes. A backend reports
-/// expected failures as the domain exceptions and never lets its own exception types cross this
-/// interface.
+/// checkpoint, found by stream and group name and from then on known by its id, its parked
+/// messages, its outbox of messages due to be delivered again, and the lease that says which
+/// instance runs it. A message is in at most one of parked and outbox. What a running group writes
+/// is fenced by its lease: the write names the instance making it, lands only while that instance
+/// holds the lease, unexpired, at the moment the write commits, and answers false otherwise. A
+/// backend reports expected failures as the domain exceptions and never lets its own exception
+/// types cross this interface. Why the lease fences, and what stays in memory, are
+/// <c>DESIGN.md</c>, seam 5.
 /// </summary>
 public interface ISubscriptionGroupStore
 {
