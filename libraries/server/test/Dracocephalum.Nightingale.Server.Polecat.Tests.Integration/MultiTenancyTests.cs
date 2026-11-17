@@ -10,7 +10,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// database holds other tests' events, so every name here carries a suffix of its own, and the
 /// tenants are ids no other test uses.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class MultiTenancyTests(SqlServerTestDatabase database)

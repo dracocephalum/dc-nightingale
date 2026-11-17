@@ -9,7 +9,6 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 internal interface IOrdinalSequencingFaults
 {
     /// <summary>Reads which sequences are recorded as faulted, so a host that takes the lease over clears them as it numbers them again.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The tenants whose sequences are faulted; <see langword="null"/> among them for the shared sequence.</returns>
     Task<IReadOnlyCollection<string?>> ReadFaultedAsync(CancellationToken cancellationToken);
 
@@ -17,7 +16,6 @@ internal interface IOrdinalSequencingFaults
     /// <param name="tenantId">The tenant whose sequence it is, or <see langword="null"/> for the shared sequence.</param>
     /// <param name="fault">Why it fails, or <see langword="null"/> when it numbers again.</param>
     /// <param name="at">When.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the row is written.</returns>
     Task WriteAsync(string? tenantId, string? fault, DateTimeOffset at, CancellationToken cancellationToken);
 }

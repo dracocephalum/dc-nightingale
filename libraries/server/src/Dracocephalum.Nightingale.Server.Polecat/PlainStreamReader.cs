@@ -16,7 +16,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="contexts">Makes the mirror to read through: the one over the main connection, or the one over the read-only connection.</param>
 /// <param name="tenantId">The tenant every read is scoped to; a stream name is per tenant.</param>
 /// <param name="partitionedByTenant">Whether the store is partitioned by tenant, so every statement names the tenant's partition key, which the store's indexes lead with there.</param>
-/// <param name="logger">The logger.</param>
 internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, string tenantId, bool partitionedByTenant, ILogger logger)
 {
     /// <summary>
@@ -30,7 +29,6 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
     /// <param name="direction">The direction to read in.</param>
     /// <param name="from">Where to begin, inclusive, in the reading direction; <see langword="null"/> for the start forwards and the end backwards.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The head and the events of the page, or <see langword="null"/> when the stream has no events.</returns>
     /// <exception cref="StreamDeletedException">The stream was deleted.</exception>
     public Task<StreamSlice?> ReadAsync(string stream, Direction direction, long? from, int count, CancellationToken cancellationToken) =>
@@ -40,7 +38,6 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
     /// <param name="stream">The stream name.</param>
     /// <param name="from">The first revision, inclusive.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The head and the events of the page, or <see langword="null"/> when the stream has no events.</returns>
     /// <exception cref="StreamDeletedException">The stream was deleted.</exception>
     public Task<StreamSlice?> ReadAsStoredAsync(string stream, long from, int count, CancellationToken cancellationToken) =>
@@ -113,7 +110,6 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
     /// after the decision, as the reference's single writer could have ordered it.
     /// </summary>
     /// <param name="stream">The plain stream's name.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The state.</returns>
     public async Task<MetadataState> ReadMetadataStateAsync(string stream, CancellationToken cancellationToken)
     {
@@ -138,7 +134,6 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
     /// <param name="stream">The stream name.</param>
     /// <param name="first">The first revision of the run.</param>
     /// <param name="count">How many revisions the run spans.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events found in the run, in revision order; fewer than asked for when the stream ends sooner.</returns>
     public async Task<IReadOnlyList<StoredId>> ReadIdsAsync(string stream, long first, int count, CancellationToken cancellationToken)
     {
@@ -159,7 +154,6 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
     /// on. A stream with no row is left out.
     /// </summary>
     /// <param name="streams">The stream names.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>Each stream found, by name, with its last revision and whether it is archived.</returns>
     public async Task<IReadOnlyDictionary<string, (long Last, bool IsArchived)>> ReadRevisionsAsync(IReadOnlyCollection<string> streams, CancellationToken cancellationToken)
     {

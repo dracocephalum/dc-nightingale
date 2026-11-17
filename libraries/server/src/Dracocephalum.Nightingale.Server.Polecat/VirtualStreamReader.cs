@@ -33,7 +33,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <summary>The bounds of a virtual stream at or below a head.</summary>
     /// <param name="stream">The virtual stream.</param>
     /// <param name="head">The highest position to consider.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The first and last positions, or <see langword="null"/> when there are none.</returns>
     public async Task<StreamHead?> HeadAsync(VirtualStreamName stream, long head, CancellationToken cancellationToken)
     {
@@ -57,7 +56,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
     /// <param name="head">The highest position a forwards page may hold.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadAsync(VirtualStreamName stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
@@ -70,7 +68,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
     /// <param name="head">The highest position a forwards page may hold.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadAllAsync(Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
@@ -90,7 +87,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <param name="head">The highest position a forwards scan may examine.</param>
     /// <param name="window">The most positions the scan examines.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events kept and the last position examined.</returns>
     public async Task<ScannedSlice> ScanAllAsync(EventFilter filter, Direction direction, long from, long head, int window, int count, CancellationToken cancellationToken)
     {
@@ -129,7 +125,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <param name="from">The first position, inclusive.</param>
     /// <param name="head">The highest position the page may hold.</param>
     /// <param name="count">The most pointers to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The pointers of the page.</returns>
     public async Task<IReadOnlyList<EventPointer>> ReadPointersAsync(long from, long head, int count, CancellationToken cancellationToken)
     {
@@ -154,7 +149,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <param name="from">Where to begin, inclusive, in the reading direction.</param>
     /// <param name="head">The highest position a forwards page may hold.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The mark and the events.</returns>
     public async Task<(long Mark, IReadOnlyList<EventRecord> Events)> ReadBelowMarkAsync(VirtualStreamName? stream, Direction direction, long from, long head, int count, CancellationToken cancellationToken)
     {
@@ -190,7 +184,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <param name="stream">The virtual stream.</param>
     /// <param name="after">The position already delivered, exclusive.</param>
     /// <param name="head">The highest position to count, inclusive.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The count.</returns>
     public async Task<long> CountAsync(VirtualStreamName stream, long after, long head, CancellationToken cancellationToken)
     {
@@ -204,7 +197,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// from each end of the stream's links.
     /// </summary>
     /// <param name="stream">The virtual stream.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The bounds, or <see langword="null"/> when nothing is numbered.</returns>
     public async Task<StreamHead?> OrdinalHeadAsync(VirtualStreamName stream, CancellationToken cancellationToken)
     {
@@ -231,7 +223,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     /// <param name="direction">The direction to read in.</param>
     /// <param name="from">The ordinal to begin at, inclusive, in the reading direction.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events of the page.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadByOrdinalAsync(VirtualStreamName stream, Direction direction, long from, int count, CancellationToken cancellationToken)
     {

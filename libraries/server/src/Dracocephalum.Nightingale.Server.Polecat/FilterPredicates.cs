@@ -48,7 +48,6 @@ internal static class FilterPredicates
     }
 
     /// <summary>Whether a stream-name prefix is a whole category followed by the hyphen, and which.</summary>
-    /// <param name="prefix">The prefix.</param>
     /// <param name="category">The category, when it is one.</param>
     /// <returns>True when the prefix is a category and its hyphen.</returns>
     public static bool TryAsCategory(string prefix, out string category)

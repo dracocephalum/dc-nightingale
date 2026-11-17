@@ -15,8 +15,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// a position above the mark last seen, seen a moment ago, is not asked of the secondary at all.
 /// A secondary that fails is left alone for a while and the primary serves everything.
 /// </summary>
-/// <param name="timeProvider">The clock.</param>
-/// <param name="logger">The logger.</param>
 internal sealed partial class ReplicaRouter(TimeProvider timeProvider, ILogger logger)
 {
     /// <summary>How long a mark seen on the secondary is trusted to say a position is above it.</summary>
@@ -31,14 +29,12 @@ internal sealed partial class ReplicaRouter(TimeProvider timeProvider, ILogger l
     private int _down;
 
     /// <summary>Reads what the secondary holds of a page: its mark, and the page's events at or below it.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The mark and the events.</returns>
     public delegate Task<(long Mark, IReadOnlyList<EventRecord> Events)> ReplicaRead(CancellationToken cancellationToken);
 
     /// <summary>Reads a page, or the rest of one, from the primary.</summary>
     /// <param name="from">Where to begin, inclusive.</param>
     /// <param name="count">The most events to return.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The events.</returns>
     public delegate Task<IReadOnlyList<EventRecord>> PrimaryRead(long from, int count, CancellationToken cancellationToken);
 
@@ -49,7 +45,6 @@ internal sealed partial class ReplicaRouter(TimeProvider timeProvider, ILogger l
     /// <param name="count">The most events to return.</param>
     /// <param name="replica">Reads from the secondary.</param>
     /// <param name="primary">Reads from the primary.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The page, as the primary alone would have returned it.</returns>
     public async Task<IReadOnlyList<EventRecord>> ReadAsync(Direction direction, long from, long head, int count, ReplicaRead replica, PrimaryRead primary, CancellationToken cancellationToken)
     {
@@ -93,7 +88,6 @@ internal sealed partial class ReplicaRouter(TimeProvider timeProvider, ILogger l
     /// <typeparam name="T">What the read returns.</typeparam>
     /// <param name="replica">Reads from the secondary.</param>
     /// <param name="primary">Reads from the primary.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result.</returns>
     public async Task<T> PreferReplicaAsync<T>(Func<CancellationToken, Task<T>> replica, Func<CancellationToken, Task<T>> primary, CancellationToken cancellationToken)
     {

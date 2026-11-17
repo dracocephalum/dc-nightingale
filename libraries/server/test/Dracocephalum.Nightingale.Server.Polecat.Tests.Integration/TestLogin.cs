@@ -24,7 +24,6 @@ internal sealed class TestLogin : IAsyncDisposable
     public string Name { get; }
 
     /// <summary>Creates a login and its user in a database.</summary>
-    /// <param name="database">The database.</param>
     /// <returns>The login.</returns>
     public static async Task<TestLogin> CreateAsync(string database)
     {
@@ -36,12 +35,10 @@ internal sealed class TestLogin : IAsyncDisposable
     }
 
     /// <summary>Grants the login a permission on the server.</summary>
-    /// <param name="permission">The permission.</param>
     /// <returns>A task that completes when it is granted.</returns>
     public Task GrantOnServerAsync(string permission) => ExecuteOnMasterAsync(string.Format(CultureInfo.InvariantCulture, "GRANT {0} TO [{1}]", permission, Name));
 
     /// <summary>Opens a connection to the database that acts as the login.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The open connection.</returns>
     public async Task<SqlConnection> OpenAsync(CancellationToken cancellationToken)
     {

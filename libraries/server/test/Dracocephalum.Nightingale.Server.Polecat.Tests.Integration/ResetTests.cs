@@ -12,7 +12,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// on the failure path; a set of the metadata brings the stream back in two events, and a second
 /// set undoes the truncation; a set at the largest truncation resets, keeping the other settings.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class ResetTests(SqlServerTestDatabase database)

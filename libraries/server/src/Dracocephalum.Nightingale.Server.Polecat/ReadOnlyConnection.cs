@@ -13,7 +13,6 @@ internal static class ReadOnlyConnection
 {
     /// <summary>Resolves the read-only connection string.</summary>
     /// <param name="connectionString">The main connection string.</param>
-    /// <param name="options">The options.</param>
     /// <param name="namedConnectionStrings">Looks a connection string up by name; <see langword="null"/> when the host gave none to look in.</param>
     /// <param name="explicitConnectionString">A read-only connection string the host passed directly, which wins over the name.</param>
     /// <returns>The connection string, or <see langword="null"/> when the read-only connection is off.</returns>

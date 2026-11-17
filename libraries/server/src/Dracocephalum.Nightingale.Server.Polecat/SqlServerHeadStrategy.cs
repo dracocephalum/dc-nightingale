@@ -23,7 +23,6 @@ internal static partial class SqlServerHeadStrategy
     /// <param name="transactions">The journal's transaction horizon.</param>
     /// <param name="events">Makes the mirror of the events table.</param>
     /// <param name="logger">Where a step down is said.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The strategy.</returns>
     public static async ValueTask<HeadStrategy> SelectAsync(ITransactionHorizon partitions, ITransactionHorizon transactions, IDbContextFactory<EventsDbContext> events, ILogger logger, CancellationToken cancellationToken)
     {

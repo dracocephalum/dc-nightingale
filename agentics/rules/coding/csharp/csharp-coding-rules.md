@@ -292,6 +292,16 @@ other files to learn why this one exists.
   The build emits `$(AssemblyName).xml` beside each
   non-test assembly for IntelliSense. Missing comments do not fail the build
   — SA1600 and CS1591 are off — reviewers enforce.
+- **A `<param>` or `<returns>` tag says something the name does not, or is
+  not written.** The analyzers ask for one on every parameter and result of
+  a documented member that is public (SA1611, SA1615, SA1618), and there it
+  is the price of a published API: write it, and make it carry a fact where
+  there is one — the unit, the range, what null means, who owns the result.
+  They ask for nothing on internal types, on private members, or in test
+  projects, so a tag there is a choice: `<param name="logger">The
+  logger.</param>` restates the declaration and is deleted; "the instance id
+  the lease is taken under" stays. A type that is public only by habit pays
+  for it in such tags; make it internal before documenting it.
 
 ## Conventions
 

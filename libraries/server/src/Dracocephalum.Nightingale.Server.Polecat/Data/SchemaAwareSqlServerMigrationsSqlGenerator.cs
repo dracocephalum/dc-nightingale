@@ -13,7 +13,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Data;
 /// migrations stay exactly as the tool generated them.
 /// </summary>
 /// <param name="dependencies">The generator's dependencies.</param>
-/// <param name="commandBatchPreparer">The command batch preparer.</param>
 internal sealed class SchemaAwareSqlServerMigrationsSqlGenerator(MigrationsSqlGeneratorDependencies dependencies, ICommandBatchPreparer commandBatchPreparer)
     : SqlServerMigrationsSqlGenerator(dependencies, commandBatchPreparer)
 {

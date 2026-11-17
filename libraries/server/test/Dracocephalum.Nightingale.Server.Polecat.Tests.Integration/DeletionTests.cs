@@ -8,7 +8,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// Delete archives a stream, tombstone removes it; what each does to reads, to <c>$all</c> and the
 /// virtual streams, and to a later append, against the real store.
 /// </summary>
-/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class DeletionTests(SqlServerTestDatabase database)

@@ -56,12 +56,9 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     private DateTimeOffset _lastWrite;
 
     /// <summary>Initializes a new instance of the <see cref="SubscriptionGroupRuntime"/> class and starts reading; delivery begins when a consumer joins.</summary>
-    /// <param name="store">The store.</param>
-    /// <param name="tail">The tail.</param>
     /// <param name="router">The router a plain stream's events come through once the group has caught up.</param>
     /// <param name="groups">The group store.</param>
     /// <param name="owner">This instance, the one holding the group's lease, which every write names.</param>
-    /// <param name="time">The clock.</param>
     /// <param name="definition">The group as read from the store.</param>
     public SubscriptionGroupRuntime(IStreamStore store, IStoreTail tail, StreamRouter router, ISubscriptionGroupStore groups, string owner, TimeProvider time, SubscriptionGroupDefinition definition)
     {

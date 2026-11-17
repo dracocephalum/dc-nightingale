@@ -15,13 +15,11 @@ internal interface IStoreDatabase
     /// it: a connection that fails is remembered by the pool for a while, and whatever connects
     /// next, to a database created in between, is told it is still missing.
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>True when the database exists.</returns>
     Task<bool> ExistsAsync(CancellationToken cancellationToken);
 
     /// <summary>The code page of a collation, as the server's catalog has it.</summary>
     /// <param name="collation">The collation's name.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The code page, or <see langword="null"/> when the server knows no collation by that name.</returns>
     Task<int?> ReadCodePageAsync(string collation, CancellationToken cancellationToken);
 
@@ -31,7 +29,6 @@ internal interface IStoreDatabase
     /// step two instances can race, and the race is settled by the server, not by them.
     /// </summary>
     /// <param name="collation">A collation the server knows, or <see langword="null"/> for the server's default.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the database exists.</returns>
     Task CreateAsync(string? collation, CancellationToken cancellationToken);
 
@@ -44,17 +41,14 @@ internal interface IStoreDatabase
     /// server notices the connection gone. A wait behind another instance is logged.
     /// </summary>
     /// <param name="exclusive">Whether the lock is taken to change the database, or to look at it.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The lock; disposing it releases it.</returns>
     Task<IAsyncDisposable> LockSchemaAsync(bool exclusive, CancellationToken cancellationToken);
 
     /// <summary>The collation the database has: its name, its code page, and what its comparison ignores.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The collation as the server describes it.</returns>
     Task<DatabaseCollation> ReadCollationAsync(CancellationToken cancellationToken);
 
     /// <summary>The tables the database holds, of anyone's, and whether each holds a row.</summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The tables, by schema and name; empty for an empty database.</returns>
     Task<IReadOnlyList<DatabaseTable>> ListTablesAsync(CancellationToken cancellationToken);
 }

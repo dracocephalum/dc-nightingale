@@ -17,10 +17,8 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// </summary>
 /// <param name="database">The database: whether it is there, making it, its collation, its lock.</param>
 /// <param name="schema">Reports what the database needs, and applies it.</param>
-/// <param name="options">The host's options.</param>
 /// <param name="names">Told the database's collation, so that names are matched in process as the database compares them.</param>
 /// <param name="timeProvider">The clock the store's creation is stamped with.</param>
-/// <param name="logger">The logger.</param>
 internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSchema schema, NightingaleOptions options, NameComparison names, TimeProvider timeProvider, ILogger<StoreInitializer> logger) : IHostedService
 {
     /// <summary>The code page SQL Server reports for a UTF-8 collation.</summary>
@@ -45,7 +43,6 @@ internal sealed partial class StoreInitializer(IStoreDatabase database, IStoreSc
     /// <summary>Brings the database to a state the server can serve, as far as the mode allows, or refuses, saying why.</summary>
     /// <param name="mode">What may be done to the database.</param>
     /// <param name="fastBoot">Whether a recorded hash equal to this server's stands in for comparing the event store's tables.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that completes when the store can be served.</returns>
     /// <exception cref="StoreInitializationException">The store cannot be served; the message says why.</exception>
     public async Task InitializeAsync(SchemaMode mode, bool fastBoot, CancellationToken cancellationToken)
