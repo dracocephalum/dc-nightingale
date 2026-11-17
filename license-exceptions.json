@@ -1,0 +1,21 @@
+[
+  {
+    "License": "LicenseRef-Microsoft-SqlClient-SNI",
+    "Id": "Microsoft.Data.SqlClient.SNI.runtime",
+    "Version": "6.0.2",
+    "Source": "https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlclient.sni.runtime/6.0.2/microsoft.data.sqlclient.sni.runtime.6.0.2.nupkg",
+    "File": "LICENSE.txt",
+    "Page": "https://www.nuget.org/packages/Microsoft.Data.SqlClient.SNI.runtime/6.0.2/License",
+    "Text": "licenses/LicenseRef-Microsoft-SqlClient-SNI.txt",
+    "Sha256": "9335e8bad875dd7be4eebd55d2335eb6433d1cea61aadb3817af7807bef8932a",
+    "Accepted": "2026-11-17",
+    "Use": "a transitive dependency of Microsoft.Data.SqlClient, which the store provider and EF Core's SQL Server provider bring in; restored by whoever builds or installs, and redistributed only with a built server, never by the packages this repository publishes",
+    "Conditions": [
+      "distributed only as part of an application, never as a standalone offering",
+      "distributors and external end users agree to terms that protect it at least as much as these",
+      "no Microsoft trademark in a product name, and nothing that suggests endorsement",
+      "not reverse engineered, decompiled or disassembled",
+      "its source never placed under a licence that requires disclosure or a right to modify"
+    ]
+  }
+]

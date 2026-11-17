@@ -84,24 +84,43 @@ Then:
 
 - **Title**: `#<ticket> <type>(<scope>): <summary>` — ticket first, then the
   conventional summary, because squash-merge makes it the commit message.
-- **Body** follows the repository's change-request template. **Bullet
-  points, not paragraphs**: one bullet per change in behaviour or structure
-  under *What*; a **checklist** wherever the section is a list of actions —
-  what was verified, what a person must do at merge or deploy time. The first
-  line of the body is the tracker's closing keyword and the ticket.
-- **A non-trivial change gets a *How*.** The approach and the reasoning
-  behind it, in the form that makes them easiest to grasp later — a list of
-  steps, a table of the options considered, a mermaid diagram of the flow.
-  It is written for the reader who opens this request in a year, person or
-  agent, and asks why it was done this way; the diff will not tell them.
-  Trivial changes skip it.
-- **The description scales with the diff.** Two sentences describe a
-  two-file change; they do not describe a large one. When a request is
-  legitimately large — a generated migration, a new component, a sequence
-  that could not be split — the description is what makes it reviewable:
-  bullets grouped by area, a reading order under *Notes for the reviewer*,
-  every manual step under *Actions*. A reviewer should be able to navigate
-  the diff from the description alone.
+- **Body** goes to the point, and is shaped to the change, not to a form.
+  The repository's change-request template prompts a person typing into the
+  web form; it is not a set of sections to fill, and an agent's body is
+  governed by this list. The first line is the tracker's closing keyword and
+  the ticket. After it:
+  - **What changed, as bullets**: one per change in behaviour or structure,
+    concise and precise. Not a paragraph, and not a list of files.
+  - **A table or a diagram where it says it better** than prose: what moved
+    where, versions before and after, the options considered, a mermaid
+    diagram of a flow.
+  - **A section of its own for the obscure part only**: the approach and the
+    reasoning a reviewer could not reconstruct from the diff, written for the
+    reader who opens this request in a year, person or agent, and asks why it
+    was done this way. A change with nothing obscure has no such section.
+  - **What was verified, as plain bullets**: what was run and what it showed,
+    numbers included. Not checkboxes: by the time the request merges each one
+    has passed, so a box says nothing a bullet does not. What was not
+    verified is said, and why.
+  - **Actions, as a checklist**, only when a person must do something at
+    merge or deploy time that the change does not do itself: a script to run
+    by hand, a setting to flip, a follow-up ticket to open. These are the
+    items still open when the request is read, which is what a box is for.
+  - **Risks, and notes for the reviewer, when there is something to say**:
+    what could break and how it is reverted; where to start reading, what was
+    left out and why. Never an empty heading, and never "None".
+- **The why is the ticket's.** Where change tracking is on, the ticket holds
+  the problem, the context and the discussion, and the body links it without
+  restating it. One sentence of why stays in the body all the same: the body
+  becomes the squash commit's message, and the ticket lives on the host, not
+  in the history. Where the repository tracks no tickets, the body carries
+  the why itself, as briefly as it can.
+- **The description scales with the diff.** Two bullets describe a two-file
+  change; they do not describe a large one. When a request is legitimately
+  large — a generated migration, a new component, a sequence that could not
+  be split — the description is what makes it reviewable: bullets grouped
+  under headings by area, and a reading order for the reviewer. A reviewer
+  should be able to navigate the diff from the description alone.
 - **Never hard-wrap the body.** A description is typed into a web form, not
   stored as a file: the host renders every newline as a line break, so prose
   wrapped at 80 columns stays at 80 columns for every reader and wraps a second

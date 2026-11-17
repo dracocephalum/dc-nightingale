@@ -11,7 +11,11 @@ names. Branches, commits, and change requests are
 Every change is traceable to a ticket, and the ticket's identifier leads — in
 the branch name and the change-request title — so history, boards, and
 searches line up on one key. A ticket is a sentence of intent, not a design
-document: what and why, one line, with context and links in the body.
+document: what and why, one line, with context and links in the body. It is
+where the problem and the discussion live, so the change request that closes
+it links it and goes to the point
+([`source-control.md`](../source-control/source-control.md), *Opening a
+change request*).
 
 A ticket is public the moment the repository is. With `publish-safe: true` in
 `.agentics.yaml`, title and body refer to other repositories, projects,
