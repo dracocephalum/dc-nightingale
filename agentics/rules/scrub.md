@@ -212,6 +212,13 @@ The fix is a pointer, not a second copy: name the document that owns the rule
 and delete the restatement. Report these; deciding which copy is authoritative
 is the user's call, not a mechanical one.
 
+A pointer is a claim too, and these two are mechanical
+([`coding/where-facts-live.md`](coding/where-facts-live.md)): every heading a
+comment or a document names exists in the document it names, and every type,
+member or setting a document names exists in the code. Report each that does
+not; the home moved or was renamed, and the pointer was not in the same
+change.
+
 **This is about duplication, not brevity.** The scrub reports the duplicate;
 shortening documents, whether by removing redundancy or because a model would
 probably behave correctly without the instruction, is

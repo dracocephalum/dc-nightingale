@@ -282,9 +282,14 @@ other files to learn why this one exists.
   commented-out code, change history, or author tags; no "added per request"
   or restatement of the rule that prompted the change. The reader was not in
   the conversation.
-- **XML doc comments on every public API.** `<summary>` in one to three
-  sentences; `<remarks>` for the design; `<example>`/`<code>` where a usage
-  example clarifies. The build emits `$(AssemblyName).xml` beside each
+- **XML doc comments on every public API**, and they are the contract, not
+  the design: `<summary>` in one to three sentences; `<remarks>` for what a
+  caller needs beyond it and nothing else says, an ordering, a thread-safety
+  promise, a failure; `<example>`/`<code>` where a usage example clarifies.
+  Never the algorithm, which is said in the body beside the lines that do it,
+  and never the reason the system is built this way, which is `DESIGN.md`'s
+  and is pointed at ([`../where-facts-live.md`](../where-facts-live.md)).
+  The build emits `$(AssemblyName).xml` beside each
   non-test assembly for IntelliSense. Missing comments do not fail the build
   — SA1600 and CS1591 are off — reviewers enforce.
 
