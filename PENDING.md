@@ -9,7 +9,8 @@ in [`VARIANCES.md`](VARIANCES.md); what was weighed and set aside is in
 
 ## Authentication: what is left
 
-Basic authentication is in (`VARIANCES.md`, *Authentication is Basic*). What
+Basic authentication is in (`VARIANCES.md`, *Authentication is Basic, roles
+are three, and a credential has a tenant*). What
 is left, in order:
 
 - **The Bearer scheme.** External tokens first, validated against an identity
@@ -258,7 +259,8 @@ here is re-derived:
 ## Stream metadata
 
 Metadata is stored, set, read back and applied to reads (`VARIANCES.md`,
-*Stream metadata keeps its history*; `DESIGN.md`, seam 7). What is left:
+*Stream metadata keeps its history and refuses what it cannot honour*;
+`DESIGN.md`, seam 7). What is left:
 
 - **Physical removal** of the events metadata hides, the analogue of the
   reference's scavenge, is a maintenance job and a slice of its own; whether
@@ -552,7 +554,7 @@ position, so a consumer sees one unbroken enumeration across reconnects.
 
 A group's start and its numbering are fixed when it is created, and an update
 changes its tunables only (`VARIANCES.md`, *Updating a group changes its
-tunables*).
+tunables, not where it stands*).
 Moving a group in place, back to replay a stretch or forward to skip one, is
 wanted and parked: it has to say what becomes of the parked messages and the
 outbox on either side of the new position, of events in flight, and of a
@@ -594,7 +596,8 @@ tables itself to get round it:
 A retry with a delay, or a nack that says later: an outbox row with a due
 time in the future, which the outbox already has the column for, and a timer
 in the group's loop. Parked messages and the outbox are otherwise done
-(`VARIANCES.md`, *Parked messages are rows*; `DESIGN.md`, seam 5).
+(`VARIANCES.md`, *Parked messages are rows: listed, replayed and skipped by
+number*; `DESIGN.md`, seam 5).
 
 ## More reads from the read-only connection
 
