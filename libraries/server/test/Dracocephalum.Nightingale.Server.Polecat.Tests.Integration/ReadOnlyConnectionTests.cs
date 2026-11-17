@@ -14,6 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// does, and a plain stream is readable through the second store. How a page is put together
 /// when the secondary lags is the router's unit tests.
 /// </summary>
+/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class ReadOnlyConnectionTests(SqlServerTestDatabase database)

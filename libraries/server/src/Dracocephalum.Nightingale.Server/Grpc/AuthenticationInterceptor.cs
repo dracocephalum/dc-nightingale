@@ -13,6 +13,8 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// credentials. The principal is left on the call for <see cref="Authorization"/> to read. With
 /// authentication off, or a host that registered no options, every call is the administrator's.
 /// </summary>
+/// <param name="options">The host's options, or <see langword="null"/> for a host that registered none.</param>
+/// <param name="basic">The authenticator of the Basic scheme, or <see langword="null"/> with authentication off.</param>
 public sealed class AuthenticationInterceptor(NightingaleOptionsBase? options = null, BasicAuthenticator? basic = null) : Interceptor
 {
     /// <summary>The key the principal is kept under on the call.</summary>

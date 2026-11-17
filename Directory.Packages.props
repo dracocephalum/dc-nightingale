@@ -40,7 +40,7 @@
       the version must be declared here or restore fails to resolve it.
       Verify against the current release.
     -->
-    <PackageVersion Include="StyleCop.Analyzers" Version="1.2.0-beta.556" />
+    <PackageVersion Include="StyleCop.Analyzers" Version="1.3.180" />
     <!-- Banned-API analyzer; the list lives in BannedSymbols.txt. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
   </ItemGroup>
@@ -58,7 +58,7 @@
   <!--
     Test stack, consumed by Tests.props.
 
-    agentics-verified: sdk=10.0.400 date=2026-09-14
+    agentics-verified: sdk=10.0.400 date=2026-11-17
     Last confirmed by a clean restore, build and `dotnet test` with this exact
     combination, on a four-component monorepo.
 
@@ -81,12 +81,12 @@
                               (tracks the ASP.NET Core version of the TFM)
   -->
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <!-- The attributes and test context without the runner, for a library of
          abstract tests that test projects derive from; the same release as xunit.v3. -->
-    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.1" />
-    <PackageVersion Include="Xunit.Combinatorial" Version="2.1.41" />
-    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.3" />
+    <PackageVersion Include="Xunit.Combinatorial" Version="2.1.43" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0" />
 
     <PackageVersion Include="FakeItEasy" Version="9.0.1" />
     <PackageVersion Include="FakeItEasy.Analyzer.CSharp" Version="6.1.1" />
@@ -97,7 +97,7 @@
 
     <!-- FakeTimeProvider. The coding rules require time-dependent code to take
          a TimeProvider; this is how tests drive it. -->
-    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0" />
 
     <!-- FakeLogger, so a test reads what was logged; same release as the fake clock. -->
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.Testing" Version="10.9.0" />
@@ -106,7 +106,7 @@
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
 
     <!-- Referenced only when Tests.props enables them. -->
-    <PackageVersion Include="FluentValidation" Version="12.1.1" />
+    <PackageVersion Include="FluentValidation" Version="12.2.0" />
     <PackageVersion Include="Serilog.Sinks.TestCorrelator" Version="4.0.2" />
     <!-- Tracks the EF Core major the application uses. -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11" />

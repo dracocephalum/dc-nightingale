@@ -9,6 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// The default host boots against the test database, which the fixture's host initialized with the
 /// same defaults, and serves the server-features service.
 /// </summary>
+/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class ProgramTests(SqlServerTestDatabase database)

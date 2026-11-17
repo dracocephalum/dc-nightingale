@@ -12,6 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 /// retries, a reset stream continued and an answer that was lost. Every test uses streams of its
 /// own in the shared database.
 /// </summary>
+/// <param name="database">The database.</param>
 [Collection(SharedSqlServer.Name)]
 [Trait("Category", "Integration")]
 public sealed class AppendToStreamsTests(SqlServerTestDatabase database)

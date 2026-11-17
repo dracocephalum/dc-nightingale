@@ -126,8 +126,8 @@ public static class NightingaleErrors
         var message = holder is null
             ? $"Group '{group}' on stream '{stream}' is no longer owned by this instance: its lease lapsed, and no instance holds it yet."
             : holder.Address is null
-            ? $"Group '{group}' on stream '{stream}' is owned by instance {holder.Owner}, which advertises no address."
-            : $"Group '{group}' on stream '{stream}' is owned by instance {holder.Owner} at {holder.Address}.";
+                ? $"Group '{group}' on stream '{stream}' is owned by instance {holder.Owner}, which advertises no address."
+                : $"Group '{group}' on stream '{stream}' is owned by instance {holder.Owner} at {holder.Address}.";
         return Build(StatusCode.Unavailable, ErrorReason.GroupOwnedElsewhere, message, ("stream", stream), ("group", group), ("owner", holder?.Owner ?? string.Empty), ("address", holder?.Address?.ToString() ?? string.Empty));
     }
 
