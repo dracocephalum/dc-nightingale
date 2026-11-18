@@ -5,4 +5,4 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// <param name="Password">The password as typed; it is hashed on the way in.</param>
 /// <param name="Role">The role.</param>
 /// <param name="TenantId">The tenant it is bound to, or <see langword="null"/> for a global credential.</param>
-public sealed record NewCredential(string Name, string Password, CredentialRole Role, Guid? TenantId);
+internal sealed record NewCredential(string Name, string Password, CredentialRole Role, Guid? TenantId);

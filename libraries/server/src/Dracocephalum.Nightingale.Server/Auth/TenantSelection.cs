@@ -7,7 +7,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// </summary>
 /// <param name="TenantId">The tenant named, or <see langword="null"/>.</param>
 /// <param name="IsWildcard">Whether the call named all tenants, which a read may.</param>
-public readonly record struct TenantSelection(Guid? TenantId, bool IsWildcard)
+internal readonly record struct TenantSelection(Guid? TenantId, bool IsWildcard)
 {
     /// <summary>Gets the selection of a call that named no tenant.</summary>
     public static TenantSelection None => default;

@@ -12,7 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// refusal as the status the contract promises, back.
 /// </summary>
 /// <param name="manager">The credentials, for any transport.</param>
-public sealed class CredentialsService(CredentialManager manager) : Credentials.CredentialsBase
+internal sealed class CredentialsService(CredentialManager manager) : Credentials.CredentialsBase
 {
     /// <inheritdoc/>
     public override Task<CredentialResponse> Create(CreateCredentialRequest request, ServerCallContext context)

@@ -12,7 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// </summary>
 /// <param name="stores">The backend's stores, for what the store was initialized with and whether a read may span all tenants.</param>
 /// <param name="options">The host's options, for whether calls are authenticated; none in a host that registered none.</param>
-public sealed class ServerFeaturesService(ITenantStores stores, NightingaleOptionsBase? options = null) : ServerFeatures.ServerFeaturesBase
+internal sealed class ServerFeaturesService(ITenantStores stores, NightingaleOptionsBase? options = null) : ServerFeatures.ServerFeaturesBase
 {
     private static readonly string Version =
         typeof(ServerFeaturesService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion

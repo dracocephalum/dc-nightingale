@@ -21,4 +21,14 @@
     <ProjectReference Include="../../../core/src/Dracocephalum.Nightingale.Protocols.Grpc/Dracocephalum.Nightingale.Protocols.Grpc.csproj" />
   </ItemGroup>
 
+  <!-- The public surface is what a host calls. What a backend and its tests reach
+       beyond that is internal, and granted here by name; the project's own tests
+       are granted in Directory.Build.props. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Polecat.Tests" />
+    <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Polecat.Tests.Integration" />
+    <!-- The assembly FakeItEasy generates its fakes into, so a test can fake an internal port. -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
 </Project>

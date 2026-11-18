@@ -18,7 +18,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// Services throw what this class returns and never construct an <see cref="RpcException"/> directly,
 /// so the client can map on the reason alone.
 /// </summary>
-public static class NightingaleErrors
+internal static class NightingaleErrors
 {
     /// <summary>The stream is in a different state than the caller asserted.</summary>
     /// <param name="conflict">The conflict the store reported.</param>

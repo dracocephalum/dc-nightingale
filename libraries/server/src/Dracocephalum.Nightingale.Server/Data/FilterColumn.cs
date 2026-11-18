@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// regular expression or the exact values, so the row says what the group keeps in one value that reads back
 /// into the same filter, and a group without one has no value.
 /// </summary>
-public static class FilterColumn
+internal static class FilterColumn
 {
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 

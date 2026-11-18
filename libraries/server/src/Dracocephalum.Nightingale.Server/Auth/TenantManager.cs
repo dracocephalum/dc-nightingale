@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// </summary>
 /// <param name="tenants">The tenants table.</param>
 /// <param name="authorizer">Checks the caller's role.</param>
-public sealed class TenantManager(ITenantStore tenants, Authorizer authorizer)
+internal sealed class TenantManager(ITenantStore tenants, Authorizer authorizer)
 {
     /// <summary>Creates a tenant.</summary>
     /// <param name="caller">The caller, a global admin.</param>

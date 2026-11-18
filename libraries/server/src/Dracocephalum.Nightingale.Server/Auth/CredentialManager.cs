@@ -18,7 +18,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// <param name="time">The clock.</param>
 /// <param name="authorizer">Checks the caller's role and that its tenant is live.</param>
 /// <param name="basic">Where this instance remembers verified credentials; none in a host without authentication.</param>
-public sealed class CredentialManager(ICredentialStore credentials, PasswordHasher hasher, NightingaleOptionsBase options, TimeProvider time, Authorizer authorizer, BasicAuthenticator? basic = null)
+internal sealed class CredentialManager(ICredentialStore credentials, PasswordHasher hasher, NightingaleOptionsBase options, TimeProvider time, Authorizer authorizer, BasicAuthenticator? basic = null)
 {
     private const string AdminPasswordIsConfiguration = "The built-in administrator's password is the server's configuration.";
 

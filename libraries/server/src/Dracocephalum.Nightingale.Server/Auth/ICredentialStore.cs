@@ -3,7 +3,7 @@ using Dracocephalum.Nightingale.Server.Data;
 namespace Dracocephalum.Nightingale.Server.Auth;
 
 /// <summary>The credentials table: a row by name and the failure bookkeeping for authentication, and the writes for management.</summary>
-public interface ICredentialStore
+internal interface ICredentialStore
 {
     /// <summary>Finds a credential by name, under the database's rule for which names are the same.</summary>
     /// <param name="name">The user name.</param>

@@ -11,7 +11,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// refusal as the status the contract promises, back.
 /// </summary>
 /// <param name="manager">The tenants, for any transport.</param>
-public sealed class TenantsService(TenantManager manager) : Protocols.Grpc.V1.Tenants.TenantsBase
+internal sealed class TenantsService(TenantManager manager) : Protocols.Grpc.V1.Tenants.TenantsBase
 {
     /// <inheritdoc/>
     public override Task<TenantResponse> Create(CreateTenantRequest request, ServerCallContext context)

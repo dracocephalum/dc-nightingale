@@ -20,7 +20,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// <param name="routers">The routers a group on a plain stream takes its live events through, one per tenant.</param>
 /// <param name="address">Where this instance is reached, written with every lease it takes.</param>
 /// <param name="timeProvider">The clock.</param>
-public sealed class PersistentSubscriptionsService(ITenantStores stores, SubscriptionGroupRegistry registry, StreamRouters routers, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
+internal sealed class PersistentSubscriptionsService(ITenantStores stores, SubscriptionGroupRegistry registry, StreamRouters routers, InstanceAddress address, TimeProvider timeProvider) : PersistentSubscriptions.PersistentSubscriptionsBase
 {
     /// <summary>How long a lease lasts; it is renewed at a third of this.</summary>
     public static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);

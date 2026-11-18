@@ -9,4 +9,4 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// of one <c>Guid</c> key named <c>Id</c>, and from that rule only.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class StoreExtensionAttribute : Attribute;
+internal sealed class StoreExtensionAttribute : Attribute;

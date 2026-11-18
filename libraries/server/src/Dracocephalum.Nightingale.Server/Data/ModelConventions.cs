@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// builds the model and this throws with every violation, so a forgotten line fails the build.
 /// The rules and their reasons are in the repository's EF Core rules.
 /// </summary>
-public static class ModelConventions
+internal static class ModelConventions
 {
     private static readonly string[] MoneySuffixes = ["Amount", "Price", "Total", "Cost", "Fee", "Balance"];
 

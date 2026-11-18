@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="streams">The stream store.</param>
 /// <param name="groups">The group store, or <see langword="null"/> in a host that keeps no groups.</param>
 /// <param name="tail">The tail, or <see langword="null"/> in a host that follows no head.</param>
-public sealed class TenantStores(IStreamStore streams, ISubscriptionGroupStore? groups = null, IStoreTail? tail = null) : ITenantStores
+internal sealed class TenantStores(IStreamStore streams, ISubscriptionGroupStore? groups = null, IStoreTail? tail = null) : ITenantStores
 {
     /// <inheritdoc/>
     public bool SupportsAllTenants => true;

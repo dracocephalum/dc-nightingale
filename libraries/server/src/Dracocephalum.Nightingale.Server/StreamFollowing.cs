@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// then follows afresh. A follower is told through its feed when its stream is deleted, or when
 /// the router can route no more, with the cause. Disposing leaves the router.
 /// </summary>
-public sealed class StreamFollowing : IDisposable
+internal sealed class StreamFollowing : IDisposable
 {
     private readonly StreamRouter _router;
     private readonly Channel<EventRecord> _events = Channel.CreateBounded<EventRecord>(new BoundedChannelOptions(StreamRouter.FollowerBuffer) { SingleReader = true, SingleWriter = true });
