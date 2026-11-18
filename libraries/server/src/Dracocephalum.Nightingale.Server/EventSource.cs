@@ -1,7 +1,5 @@
 using System.Runtime.CompilerServices;
 
-using Dracocephalum.Nightingale;
-
 namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>

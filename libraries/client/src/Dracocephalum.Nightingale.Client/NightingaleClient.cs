@@ -704,6 +704,8 @@ public sealed class NightingaleClient : IAsyncDisposable
 
     private async Task<int> SkipAsync(SkipParkedRequest request, CancellationToken cancellationToken)
     {
+        // Asked of whichever instance answers, with no owner to follow: parked messages are rows
+        // that any instance removes, so the server never refuses this call with an owner's address.
         return await CallWithErrorMappingAsync(async () =>
         {
             var response = await _persistent.SkipParkedAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
