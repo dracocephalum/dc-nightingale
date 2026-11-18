@@ -260,6 +260,10 @@ one:
     dotnet sln <solution>.slnx add src/<Prefix>.<Name>/<Prefix>.<Name>.csproj
     dotnet sln <solution>.slnx add test/<Prefix>.<Name>.Tests/<Prefix>.<Name>.Tests.csproj
 
+In a repository of several solutions that has a `.lsp/` folder, write the
+local solution again, so a language server holds the new projects too. The
+command is in the root `AGENTS.md`, under *Code intelligence*.
+
 ## 6. Verify — none of these are optional
 
     dotnet format analyzers <solution>.slnx
