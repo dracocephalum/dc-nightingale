@@ -7,4 +7,4 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 /// <param name="Events">The events kept, in the reading direction; as many as were asked for means the stretch may hold more.</param>
 /// <param name="Through">The last position examined, inclusive: the last event's when as many were kept as asked for, the end of the stretch otherwise.</param>
-public sealed record ScannedSlice(IReadOnlyList<EventRecord> Events, long Through);
+internal sealed record ScannedSlice(IReadOnlyList<EventRecord> Events, long Through);

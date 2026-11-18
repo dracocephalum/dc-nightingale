@@ -13,7 +13,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// thing it cannot reach is the text of a raw SQL operation, so a migration that needs raw SQL
 /// must not name the schema in it.
 /// </summary>
-public static class MigrationSchema
+internal static class MigrationSchema
 {
     private static readonly string[] SchemaProperties = ["Schema", "NewSchema", "PrincipalSchema"];
 

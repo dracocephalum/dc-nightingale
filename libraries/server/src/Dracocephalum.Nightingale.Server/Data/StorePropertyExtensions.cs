@@ -13,7 +13,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// and a row the type has no member for is ignored. Why rows, and why a setting is never an object
 /// or a list, are <c>DESIGN.md</c>, seam 3.
 /// </summary>
-public static class StorePropertyExtensions
+internal static class StorePropertyExtensions
 {
     /// <summary>Reads the settings the store was initialized with from their rows.</summary>
     /// <typeparam name="T">The settings type.</typeparam>

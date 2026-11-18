@@ -11,7 +11,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// types cross this interface. Why the lease fences, and what stays in memory, are
 /// <c>DESIGN.md</c>, seam 5.
 /// </summary>
-public interface ISubscriptionGroupStore
+internal interface ISubscriptionGroupStore
 {
     /// <summary>Creates a group with no checkpoint.</summary>
     /// <param name="group">The definition.</param>

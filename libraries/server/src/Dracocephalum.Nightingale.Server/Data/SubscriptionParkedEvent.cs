@@ -4,7 +4,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// An event a group could not process, kept until a replay: one row per group and position,
 /// with every number the event has so it can be addressed by whichever one the group speaks.
 /// </summary>
-public sealed class SubscriptionParkedEvent
+internal sealed class SubscriptionParkedEvent
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }

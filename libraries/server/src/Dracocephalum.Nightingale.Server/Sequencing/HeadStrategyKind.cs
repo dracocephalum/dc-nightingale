@@ -1,7 +1,7 @@
 namespace Dracocephalum.Nightingale.Server.Sequencing;
 
 /// <summary>Which strategy keeps a journal's sequence heads.</summary>
-public enum HeadStrategyKind
+internal enum HeadStrategyKind
 {
     /// <summary>
     /// The transaction horizon of each store partition: a missing position is given up once no

@@ -6,4 +6,4 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 /// <param name="Head">The stream's bounds at the time of the read.</param>
 /// <param name="Events">The events of this page, possibly empty.</param>
-public sealed record StreamSlice(StreamHead Head, IReadOnlyList<EventRecord> Events);
+internal sealed record StreamSlice(StreamHead Head, IReadOnlyList<EventRecord> Events);

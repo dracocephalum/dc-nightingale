@@ -11,7 +11,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// database answers the same for every sequence; one by store partition answers each sequence by
 /// the writers of its own partition.
 /// </summary>
-public interface ITransactionHorizon
+internal interface ITransactionHorizon
 {
     /// <summary>
     /// Gets how old a marker must be before it is judged: the moment, on a database where it

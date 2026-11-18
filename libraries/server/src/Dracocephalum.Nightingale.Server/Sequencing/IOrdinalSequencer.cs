@@ -7,7 +7,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// instance's numbering current; a backend writes the statement for its
 /// database, over its events table and the gateway's links and progress rows.
 /// </summary>
-public interface IOrdinalSequencer
+internal interface IOrdinalSequencer
 {
     /// <summary>
     /// Sequences one batch of a sequence, numbering it from the position numbered through up to the head or the

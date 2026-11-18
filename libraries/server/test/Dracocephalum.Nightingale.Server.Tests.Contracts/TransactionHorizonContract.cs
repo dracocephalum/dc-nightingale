@@ -2,7 +2,7 @@ using System.Data.Common;
 using Dracocephalum.Nightingale.Server.Sequencing;
 using Shouldly;
 
-namespace Dracocephalum.Nightingale.Server.Contracts;
+namespace Dracocephalum.Nightingale.Server.Tests.Contracts;
 
 /// <summary>
 /// What every backend's <see cref="ITransactionHorizon"/> must do. Correctness: a transaction
@@ -24,7 +24,7 @@ public abstract class TransactionHorizonContract
     private static readonly TimeSpan Settling = TimeSpan.FromSeconds(5);
 
     /// <summary>Gets the horizon of the journal under test.</summary>
-    protected abstract ITransactionHorizon Horizon { get; }
+    private protected abstract ITransactionHorizon Horizon { get; }
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 

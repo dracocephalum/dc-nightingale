@@ -1,7 +1,7 @@
 using System.Text;
 
-using Dracocephalum.Nightingale.Server.Contracts;
 using Dracocephalum.Nightingale.Server.Sequencing;
+using Dracocephalum.Nightingale.Server.Tests.Contracts;
 using Microsoft.Data.SqlClient;
 using Shouldly;
 

@@ -8,4 +8,4 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 /// <param name="Owner">The instance id.</param>
 /// <param name="Address">Where the instance is reached, or <see langword="null"/> when it advertised none.</param>
-public sealed record LeaseHolder(string Owner, Uri? Address);
+internal sealed record LeaseHolder(string Owner, Uri? Address);

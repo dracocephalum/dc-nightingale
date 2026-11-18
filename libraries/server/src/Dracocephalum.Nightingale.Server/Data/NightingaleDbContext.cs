@@ -14,7 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// </summary>
 /// <param name="options">The options, which name the provider and the connection.</param>
 /// <param name="schema">The schema the tables live in.</param>
-public sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> options, NightingaleSchema schema) : DbContext(options), ISchemaScoped
+internal sealed class NightingaleDbContext(DbContextOptions<NightingaleDbContext> options, NightingaleSchema schema) : DbContext(options), ISchemaScoped
 {
     /// <summary>Gets the groups.</summary>
     public DbSet<SubscriptionGroup> SubscriptionGroups => Set<SubscriptionGroup>();

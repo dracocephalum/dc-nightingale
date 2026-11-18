@@ -4,7 +4,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// <param name="TenantId">The tenant's id, or <see langword="null"/> for all tenants or for the instance's own.</param>
 /// <param name="StoreTenantId">The id the store keeps for it, or <see langword="null"/> for all tenants or for the instance's own.</param>
 /// <param name="IsWildcard">Whether the scope spans all tenants.</param>
-public sealed record TenantScope(Guid? TenantId, string? StoreTenantId, bool IsWildcard = false)
+internal sealed record TenantScope(Guid? TenantId, string? StoreTenantId, bool IsWildcard = false)
 {
     /// <summary>Gets the scope of a call under the wildcard: all tenants.</summary>
     public static TenantScope AllTenants { get; } = new(null, null, true);

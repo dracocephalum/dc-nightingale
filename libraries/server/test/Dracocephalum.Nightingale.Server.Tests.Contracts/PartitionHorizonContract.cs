@@ -2,7 +2,7 @@ using System.Data.Common;
 using Dracocephalum.Nightingale.Server.Sequencing;
 using Shouldly;
 
-namespace Dracocephalum.Nightingale.Server.Contracts;
+namespace Dracocephalum.Nightingale.Server.Tests.Contracts;
 
 /// <summary>
 /// What every backend's horizon by store partition must do besides the
@@ -17,13 +17,13 @@ public abstract class PartitionHorizonContract
     private static readonly TimeSpan Settling = TimeSpan.FromSeconds(10);
 
     /// <summary>Gets the horizon of the store under test.</summary>
-    protected abstract ITransactionHorizon Horizon { get; }
+    private protected abstract ITransactionHorizon Horizon { get; }
 
     /// <summary>Gets a sequence in one partition.</summary>
-    protected abstract SequenceKey First { get; }
+    private protected abstract SequenceKey First { get; }
 
     /// <summary>Gets a sequence in another partition.</summary>
-    protected abstract SequenceKey Second { get; }
+    private protected abstract SequenceKey Second { get; }
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
@@ -83,7 +83,7 @@ public abstract class PartitionHorizonContract
     /// <param name="sequence">The sequence.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The open transaction, on a connection of its own.</returns>
-    protected abstract Task<DbTransaction> BeginWriteAsync(SequenceKey sequence, CancellationToken cancellationToken);
+    private protected abstract Task<DbTransaction> BeginWriteAsync(SequenceKey sequence, CancellationToken cancellationToken);
 
     private async Task<OpenWriter> BeginWriterInAsync(SequenceKey sequence, CancellationToken cancellationToken) => new(await BeginWriteAsync(sequence, cancellationToken));
 

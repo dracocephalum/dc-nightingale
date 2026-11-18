@@ -10,4 +10,4 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="OutboxCount">How many messages are on the outbox.</param>
 /// <param name="Holder">The instance holding the group's lease, or <see langword="null"/> when none does.</param>
 /// <param name="Live">How the running group stood when it last wrote it, or <see langword="null"/> when no instance holds its lease or it has written nothing.</param>
-public sealed record SubscriptionGroupSummary(SubscriptionGroupDefinition Definition, DateTimeOffset CreatedAt, long ParkedCount, long OutboxCount, LeaseHolder? Holder, SubscriptionGroupLive? Live = null);
+internal sealed record SubscriptionGroupSummary(SubscriptionGroupDefinition Definition, DateTimeOffset CreatedAt, long ParkedCount, long OutboxCount, LeaseHolder? Holder, SubscriptionGroupLive? Live = null);

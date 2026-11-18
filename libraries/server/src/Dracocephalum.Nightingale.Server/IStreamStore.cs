@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// and never lets its own exception types cross this interface. Liveness is the
 /// <see cref="IStoreTail"/>'s business, registered beside the store.
 /// </summary>
-public interface IStreamStore
+internal interface IStreamStore
 {
     /// <summary>
     /// Appends events to one stream atomically under an expected state. A retry with the same ids at

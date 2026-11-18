@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// sequence head of a tail and how far the sequencer has numbered it, so the waiting is written
 /// once for every backend.
 /// </summary>
-public sealed class FollowedHead
+internal sealed class FollowedHead
 {
     private readonly Lock _gate = new();
     private TaskCompletionSource _advanced = new(TaskCreationOptions.RunContinuationsAsynchronously);

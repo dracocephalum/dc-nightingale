@@ -7,7 +7,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// so liveness costs the store one poll per interval rather than one per subscriber. A backend
 /// registers its implementation beside its <see cref="IStreamStore"/>.
 /// </summary>
-public interface IStoreTail
+internal interface IStoreTail
 {
     /// <summary>
     /// Gets the position up to which every event has its ordinals, as this process knows it: never

@@ -1,7 +1,7 @@
 using System.Data.Common;
 
-using Dracocephalum.Nightingale.Server.Contracts;
 using Dracocephalum.Nightingale.Server.Sequencing;
+using Dracocephalum.Nightingale.Server.Tests.Contracts;
 using Microsoft.Data.SqlClient;
 
 namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
@@ -15,16 +15,16 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 public sealed class SqlServerTenantPartitionHorizonTests(SqlServerTenantPartitionHorizonTests.TenantStore store) : PartitionHorizonContract, IClassFixture<SqlServerTenantPartitionHorizonTests.TenantStore>
 {
     /// <inheritdoc/>
-    protected override ITransactionHorizon Horizon { get; } = SqlServerPartitionHorizon.OverStore(TestDatabases.ConnectionStringFor(store.Name), "dbo", partitionedByTenant: true);
+    private protected override ITransactionHorizon Horizon { get; } = SqlServerPartitionHorizon.OverStore(TestDatabases.ConnectionStringFor(store.Name), "dbo", partitionedByTenant: true);
 
     /// <inheritdoc/>
-    protected override SequenceKey First => new(TenantStore.Acme);
+    private protected override SequenceKey First => new(TenantStore.Acme);
 
     /// <inheritdoc/>
-    protected override SequenceKey Second => new(TenantStore.Globex);
+    private protected override SequenceKey Second => new(TenantStore.Globex);
 
     /// <inheritdoc/>
-    protected override async Task<DbTransaction> BeginWriteAsync(SequenceKey sequence, CancellationToken cancellationToken)
+    private protected override async Task<DbTransaction> BeginWriteAsync(SequenceKey sequence, CancellationToken cancellationToken)
     {
         var connection = new SqlConnection(TestDatabases.ConnectionStringFor(store.Name));
         await connection.OpenAsync(cancellationToken);

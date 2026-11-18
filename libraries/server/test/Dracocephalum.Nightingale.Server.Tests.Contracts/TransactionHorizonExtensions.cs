@@ -1,9 +1,9 @@
 using Dracocephalum.Nightingale.Server.Sequencing;
 
-namespace Dracocephalum.Nightingale.Server.Contracts;
+namespace Dracocephalum.Nightingale.Server.Tests.Contracts;
 
 /// <summary>A horizon asked about one sequence, as a test asks it.</summary>
-public static class TransactionHorizonExtensions
+internal static class TransactionHorizonExtensions
 {
     /// <summary>Finds the transaction holding the shared sequence back from a marker.</summary>
     /// <param name="horizon">The horizon.</param>

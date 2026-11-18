@@ -15,7 +15,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// where they were, and whoever waits on them waits on. How a head moves, how a gap is judged and
 /// when the poller looks are <c>DESIGN.md</c>, seam 4.
 /// </summary>
-public sealed partial class SequenceTails : IHostedService, IAsyncDisposable
+internal sealed partial class SequenceTails : IHostedService, IAsyncDisposable
 {
     /// <summary>How long the poller waits after a look that left a head behind positions seen past it, catching up or held by a gap: the store's fast polling time.</summary>
     public static readonly TimeSpan FastInterval = TimeSpan.FromMilliseconds(250);

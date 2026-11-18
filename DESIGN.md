@@ -871,7 +871,7 @@ transports at once and of a client that can fall back between them.
   the wake, proven by a host whose polling interval is minutes long reaching
   its own append in seconds, the category rule, the database's column
   against the server's, and the horizons through the contracts of
-  `Server.Contracts`. Each creates its databases and drops them.
+  `Server.Tests.Contracts`. Each creates its databases and drops them.
 - `examples/` holds one program per backend that narrates each of its scenarios
   end to end, and a test per scenario that asserts the same run, against one
   database per run that the run's server creates and the run drops, with a

@@ -6,4 +6,4 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// another. Markers from different journals never compare.
 /// </summary>
 /// <param name="Value">The value, in the issuing horizon's terms.</param>
-public readonly record struct HorizonMarker(long Value);
+internal readonly record struct HorizonMarker(long Value);

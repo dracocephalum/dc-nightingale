@@ -4,7 +4,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// An event due to be delivered to a group again: a parked event a replay put back. An event is
 /// parked or on the outbox, never both.
 /// </summary>
-public sealed class SubscriptionOutboxEntry
+internal sealed class SubscriptionOutboxEntry
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }

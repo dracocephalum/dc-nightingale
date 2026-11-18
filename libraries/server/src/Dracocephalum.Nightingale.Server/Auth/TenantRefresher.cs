@@ -12,7 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// <param name="options">The host's options.</param>
 /// <param name="time">The clock.</param>
 /// <param name="logger">The logger.</param>
-public sealed partial class TenantRefresher(TenantDirectory directory, NightingaleOptionsBase options, TimeProvider time, ILogger<TenantRefresher> logger) : BackgroundService
+internal sealed partial class TenantRefresher(TenantDirectory directory, NightingaleOptionsBase options, TimeProvider time, ILogger<TenantRefresher> logger) : BackgroundService
 {
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

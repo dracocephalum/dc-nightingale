@@ -8,7 +8,7 @@ the default host.
 | Category | `libraries/` |
 | Kind | library, plus a service library |
 | Solution | `Dracocephalum.Nightingale.Server.slnx` |
-| Projects | `src/Dracocephalum.Nightingale.Server`, `src/Dracocephalum.Nightingale.Server.Polecat`, `test/Dracocephalum.Nightingale.Server.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration`, `test/Dracocephalum.Nightingale.Server.Contracts` |
+| Projects | `src/Dracocephalum.Nightingale.Server`, `src/Dracocephalum.Nightingale.Server.Polecat`, `test/Dracocephalum.Nightingale.Server.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration`, `test/Dracocephalum.Nightingale.Server.Tests.Contracts` |
 
 ## What it does
 
@@ -29,10 +29,18 @@ its sequences: `SequenceTails`, the one tail of a process that keeps every
 sequence head, and the ordinal sequencer, registered by
 `AddNightingaleOrdinalSequencer`; each over the ports a backend implements,
 its head strategy and `IOrdinalSequencer` (`DESIGN.md`, seams 4 and 6).
-`test/Dracocephalum.Nightingale.Server.Contracts` holds those ports'
+`test/Dracocephalum.Nightingale.Server.Tests.Contracts` holds those ports'
 contracts as abstract tests, a library and not a test project: a backend's
 integration project derives a class from each and supplies its database,
 and the contract's tests run there.
+
+The package's public surface is what a host calls: the registration and
+mapping extensions and the options they bind. The ports, the gateway's
+tables and everything else a backend builds on are internal, and a backend
+is granted them by name: its project and its test projects are listed as
+`InternalsVisibleTo` in the server's project file, and its integration
+project in the contracts' project file. A later backend adds its names in
+both places.
 
 `Dracocephalum.Nightingale.Server.Polecat` is the backend over the Polecat
 event-sourcing framework and the default host: one project that packs as a

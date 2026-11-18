@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// default tenant is written when the schema is applied, mapped to the store's own default id,
 /// so the single-tenant store needs nothing else.
 /// </summary>
-public sealed class Tenant
+internal sealed class Tenant
 {
     /// <summary>The default tenant's id, the same in every store, seeded with the schema.</summary>
     public static readonly Guid DefaultId = new("a1c6e3d2-5b7f-4e8a-9c0d-1f2a3b4c5d6e");

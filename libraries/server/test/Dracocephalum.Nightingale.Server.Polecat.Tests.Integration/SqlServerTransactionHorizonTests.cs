@@ -1,8 +1,8 @@
 using System.Data.Common;
 using System.Globalization;
 
-using Dracocephalum.Nightingale.Server.Contracts;
 using Dracocephalum.Nightingale.Server.Sequencing;
+using Dracocephalum.Nightingale.Server.Tests.Contracts;
 using Microsoft.Data.SqlClient;
 using Shouldly;
 
@@ -16,7 +16,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat.Tests.Integration;
 public sealed class SqlServerTransactionHorizonTests(SqlServerTransactionHorizonTests.Databases databases) : TransactionHorizonContract, IClassFixture<SqlServerTransactionHorizonTests.Databases>
 {
     /// <inheritdoc/>
-    protected override ITransactionHorizon Horizon { get; } = SqlServerTransactionHorizon.Over(TestDatabases.ConnectionStringFor(databases.Journal));
+    private protected override ITransactionHorizon Horizon { get; } = SqlServerTransactionHorizon.Over(TestDatabases.ConnectionStringFor(databases.Journal));
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 

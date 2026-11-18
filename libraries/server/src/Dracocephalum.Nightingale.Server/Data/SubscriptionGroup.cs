@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// are read, compared and changed in the database like any other column; the checkpoint is in
 /// the group's numbering.
 /// </summary>
-public sealed class SubscriptionGroup
+internal sealed class SubscriptionGroup
 {
     /// <summary>Gets or sets the group's id, its key.</summary>
     public Guid Id { get; set; }
