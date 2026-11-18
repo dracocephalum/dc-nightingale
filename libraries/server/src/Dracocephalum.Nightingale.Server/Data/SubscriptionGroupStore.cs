@@ -228,8 +228,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         return new SubscriptionGroupSummary(
             ToDefinition(row),
             row.CreatedAt,
-            await GetParked(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
-            await GetOutbox(context, row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
+            await context.SubscriptionParkedEvents.FilterByGroup(row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
+            await context.SubscriptionOutboxEntries.FilterByGroup(row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
             holder,
             ToLive(row, holder));
     }
@@ -303,8 +303,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
                 return attempt > 1;
             }
 
-            context.SubscriptionParkedEvents.RemoveRange(await GetParked(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
-            context.SubscriptionOutboxEntries.RemoveRange(await GetOutbox(context, row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
+            context.SubscriptionParkedEvents.RemoveRange(await context.SubscriptionParkedEvents.FilterByGroup(row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
+            context.SubscriptionOutboxEntries.RemoveRange(await context.SubscriptionOutboxEntries.FilterByGroup(row.Id).ToListAsync(cancellationToken).ConfigureAwait(false));
             context.SubscriptionGroups.Remove(row);
             try
             {
@@ -384,7 +384,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<int> SkipAsync(Guid groupId, long? number, long? before, SubscriptionParkedNumber by, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var toSkip = await FilterByNumber(GetParked(context, groupId), number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
+        var toSkip = await context.SubscriptionParkedEvents.FilterByGroup(groupId).FilterByNumber(number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
         context.SubscriptionParkedEvents.RemoveRange(toSkip);
         try
         {
@@ -395,7 +395,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             // A replay or another skip took some of them first; what is left to count is what
             // this call can still remove, and the caller's rows are gone either way.
             await using var again = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-            var left = await FilterByNumber(GetParked(again, groupId), number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
+            var left = await again.SubscriptionParkedEvents.FilterByGroup(groupId).FilterByNumber(number, before, by).ToListAsync(cancellationToken).ConfigureAwait(false);
             again.SubscriptionParkedEvents.RemoveRange(left);
             await again.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             return left.Count;
@@ -408,7 +408,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<IReadOnlyList<SubscriptionParkedMessage>> ListParkedAsync(Guid groupId, SubscriptionParkedNumber by, long? after, int limit, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = GetParked(context, groupId).AsNoTracking();
+        var rows = context.SubscriptionParkedEvents.FilterByGroup(groupId).AsNoTracking();
         rows = by switch
         {
             SubscriptionParkedNumber.Revision => rows.Where(row => after == null || row.Revision > after).OrderBy(row => row.Revision),
@@ -423,7 +423,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<IReadOnlyList<SubscriptionOutboxMessage>> ListOutboxAsync(Guid groupId, SubscriptionParkedNumber by, long? after, int limit, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = GetOutbox(context, groupId).AsNoTracking();
+        var rows = context.SubscriptionOutboxEntries.FilterByGroup(groupId).AsNoTracking();
         rows = by switch
         {
             SubscriptionParkedNumber.Revision => rows.Where(row => after == null || row.Revision > after).OrderBy(row => row.Revision),
@@ -434,61 +434,11 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         return page.Select(row => new SubscriptionOutboxMessage(groupId, row.Position, row.Revision, row.Ordinal, row.EventId, row.Reason, row.Attempts, row.DueAt)).ToList();
     }
 
-    private static IQueryable<SubscriptionParkedEvent> FilterByNumber(IQueryable<SubscriptionParkedEvent> parked, long? number, long? before, SubscriptionParkedNumber by)
-    {
-        if (number is { } wanted)
-        {
-            parked = by switch
-            {
-                SubscriptionParkedNumber.Revision => parked.Where(row => row.Revision == wanted),
-                SubscriptionParkedNumber.Ordinal => parked.Where(row => row.Ordinal == wanted),
-                _ => parked.Where(row => row.Position == wanted),
-            };
-        }
-
-        if (before is { } below)
-        {
-            parked = by switch
-            {
-                SubscriptionParkedNumber.Revision => parked.Where(row => row.Revision < below),
-                SubscriptionParkedNumber.Ordinal => parked.Where(row => row.Ordinal < below),
-                _ => parked.Where(row => row.Position < below),
-            };
-        }
-
-        return parked;
-    }
-
-    private static IQueryable<SubscriptionOutboxEntry> FilterByNumber(IQueryable<SubscriptionOutboxEntry> queued, long? number, long? before, SubscriptionParkedNumber by)
-    {
-        if (number is { } wanted)
-        {
-            queued = by switch
-            {
-                SubscriptionParkedNumber.Revision => queued.Where(row => row.Revision == wanted),
-                SubscriptionParkedNumber.Ordinal => queued.Where(row => row.Ordinal == wanted),
-                _ => queued.Where(row => row.Position == wanted),
-            };
-        }
-
-        if (before is { } below)
-        {
-            queued = by switch
-            {
-                SubscriptionParkedNumber.Revision => queued.Where(row => row.Revision < below),
-                SubscriptionParkedNumber.Ordinal => queued.Where(row => row.Ordinal < below),
-                _ => queued.Where(row => row.Position < below),
-            };
-        }
-
-        return queued;
-    }
-
     private async Task<int> MoveToOutboxAsync(Guid groupId, long? number, long? before, SubscriptionParkedNumber by, DateTimeOffset dueAt, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var parked = FilterByNumber(GetParked(context, groupId), number, before, by);
-        var queued = FilterByNumber(GetOutbox(context, groupId), number, before, by);
+        var parked = context.SubscriptionParkedEvents.FilterByGroup(groupId).FilterByNumber(number, before, by);
+        var queued = context.SubscriptionOutboxEntries.FilterByGroup(groupId).FilterByNumber(number, before, by);
 
         var toMove = await parked.ToListAsync(cancellationToken).ConfigureAwait(false);
         var already = await queued.CountAsync(cancellationToken).ConfigureAwait(false);
@@ -518,7 +468,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     public async Task<IReadOnlyList<SubscriptionOutboxMessage>> DueAsync(Guid groupId, DateTimeOffset now, CancellationToken cancellationToken)
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = await GetOutbox(context, groupId).AsNoTracking()
+        var rows = await context.SubscriptionOutboxEntries.FilterByGroup(groupId).AsNoTracking()
             .Where(row => row.DueAt <= now)
             .OrderBy(row => row.DueAt).ThenBy(row => row.Position)
             .ToListAsync(cancellationToken)
@@ -660,10 +610,4 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         return await context.SubscriptionGroups.AnyAsync(row => row.Id == groupId, cancellationToken).ConfigureAwait(false);
     }
-
-    private static IQueryable<SubscriptionParkedEvent> GetParked(NightingaleDbContext context, Guid groupId) =>
-        context.SubscriptionParkedEvents.Where(row => row.SubscriptionGroupId == groupId);
-
-    private static IQueryable<SubscriptionOutboxEntry> GetOutbox(NightingaleDbContext context, Guid groupId) =>
-        context.SubscriptionOutboxEntries.Where(row => row.SubscriptionGroupId == groupId);
 }

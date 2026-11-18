@@ -249,8 +249,8 @@ public sealed class PlainStreamReaderTests
 
         // Act
         var first = _sut.FindWithMetadata(context, Stream, Metastream).ToQueryString();
-        var aged = PlainStreamReader.FilterByAge(_sut.QueryRows(context, Stream), TimeSpan.FromHours(1)).Select(row => row.SeqId).ToQueryString();
-        var unaged = PlainStreamReader.FilterByAge(_sut.QueryRows(context, Stream), null).Select(row => row.SeqId).ToQueryString();
+        var aged = _sut.QueryRows(context, Stream).FilterByAge(TimeSpan.FromHours(1)).Select(row => row.SeqId).ToQueryString();
+        var unaged = _sut.QueryRows(context, Stream).FilterByAge(null).Select(row => row.SeqId).ToQueryString();
 
         // Assert: the probe is a TOP 1 inside the statement that finds the stream, and the age is
         // the database's to measure, so no instance's clock is sent.
