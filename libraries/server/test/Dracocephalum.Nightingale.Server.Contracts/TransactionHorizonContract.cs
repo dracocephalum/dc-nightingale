@@ -24,7 +24,7 @@ public abstract class TransactionHorizonContract
     private static readonly TimeSpan Settling = TimeSpan.FromSeconds(5);
 
     /// <summary>Gets the horizon of the journal under test.</summary>
-    protected abstract ITransactionHorizon Horizon { get; }
+    private protected abstract ITransactionHorizon Horizon { get; }
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 

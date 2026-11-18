@@ -19,7 +19,7 @@ public sealed class SqlServerPartitionHorizonTests(SqlServerTransactionHorizonTe
     private static readonly TimeSpan LockReadDelay = TimeSpan.FromMilliseconds(200);
 
     /// <inheritdoc/>
-    protected override ITransactionHorizon Horizon { get; } = Watching(SqlServerHorizon.Connect(TestDatabases.ConnectionStringFor(databases.Journal)));
+    private protected override ITransactionHorizon Horizon { get; } = Watching(SqlServerHorizon.Connect(TestDatabases.ConnectionStringFor(databases.Journal)));
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 

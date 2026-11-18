@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// request with them before anything is written, so every problem comes back at once; a backend
 /// checks them again, since it is called by more than the service.
 /// </summary>
-public static class StreamAppends
+internal static class StreamAppends
 {
     /// <summary>Whether an expected state holds against a stream's last revision, -1 when it has no events.</summary>
     /// <param name="expected">What the caller asserted.</param>

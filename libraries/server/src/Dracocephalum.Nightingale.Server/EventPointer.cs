@@ -12,4 +12,4 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="Position">The event's global position.</param>
 /// <param name="Type">The event type.</param>
 /// <param name="CorrelationId">The event's <c>$correlationId</c>, or <see langword="null"/> when it carries none.</param>
-public sealed record EventPointer(string Stream, long Revision, long Position, string Type, string? CorrelationId = null);
+internal sealed record EventPointer(string Stream, long Revision, long Position, string Type, string? CorrelationId = null);

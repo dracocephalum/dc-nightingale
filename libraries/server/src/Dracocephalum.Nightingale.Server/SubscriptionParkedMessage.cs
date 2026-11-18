@@ -15,4 +15,4 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="Reason">Why it was parked: the consumer's reason, or the retry limit.</param>
 /// <param name="Attempts">Its retry count when it was parked: how many times it had been delivered again.</param>
 /// <param name="ParkedAt">When it was parked.</param>
-public sealed record SubscriptionParkedMessage(Guid GroupId, long Position, long Revision, long? Ordinal, Guid EventId, string Reason, int Attempts, DateTimeOffset ParkedAt);
+internal sealed record SubscriptionParkedMessage(Guid GroupId, long Position, long Revision, long? Ordinal, Guid EventId, string Reason, int Attempts, DateTimeOffset ParkedAt);

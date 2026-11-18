@@ -17,7 +17,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// <param name="contexts">Makes the gateway's own context.</param>
 /// <param name="registry">The running groups, where a disabled tenant's are stopped.</param>
 /// <param name="logger">The logger.</param>
-public sealed partial class TenantDirectory(IDbContextFactory<NightingaleDbContext> contexts, SubscriptionGroupRegistry registry, ILogger<TenantDirectory> logger)
+internal sealed partial class TenantDirectory(IDbContextFactory<NightingaleDbContext> contexts, SubscriptionGroupRegistry registry, ILogger<TenantDirectory> logger)
 {
     private readonly ConcurrentDictionary<Guid, TenantEntry> _tenants = new();
 

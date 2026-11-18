@@ -15,7 +15,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="AsOf">When these numbers were taken.</param>
 /// <param name="ConsumerCount">How many consumers are connected.</param>
 /// <param name="Consumers">Each consumer, from the running group; empty from the store, which keeps the count and the totals only.</param>
-public sealed record SubscriptionGroupLive(
+internal sealed record SubscriptionGroupLive(
     DateTimeOffset ConnectedAt,
     int InFlightCount,
     int AwaitingRetryCount,

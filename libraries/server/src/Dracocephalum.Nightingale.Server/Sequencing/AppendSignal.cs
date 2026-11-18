@@ -11,7 +11,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// finds the event at its next look.
 /// </summary>
 /// <param name="timeProvider">The clock a wait's time runs on.</param>
-public sealed class AppendSignal(TimeProvider timeProvider)
+internal sealed class AppendSignal(TimeProvider timeProvider)
 {
     private readonly Lock _gate = new();
     private TaskCompletionSource _pulsed = new(TaskCreationOptions.RunContinuationsAsynchronously);

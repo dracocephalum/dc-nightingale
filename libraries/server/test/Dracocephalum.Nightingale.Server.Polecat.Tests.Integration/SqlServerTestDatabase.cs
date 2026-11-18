@@ -20,7 +20,7 @@ public sealed class SqlServerTestDatabase : IAsyncLifetime
     public string ConnectionString => TestDatabases.ConnectionStringFor(Name);
 
     /// <summary>Gets the store, as the host registered it.</summary>
-    public IStreamStore Store => Services.GetRequiredService<IStreamStore>();
+    internal IStreamStore Store => Services.GetRequiredService<IStreamStore>();
 
     /// <summary>Gets the host's services.</summary>
     public IServiceProvider Services => _host?.Services ?? throw new InvalidOperationException("The fixture has not started.");

@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// that an event is numbered, are <c>DESIGN.md</c>, seam 6.
 /// </summary>
 [StoreExtension]
-public sealed class OrdinalLink
+internal sealed class OrdinalLink
 {
     /// <summary>Gets or sets which virtual stream the ordinal is in.</summary>
     public OrdinalLinkType Type { get; set; }

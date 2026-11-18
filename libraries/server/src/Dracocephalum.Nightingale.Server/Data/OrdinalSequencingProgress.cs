@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// the one row of a shared sequence, whose tenant is <see langword="null"/>, or a tenant's own
 /// under a sequence per tenant.
 /// </summary>
-public sealed class OrdinalSequencingProgress
+internal sealed class OrdinalSequencingProgress
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }

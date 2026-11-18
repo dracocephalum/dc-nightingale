@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// tail that starts takes it as where to begin. The time it was checked moves at every look, so a
 /// head that has caught up is told from one nobody keeps any more.
 /// </summary>
-public sealed class SequenceHead
+internal sealed class SequenceHead
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }

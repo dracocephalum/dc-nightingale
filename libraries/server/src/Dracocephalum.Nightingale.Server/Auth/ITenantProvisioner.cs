@@ -5,7 +5,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// conjoined store, and a partition when the store partitions its events by tenant. The
 /// backend implements it.
 /// </summary>
-public interface ITenantProvisioner
+internal interface ITenantProvisioner
 {
     /// <summary>Makes the store ready for a tenant.</summary>
     /// <param name="storeTenantId">The id the store will keep on the tenant's rows.</param>

@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// keeps about failures. The built-in administrator is not a row: its password is the host's
 /// configuration, so that nothing done through the API can lock everyone out.
 /// </summary>
-public sealed class Credential
+internal sealed class Credential
 {
     /// <summary>Gets or sets the id.</summary>
     public Guid Id { get; set; }

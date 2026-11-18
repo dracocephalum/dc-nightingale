@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// asked how it stands, for whoever asks this instance about the group; and stopped, for a
 /// change of settings its consumers have to connect again under.
 /// </summary>
-public sealed class SubscriptionGroupRegistry
+internal sealed class SubscriptionGroupRegistry
 {
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Entry> _groups = new(StringComparer.Ordinal);

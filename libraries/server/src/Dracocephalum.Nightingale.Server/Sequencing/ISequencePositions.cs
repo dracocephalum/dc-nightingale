@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// table; how it reads, past an open transaction's row or waiting on it, is part of the
 /// <see cref="HeadStrategy"/> it belongs to.
 /// </summary>
-public interface ISequencePositions
+internal interface ISequencePositions
 {
     /// <summary>Reads the highest visible position of each sequence that has one.</summary>
     /// <param name="sequences">The sequences.</param>

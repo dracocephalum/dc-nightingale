@@ -34,6 +34,14 @@ contracts as abstract tests, a library and not a test project: a backend's
 integration project derives a class from each and supplies its database,
 and the contract's tests run there.
 
+The package's public surface is what a host calls: the registration and
+mapping extensions and the options they bind. The ports, the gateway's
+tables and everything else a backend builds on are internal, and a backend
+is granted them by name: its project and its test projects are listed as
+`InternalsVisibleTo` in the server's project file, and its integration
+project in the contracts' project file. A later backend adds its names in
+both places.
+
 `Dracocephalum.Nightingale.Server.Polecat` is the backend over the Polecat
 event-sourcing framework and the default host: one project that packs as a
 library another host mounts through `AddNightingalePolecat()`, and runs on its

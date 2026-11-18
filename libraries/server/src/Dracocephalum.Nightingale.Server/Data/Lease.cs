@@ -5,7 +5,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// reached. The owner and the expiry are concurrency tokens, so two instances writing the same
 /// lease are told apart by the row itself, on any provider.
 /// </summary>
-public sealed class Lease
+internal sealed class Lease
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }

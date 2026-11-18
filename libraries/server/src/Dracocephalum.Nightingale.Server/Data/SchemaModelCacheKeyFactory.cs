@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// of the same type over another schema would read and write the first one's tables. One
 /// process serving two schemas is rare outside tests, and silent when it happens.
 /// </summary>
-public sealed class SchemaModelCacheKeyFactory : IModelCacheKeyFactory
+internal sealed class SchemaModelCacheKeyFactory : IModelCacheKeyFactory
 {
     /// <inheritdoc/>
     public object Create(DbContext context, bool designTime)

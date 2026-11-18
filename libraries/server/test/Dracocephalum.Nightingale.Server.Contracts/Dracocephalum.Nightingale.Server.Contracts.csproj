@@ -22,6 +22,12 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The contracts name the seam, which is internal to the server, so their members are too:
+       a backend's integration project is granted them here by name. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Polecat.Tests.Integration" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../src/Dracocephalum.Nightingale.Server/Dracocephalum.Nightingale.Server.csproj" />
   </ItemGroup>

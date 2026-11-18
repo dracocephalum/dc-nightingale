@@ -13,7 +13,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// group is per tenant, so neither is served under it. A host without a backend registers
 /// <see cref="TenantStores"/>, which hands every scope the one store and the one tail it has.
 /// </summary>
-public interface ITenantStores
+internal interface ITenantStores
 {
     /// <summary>
     /// Gets a value indicating whether a read may span all tenants: the store keeps one sequence

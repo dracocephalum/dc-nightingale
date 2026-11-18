@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// host's choice as they run.
 /// </summary>
 /// <param name="Name">The schema's name.</param>
-public sealed record NightingaleSchema(string Name)
+internal sealed record NightingaleSchema(string Name)
 {
     /// <summary>The schema used when a host names none, and the one migrations are generated under.</summary>
     public const string Default = "nightingale";

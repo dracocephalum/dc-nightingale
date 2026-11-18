@@ -7,4 +7,4 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// <param name="SessionId">The database's id of the session, when it says.</param>
 /// <param name="LoginName">The login the session runs under, when it says.</param>
 /// <param name="StartedAt">When the transaction began, in UTC, when the database says in a form that can be read.</param>
-public sealed record HorizonHolder(int? SessionId, string? LoginName, DateTimeOffset? StartedAt);
+internal sealed record HorizonHolder(int? SessionId, string? LoginName, DateTimeOffset? StartedAt);

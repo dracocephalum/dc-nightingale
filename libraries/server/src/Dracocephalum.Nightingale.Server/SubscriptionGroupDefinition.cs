@@ -7,7 +7,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="Group">The group name, unique per stream.</param>
 /// <param name="Settings">The settings.</param>
 /// <param name="Checkpoint">The last position every event up to which is done, or -1 when none is yet.</param>
-public sealed record SubscriptionGroupDefinition(string Stream, string Group, GroupSettings Settings, long Checkpoint)
+internal sealed record SubscriptionGroupDefinition(string Stream, string Group, GroupSettings Settings, long Checkpoint)
 {
     /// <summary>
     /// Gets the group's id: made when the definition is, written with the row, and what the group

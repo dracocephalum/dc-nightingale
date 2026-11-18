@@ -16,7 +16,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// <param name="contexts">Where a context comes from, one per operation.</param>
 /// <param name="tenantId">The tenant every group belongs to.</param>
 /// <param name="timeProvider">The clock leases are measured against.</param>
-public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContext> contexts, string tenantId, TimeProvider timeProvider) : ISubscriptionGroupStore
+internal sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContext> contexts, string tenantId, TimeProvider timeProvider) : ISubscriptionGroupStore
 {
     /// <summary>How many times a delete is tried while the group's rows change under it.</summary>
     private const int DeleteAttempts = 5;

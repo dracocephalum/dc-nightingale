@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// system. Every backend has these four; what is configured and what is stored are both seen
 /// through this interface, which is what the comparison between them is written against.
 /// </summary>
-public interface IStoreSettings
+internal interface IStoreSettings
 {
     /// <summary>
     /// Gets the schema the event store's tables live in. Fixed at initialization: a store

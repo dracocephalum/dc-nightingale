@@ -7,7 +7,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// the rows bind into it too, and the table's shape never changes when a property is added: an
 /// older store simply has no row for it and reads as the default.
 /// </summary>
-public sealed class StoreProperty
+internal sealed class StoreProperty
 {
     /// <summary>Gets or sets the row's id, its key.</summary>
     public Guid Id { get; set; }

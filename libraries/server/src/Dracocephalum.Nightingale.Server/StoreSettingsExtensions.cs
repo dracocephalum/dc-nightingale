@@ -5,7 +5,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// It is written against the interface, so it holds for any two things that carry the settings,
 /// whichever backend they are for.
 /// </summary>
-public static class StoreSettingsExtensions
+internal static class StoreSettingsExtensions
 {
     /// <summary>Finds where the configuration disagrees with what the store was initialized with.</summary>
     /// <param name="stored">What the store was initialized with; its collation is the database's actual one.</param>

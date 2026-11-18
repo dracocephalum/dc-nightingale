@@ -14,7 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// tenant. A backend registers its tails first, so the sequencer's first look at a head is a real
 /// one.
 /// </summary>
-public static class OrdinalSequencing
+internal static class OrdinalSequencing
 {
     /// <summary>The lease every instance competes for.</summary>
     public const string LeaseName = "ordinals";

@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// A unit test pins them.
 /// </summary>
 [StoredAsNumber]
-public enum OrdinalLinkType : byte
+internal enum OrdinalLinkType : byte
 {
     /// <summary>Every event of a type: <c>$et-</c> and the type. Every event has one, written in the same batch as its others, so it is the witness that an event is numbered.</summary>
     EventType = 1,

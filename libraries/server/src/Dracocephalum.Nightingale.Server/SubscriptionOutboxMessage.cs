@@ -13,4 +13,4 @@ namespace Dracocephalum.Nightingale.Server;
 /// <param name="Reason">Why it was parked, kept so a second failure keeps the history.</param>
 /// <param name="Attempts">Its retry count when it was parked, which it is delivered with again.</param>
 /// <param name="DueAt">When it becomes deliverable; now, for a replay.</param>
-public sealed record SubscriptionOutboxMessage(Guid GroupId, long Position, long Revision, long? Ordinal, Guid EventId, string Reason, int Attempts, DateTimeOffset DueAt);
+internal sealed record SubscriptionOutboxMessage(Guid GroupId, long Position, long Revision, long? Ordinal, Guid EventId, string Reason, int Attempts, DateTimeOffset DueAt);

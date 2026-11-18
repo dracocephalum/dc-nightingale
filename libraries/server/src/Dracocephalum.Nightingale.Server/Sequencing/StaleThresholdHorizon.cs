@@ -8,7 +8,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// rule, the checkpoint's, for both strategies.
 /// </summary>
 /// <param name="threshold">How long a checkpoint waits before the positions up to its ceiling are given up.</param>
-public sealed class StaleThresholdHorizon(TimeSpan threshold) : ITransactionHorizon
+internal sealed class StaleThresholdHorizon(TimeSpan threshold) : ITransactionHorizon
 {
     /// <summary>The threshold the store itself gives a gap up after: 3 seconds.</summary>
     public static readonly TimeSpan DefaultThreshold = TimeSpan.FromSeconds(3);

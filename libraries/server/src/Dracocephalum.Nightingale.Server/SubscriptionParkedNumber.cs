@@ -5,7 +5,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// which is the revision for a group over a plain stream, the global position for one over
 /// <c>$all</c> or a virtual stream, and the ordinal for one created under ordinal numbering.
 /// </summary>
-public enum SubscriptionParkedNumber
+internal enum SubscriptionParkedNumber
 {
     /// <summary>The event's global position.</summary>
     Position = 0,

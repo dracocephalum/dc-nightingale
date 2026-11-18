@@ -8,4 +8,4 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// <param name="Kind">Which strategy it is.</param>
 /// <param name="Horizon">Judges when every position up to a checkpoint's ceiling is final.</param>
 /// <param name="Positions">Reads the events table's positions.</param>
-public sealed record HeadStrategy(HeadStrategyKind Kind, ITransactionHorizon Horizon, ISequencePositions Positions);
+internal sealed record HeadStrategy(HeadStrategyKind Kind, ITransactionHorizon Horizon, ISequencePositions Positions);
