@@ -208,7 +208,7 @@ internal sealed partial class PolecatStreamStore
         }
         catch (SqlException exception) when (exception.Number is TruncationWithColumn or Truncation)
         {
-            throw new ValueTooLongException(DescribeColumn(exception), exception);
+            throw new ValueTooLongException(exception.DescribeColumn(), exception);
         }
 
         appended.Pulse();

@@ -281,7 +281,7 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
             throw NightingaleErrors.GroupOwnedElsewhere(stream, group, holder);
         }
 
-        var by = GetNumberKind(definition);
+        var by = definition.GetNumberKind();
         long? position = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Position ? request.Position : null;
         var replayed = request.WhichCase == ReplayParkedRequest.WhichOneofCase.Before
             ? await groups.ReplayBeforeAsync(definition.Id, request.Before, by, timeProvider.GetUtcNow(), context.CancellationToken).ConfigureAwait(false)
@@ -305,13 +305,13 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
         var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
-        var by = GetNumberKind(definition);
+        var by = definition.GetNumberKind();
         var response = new ListParkedResponse();
         foreach (var message in await groups.ListParkedAsync(definition.Id, by, request.HasAfter ? request.After : null, ClampLimit(request.Limit), context.CancellationToken).ConfigureAwait(false))
         {
             response.Messages.Add(new ParkedMessage
             {
-                Number = PickNumber(by, message.Position, message.Revision, message.Ordinal),
+                Number = by.PickNumber(message.Position, message.Revision, message.Ordinal),
                 EventId = message.EventId.ToString("D"),
                 Reason = message.Reason,
                 RetryCount = message.Attempts,
@@ -332,13 +332,13 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
         var groups = await AuthorizeGroupsAsync(context, CredentialRole.Ops).ConfigureAwait(false);
 
         var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
-        var by = GetNumberKind(definition);
+        var by = definition.GetNumberKind();
         var response = new ListOutboxResponse();
         foreach (var message in await groups.ListOutboxAsync(definition.Id, by, request.HasAfter ? request.After : null, ClampLimit(request.Limit), context.CancellationToken).ConfigureAwait(false))
         {
             response.Messages.Add(new OutboxMessage
             {
-                Number = PickNumber(by, message.Position, message.Revision, message.Ordinal),
+                Number = by.PickNumber(message.Position, message.Revision, message.Ordinal),
                 EventId = message.EventId.ToString("D"),
                 Reason = message.Reason,
                 RetryCount = message.Attempts,
@@ -363,7 +363,7 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
         var definition = await GroupAsync(groups, request.Stream, request.Group, context.CancellationToken).ConfigureAwait(false);
         long? position = request.WhichCase == SkipParkedRequest.WhichOneofCase.Position ? request.Position : null;
         long? before = request.WhichCase == SkipParkedRequest.WhichOneofCase.Before ? request.Before : null;
-        var skipped = await groups.SkipAsync(definition.Id, position, before, GetNumberKind(definition), context.CancellationToken).ConfigureAwait(false);
+        var skipped = await groups.SkipAsync(definition.Id, position, before, definition.GetNumberKind(), context.CancellationToken).ConfigureAwait(false);
         if (position is { } wanted && skipped == 0)
         {
             throw NightingaleErrors.ParkedMessageNotFound(definition.Stream, definition.Group, wanted);
@@ -494,20 +494,6 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
     /// stream, a position over <c>$all</c> or a virtual stream, an ordinal for a group created
     /// under ordinal numbering.
     /// </summary>
-    private static SubscriptionParkedNumber GetNumberKind(SubscriptionGroupDefinition definition) =>
-        definition.Settings.Numbering == Numbering.Ordinal
-            ? SubscriptionParkedNumber.Ordinal
-            : StreamNames.IsReserved(definition.Stream)
-                ? SubscriptionParkedNumber.Position
-                : SubscriptionParkedNumber.Revision;
-
-    private static long PickNumber(SubscriptionParkedNumber by, long position, long revision, long? ordinal) => by switch
-    {
-        SubscriptionParkedNumber.Revision => revision,
-        SubscriptionParkedNumber.Ordinal => ordinal ?? -1,
-        _ => position,
-    };
-
     private static int ClampLimit(int asked) => asked switch
     {
         <= 0 => DefaultPageSize,

@@ -67,4 +67,12 @@ internal static class PersistentSubscriptionsWireExtensions
 
         return info;
     }
+
+    /// <summary>The number a parked or outbox message is told by: the one of its three the group goes by.</summary>
+    public static long PickNumber(this SubscriptionParkedNumber by, long position, long revision, long? ordinal) => by switch
+    {
+        SubscriptionParkedNumber.Revision => revision,
+        SubscriptionParkedNumber.Ordinal => ordinal ?? -1,
+        _ => position,
+    };
 }

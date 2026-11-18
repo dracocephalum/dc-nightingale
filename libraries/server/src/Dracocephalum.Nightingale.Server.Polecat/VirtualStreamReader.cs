@@ -197,7 +197,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     {
         RequireOrdinals(stream);
         await using var context = OpenContext();
-        var ordinals = QueryLinks(context, LinkTypeOf(stream), stream.Key).Select(l => (long?)l.Ordinal);
+        var ordinals = QueryLinks(context, stream.ToOrdinalLinkType(), stream.Key).Select(l => (long?)l.Ordinal);
         var first = await ordinals.MinAsync(cancellationToken).ConfigureAwait(false);
         if (first is null)
         {
@@ -223,7 +223,7 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     {
         RequireOrdinals(stream);
         await using var context = OpenContext();
-        return await HydrateAsync(QueryLinked(context, LinkTypeOf(stream), stream.Key, direction, from), count, cancellationToken).ConfigureAwait(false);
+        return await HydrateAsync(QueryLinked(context, stream.ToOrdinalLinkType(), stream.Key, direction, from), count, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>A virtual stream read by ordinal: every one but the data events, which have none.</summary>
@@ -234,17 +234,6 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
             throw new ArgumentException($"{stream.Name} is read by position only; it has no ordinals.", nameof(stream));
         }
     }
-
-    /// <summary>Which links hold a virtual stream's ordinals; every virtual stream with ordinals has its links.</summary>
-    private static OrdinalLinkType LinkTypeOf(VirtualStreamName stream) => stream.Kind switch
-    {
-        VirtualStreamKind.Category => OrdinalLinkType.Category,
-        VirtualStreamKind.EventType => OrdinalLinkType.EventType,
-        VirtualStreamKind.Correlation => OrdinalLinkType.Correlation,
-        VirtualStreamKind.Streams => OrdinalLinkType.Streams,
-        VirtualStreamKind.CategoryStreams => OrdinalLinkType.CategoryStreams,
-        _ => throw new ArgumentException($"{stream.Name} has no ordinals.", nameof(stream)),
-    };
 
     /// <summary>The first rows of an ordered query, as event records.</summary>
     internal static Task<IReadOnlyList<EventRecord>> PageAsync(IQueryable<EventRow> ordered, int count, Expression<Func<EventRow, Raw>> columns, CancellationToken cancellationToken) =>

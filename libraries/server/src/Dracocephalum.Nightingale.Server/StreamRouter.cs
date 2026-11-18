@@ -270,7 +270,7 @@ internal sealed class StreamRouter : IAsyncDisposable
         var matched = new List<StreamFollowing>();
         lock (_gate)
         {
-            foreach (var name in GetNames(record.Stream, record.Revision, record.Type, GetCorrelationId(record)))
+            foreach (var name in GetNames(record.Stream, record.Revision, record.Type, record.GetCorrelationId()))
             {
                 Collect(name, matched);
             }
@@ -303,9 +303,6 @@ internal sealed class StreamRouter : IAsyncDisposable
             yield return StreamNames.CategoryStreamsPrefix + category;
         }
     }
-
-    private static string? GetCorrelationId(EventRecord record) =>
-        record.Metadata.TryGetPropertyValue(MetadataKeys.CorrelationId, out var value) && value is System.Text.Json.Nodes.JsonValue text && text.TryGetValue<string>(out var id) ? id : null;
 
     /// <summary>The first revision pointed at and how many pointers, of each stream any pointer of which is somebody's, in the order the streams first appear.</summary>
     private Dictionary<string, (long First, int Count)> GroupMatched(IReadOnlyList<EventPointer> pointers)

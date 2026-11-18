@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 using Dracocephalum.Nightingale.Server.Data;
 using Dracocephalum.Nightingale.Server.Polecat.Data;
@@ -203,7 +202,7 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         {
             // The store's columns hold so many bytes of the encoded text, and the database is what
             // measures: it refuses the write, names the column, and nothing is stored cut short.
-            throw new ValueTooLongException(DescribeColumn(exception), exception);
+            throw new ValueTooLongException(exception.DescribeColumn(), exception);
         }
 
         // Committed, so the tail finds the rows the moment it looks; an append resolved as a
@@ -338,23 +337,6 @@ internal sealed partial class PolecatStreamStore(IDocumentStore store, string? t
         RequireTenant(stream.Name);
         return _virtual.ReadByOrdinalAsync(stream, direction, from, count, cancellationToken);
     }
-
-    /// <summary>What the column the database named holds, as a caller would call it.</summary>
-    private static string DescribeColumn(SqlException exception)
-    {
-        var column = ColumnRegex().Match(exception.Message) is { Success: true } match ? match.Groups[1].Value : string.Empty;
-        return column switch
-        {
-            "id" or "stream_id" => ValueTooLongException.StreamName,
-            "type" => "event type",
-            "correlation_id" => "correlation id",
-            "causation_id" => "causation id",
-            _ => "value",
-        };
-    }
-
-    [GeneratedRegex("column '([^']+)'")]
-    private static partial Regex ColumnRegex();
 
     private void RequireOrdinals(string stream)
     {
