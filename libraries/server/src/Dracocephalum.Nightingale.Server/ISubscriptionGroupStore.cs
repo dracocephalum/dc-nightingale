@@ -1,5 +1,3 @@
-using Dracocephalum.Nightingale;
-
 namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>

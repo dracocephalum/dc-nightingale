@@ -1,4 +1,3 @@
-using Dracocephalum.Nightingale;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dracocephalum.Nightingale.Server.Data;

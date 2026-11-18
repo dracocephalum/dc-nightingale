@@ -1,8 +1,6 @@
 using System.Text;
 using System.Threading.Channels;
 
-using Dracocephalum.Nightingale;
-
 namespace Dracocephalum.Nightingale.Server;
 
 /// <summary>

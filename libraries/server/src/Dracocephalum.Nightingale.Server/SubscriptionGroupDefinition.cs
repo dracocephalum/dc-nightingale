@@ -1,4 +1,3 @@
-using Dracocephalum.Nightingale;
 using Dracocephalum.Nightingale.Server.Data;
 
 namespace Dracocephalum.Nightingale.Server;
