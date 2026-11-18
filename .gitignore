@@ -520,3 +520,8 @@ docs/reviews/
 # window before that. Decide separately whether .serena/memories/ is shared.
 .serena/project.local.yml
 .serena/cache/
+
+# Language server (agent tooling) - a local solution listing every project, so
+# a C# language server holds the whole repository and not one solution of
+# several. Written by a one-line command in AGENTS.md; never built from.
+.lsp/

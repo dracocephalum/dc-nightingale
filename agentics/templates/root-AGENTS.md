@@ -147,17 +147,45 @@ A trailing `.Core` names the assembly, not the namespace — `{{PREFIX}}.Core` h
 namespace `{{PREFIX}}` — applied by `Directory.Build.props`; the full rule and
 its edge cases are in [`agentics/rules/layout.md`](agentics/rules/layout.md).
 
-## Serena — use it when connected, fall back when not
+## Code intelligence — use what is connected, fall back when it is not
 
-This repository carries a [Serena](https://github.com/oraios/serena) project
-file (`.serena/project.yml`); whether the server is available depends on the
-machine. **Connected:** call `initial_instructions` once per coding task, then
-prefer the symbolic tools — `get_symbols_overview` before reading a file,
-`find_symbol` / `find_referencing_symbols` over grep, `replace_symbol_body` /
-`insert_after_symbol` for symbol-scoped edits — one method body instead of a
-400-line file. **Not connected:** use the ordinary tools; do not stop, install,
-or ask about it mid-task. Its C# language server needs a restored solution —
-`dotnet restore` first if references look incomplete.
+Two optional tools answer questions about symbols instead of text. Which are
+there depends on the machine and shows in the session's own tool list; neither
+is required, and neither is recorded in `.agentics.yaml`.
+
+- **The `LSP` tool** (Claude Code, with a language-server plugin). Reads only:
+  definitions, references, implementations, symbols, and diagnostics after an
+  edit. **Connected:** prefer it over grep for "where is this used" and "what
+  implements this". A first call that fails with `server is starting` is
+  called again; the server loads on the first question, and searches the
+  session's working directory of that moment. Be at the repository root
+  then: from a folder of several repositories it loads the largest solution
+  of any of them.
+
+  **Several solutions:** the C# server holds one — the one listing the most
+  projects — and answers for that one only, without saying so. A local
+  solution of every project makes it hold them all. Write it before the first
+  question of a session and again after adding a project; it is ignored by
+  git, never built, and safe to rewrite at any time:
+
+      mkdir -p .lsp && { echo '<Solution>'; git ls-files -co --exclude-standard '*.csproj' | sed 's|.*|  <Project Path="../&" />|'; echo '</Solution>'; } > .lsp/All.slnx
+
+  A type the workspace symbol search does not find is in a project the server
+  does not hold; references are then confirmed with Serena or a text search.
+- **[Serena](https://github.com/oraios/serena)**, for which this repository
+  carries a project file (`.serena/project.yml`). Reads the same and also
+  edits by symbol. **Connected:** call `initial_instructions` once per coding
+  task. Use it for `rename_symbol`, `replace_symbol_body` /
+  `insert_after_symbol` and `safe_delete_symbol` — one method body instead of
+  a 400-line file — and for navigation when the `LSP` tool is absent
+  (`get_symbols_overview`, `find_symbol`, `find_referencing_symbols`). A
+  rename leaves what is only named after the symbol, test method names for
+  one; search for those after it.
+- **Neither connected:** use the ordinary tools; do not stop, install, or ask
+  about it mid-task.
+
+Both read the solution's projects — `dotnet restore` first if references look
+incomplete.
 
 ## Building and testing
 
