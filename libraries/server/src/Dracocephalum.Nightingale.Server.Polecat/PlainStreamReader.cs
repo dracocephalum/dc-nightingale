@@ -18,12 +18,6 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="partitionedByTenant">Whether the store is partitioned by tenant, so every statement names the tenant's partition key, which the store's indexes lead with there.</param>
 internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, string tenantId, bool partitionedByTenant, ILogger logger)
 {
-    /// <summary>
-    /// The most seconds a <c>$maxAge</c> is checked for: the database adds a whole number of
-    /// seconds of the width of an <c>int</c>, some 68 years, and nothing in a store is older.
-    /// </summary>
-    private const double LongestCheckedAge = int.MaxValue;
-
     /// <summary>One page of the stream, with its metadata applied unless it is a metadata stream; see the port for the bounds.</summary>
     /// <param name="stream">The stream name.</param>
     /// <param name="direction">The direction to read in.</param>
@@ -73,7 +67,7 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
         }
 
         var head = new StreamHead(Math.Max(found.CompactedVersion, metadata.GetFirstRevision(last)), last);
-        var rows = FilterByAge(QueryRows(context, stream), metadata.MaxAge);
+        var rows = QueryRows(context, stream).FilterByAge(metadata.MaxAge);
         IOrderedQueryable<EventRow> ordered;
         if (direction == Direction.Forwards)
         {
@@ -176,23 +170,6 @@ internal sealed partial class PlainStreamReader(Func<EventsDbContext> contexts, 
         // Composed from the two queries, which the provider inlines into one statement.
         var probe = QueryRows(context, metastream).OrderByDescending(e => e.Version).Select(e => e.Data);
         return QueryStreams(context, stream).Select(s => new Found(s.Version, s.IsArchived, s.CompactedVersion, probe.FirstOrDefault()));
-    }
-
-    /// <summary>The page's rows: those of the stream, the database's clock deciding which are too old for a <c>$maxAge</c>.</summary>
-    internal static IQueryable<EventRow> FilterByAge(IQueryable<EventRow> rows, TimeSpan? maxAge)
-    {
-        if (maxAge is not { TotalSeconds: <= LongestCheckedAge } age)
-        {
-            return rows;
-        }
-
-        // UtcNow is the database's, translated rather than sent: an event's timestamp is the
-        // database's clock when it was appended, and every instance's own clock differs from it.
-        // The ban on it is for clocks read in process, which this one never is.
-        var seconds = -age.TotalSeconds;
-#pragma warning disable RS0030
-        return rows.Where(e => e.Timestamp >= DateTimeOffset.UtcNow.AddSeconds(seconds));
-#pragma warning restore RS0030
     }
 
     /// <summary>The rows of one stream of the tenant, in the tenant's partition on a store partitioned by tenant.</summary>
