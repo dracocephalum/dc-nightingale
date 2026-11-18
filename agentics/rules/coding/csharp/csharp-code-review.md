@@ -27,6 +27,9 @@ banned-API list. The authority for each item is
 | Small in-memory list wrapped in `IAsyncEnumerable<T>` | Types and APIs | `suggestion` |
 | Implicit conversion operator on an id or value object | Types and APIs | `issue` |
 | AutoMapper / reflection mapper introduced | Types and APIs | `issue (blocking)` |
+| A static helper whose first parameter is its subject and that uses nothing else of its class, not written as an extension; or an extension that is a factory, needs state, or has no one subject | Types and APIs | `suggestion` |
+| An extension that is `public` with no caller outside, sits in a namespace enclosing other features, extends `object`, or has a bare name on a primitive or `string` | Types and APIs | `issue` |
+| A static class named `Extensions`, `Helpers` or `Utils` | Types and APIs | `suggestion` |
 | `!` to silence a nullable warning | Types and APIs | `issue` |
 | `throw new Exception(...)` or `catch (Exception)` swallowing | Design | `issue` |
 | `JsonSerializer` called without the repository's options, or `new JsonSerializerOptions` outside the one class that defines them | Conventions, JSON | `issue` |

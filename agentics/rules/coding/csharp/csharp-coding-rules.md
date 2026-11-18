@@ -228,6 +228,27 @@ sub-sections as nested classes — *Configuration*, below.
   in-memory list in `IAsyncEnumerable<T>`.
 - **Map explicitly.** Extension methods such as `entity.ToDto()`. No
   reflection-based mappers.
+- **A helper that works on one value is an extension on it.** The test: its
+  first parameter is what it works on, and it uses nothing else of the class
+  it sits in — a mapping, a query filter, a value read off one object. Not a
+  factory, not a method with several collaborators and no subject, not one
+  that needs state.
+  - **A type of ours takes a member instead**, unless the knowledge belongs
+    to another layer than the type's: what the wire or a table calls a thing
+    is not the domain type's to know.
+  - **`internal`, in the namespace of the code that uses it.** A file sees
+    every namespace enclosing its own without a `using`, so an extension
+    declared high is on every value of that type below it. A `public` one is
+    part of the surface, written because a caller outside needs it.
+  - **Any type, primitives and `string` included, never `object`.** There
+    the name carries the domain — `IsInvoiceNumber`, not `IsValid` — because
+    a member the type gains later wins over an extension of the same name,
+    silently.
+  - **The class is named for the subject or the role** —
+    `InvoiceExtensions`, `InvoiceWireExtensions` — never `Extensions`,
+    `Helpers` or `Utils`, and sits beside the code that uses it.
+  - **An `extension(T value)` block** (C# 14) where a property reads better
+    than a method, or several members share a receiver.
 - **Every `async` method takes a `CancellationToken`** and passes it on.
   **Never block on a task** — no `.Result`, `.Wait()`, or
   `.GetAwaiter().GetResult()`. `ConfigureAwait(false)` in `libraries/` only.
