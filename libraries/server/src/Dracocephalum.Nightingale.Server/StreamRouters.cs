@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// the same store shares the one router, whatever the backend calls its default tenant.
 /// </summary>
 /// <param name="stores">The backend's stores and tails.</param>
-public sealed class StreamRouters(ITenantStores stores) : IAsyncDisposable
+internal sealed class StreamRouters(ITenantStores stores) : IAsyncDisposable
 {
     private readonly Dictionary<IStreamStore, StreamRouter> _routers = new(ReferenceEqualityComparer.Instance);
     private readonly Lock _gate = new();

@@ -8,4 +8,4 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// <see cref="ModelConventions"/> accepts a numeric enum column only when its enum carries this.
 /// </summary>
 [AttributeUsage(AttributeTargets.Enum, Inherited = false)]
-public sealed class StoredAsNumberAttribute : Attribute;
+internal sealed class StoredAsNumberAttribute : Attribute;

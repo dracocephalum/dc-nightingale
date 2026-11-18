@@ -22,7 +22,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// <param name="routers">The routers a subscription to a plain stream takes its live events through, one per tenant.</param>
 /// <param name="timeProvider">The clock the progress notes are stamped with.</param>
 /// <param name="options">The common settings: how far the host lets a stream be taken away.</param>
-public sealed class StreamsService(ITenantStores stores, StreamRouters routers, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
+internal sealed class StreamsService(ITenantStores stores, StreamRouters routers, TimeProvider timeProvider, NightingaleOptionsBase options) : Streams.StreamsBase
 {
     /// <summary>The longest stream name the store column holds.</summary>
     public const int MaxStreamNameLength = 250;

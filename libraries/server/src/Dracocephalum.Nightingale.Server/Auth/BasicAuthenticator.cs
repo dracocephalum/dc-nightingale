@@ -20,7 +20,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// <param name="credentials">The credentials table.</param>
 /// <param name="time">The clock.</param>
 /// <param name="logger">The logger.</param>
-public sealed partial class BasicAuthenticator(NightingaleOptionsBase.AuthSettings settings, PasswordHasher hasher, ICredentialStore credentials, TimeProvider time, ILogger<BasicAuthenticator> logger)
+internal sealed partial class BasicAuthenticator(NightingaleOptionsBase.AuthSettings settings, PasswordHasher hasher, ICredentialStore credentials, TimeProvider time, ILogger<BasicAuthenticator> logger)
 {
     /// <summary>The scheme, as it appears in the header.</summary>
     public const string Scheme = "Basic";

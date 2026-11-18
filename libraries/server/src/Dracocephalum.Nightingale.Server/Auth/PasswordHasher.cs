@@ -12,7 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// the iterations can be raised and the pepper rotated, and a hash made under older ones still
 /// verifies and says it wants remaking.
 /// </summary>
-public sealed class PasswordHasher
+internal sealed class PasswordHasher
 {
     private const string Algorithm = "pbkdf2-sha256";
     private const int SaltSize = 16;

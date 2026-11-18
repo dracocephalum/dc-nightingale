@@ -15,7 +15,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 /// <param name="options">The cluster settings.</param>
 /// <param name="server">The server, for what it listens on.</param>
-public sealed class InstanceAddress(NightingaleOptionsBase options, IServer server)
+internal sealed class InstanceAddress(NightingaleOptionsBase options, IServer server)
 {
     private static readonly string[] Wildcards = ["0.0.0.0", "[::]", "::", "+", "*"];
     private readonly Lock _gate = new();

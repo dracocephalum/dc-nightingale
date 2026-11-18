@@ -15,7 +15,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// <param name="provisioner">Readies the store for a new tenant.</param>
 /// <param name="directory">Where a change made here is applied at once.</param>
 /// <param name="time">The clock.</param>
-public sealed class TenantStore(IDbContextFactory<NightingaleDbContext> contexts, ITenantProvisioner provisioner, TenantDirectory directory, TimeProvider time) : ITenantStore
+internal sealed class TenantStore(IDbContextFactory<NightingaleDbContext> contexts, ITenantProvisioner provisioner, TenantDirectory directory, TimeProvider time) : ITenantStore
 {
     /// <inheritdoc/>
     public async Task<Tenant> CreateAsync(string name, CancellationToken cancellationToken)

@@ -15,7 +15,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// tail that has stopped following the head ends the router, which then refuses to be followed with
 /// the same cause.
 /// </remarks>
-public sealed class StreamRouter : IAsyncDisposable
+internal sealed class StreamRouter : IAsyncDisposable
 {
     /// <summary>How many pointers, or events under <c>$all</c>, one read of an advanced range asks for.</summary>
     public const int PointerPage = 512;

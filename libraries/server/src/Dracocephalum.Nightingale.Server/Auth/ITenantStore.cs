@@ -3,7 +3,7 @@ using Dracocephalum.Nightingale.Server.Data;
 namespace Dracocephalum.Nightingale.Server.Auth;
 
 /// <summary>The tenants table, for management: the directory reads it on its own.</summary>
-public interface ITenantStore
+internal interface ITenantStore
 {
     /// <summary>Creates a tenant under a name, with a store id of its own.</summary>
     /// <param name="name">The name.</param>

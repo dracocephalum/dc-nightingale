@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server.Grpc;
 /// the tenant the <c>nightingale-tenant</c> header names, and the shared exceptions turned into
 /// the statuses the contract promises.
 /// </summary>
-public static class Authorization
+internal static class Authorization
 {
     /// <summary>The header a global credential names its tenant in.</summary>
     public const string TenantHeader = "nightingale-tenant";

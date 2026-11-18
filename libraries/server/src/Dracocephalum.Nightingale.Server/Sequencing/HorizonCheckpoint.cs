@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Sequencing;
 /// which numbers up to the head, numbers the range in order. Nothing is kept per position: one
 /// checkpoint covers the range.
 /// </summary>
-public sealed class HorizonCheckpoint
+internal sealed class HorizonCheckpoint
 {
     private readonly TimeProvider _timeProvider;
     private readonly long _takenAt;

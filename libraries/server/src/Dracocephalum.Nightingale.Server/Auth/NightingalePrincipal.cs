@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// <param name="Role">The role.</param>
 /// <param name="TenantId">The tenant the credential is bound to, or <see langword="null"/> for a global one.</param>
 /// <param name="Scheme">The authorization scheme the credentials came in under, or <c>none</c> when authentication is off.</param>
-public sealed record NightingalePrincipal(string Name, CredentialRole Role, Guid? TenantId, string Scheme)
+internal sealed record NightingalePrincipal(string Name, CredentialRole Role, Guid? TenantId, string Scheme)
 {
     /// <summary>Gets the caller every call is from while authentication is off: the built-in administrator, global.</summary>
     public static NightingalePrincipal Anonymous { get; } = new(UserCredentials.AdminUserName, CredentialRole.Admin, null, "none");

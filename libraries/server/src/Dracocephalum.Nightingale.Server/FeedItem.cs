@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server;
 /// </summary>
 /// <param name="Record">The event, or <see langword="null"/> for a stretch examined.</param>
 /// <param name="ScannedThrough">The last position examined: the event's own, or the stretch's end.</param>
-public readonly record struct FeedItem(EventRecord? Record, long ScannedThrough)
+internal readonly record struct FeedItem(EventRecord? Record, long ScannedThrough)
 {
     /// <summary>An event.</summary>
     /// <param name="record">The event.</param>

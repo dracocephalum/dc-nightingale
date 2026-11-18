@@ -6,7 +6,7 @@ namespace Dracocephalum.Nightingale.Server.Data;
 /// <summary>The credentials table, through the gateway's own context.</summary>
 /// <param name="contexts">Makes a context per call.</param>
 /// <param name="time">The clock.</param>
-public sealed class CredentialStore(IDbContextFactory<NightingaleDbContext> contexts, TimeProvider time) : ICredentialStore
+internal sealed class CredentialStore(IDbContextFactory<NightingaleDbContext> contexts, TimeProvider time) : ICredentialStore
 {
     /// <inheritdoc/>
     public async Task<Credential?> FindAsync(string name, CancellationToken cancellationToken)

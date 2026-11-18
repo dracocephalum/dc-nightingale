@@ -10,7 +10,7 @@ namespace Dracocephalum.Nightingale.Server.Auth;
 /// it carries it and maps the refusals to its own statuses.
 /// </summary>
 /// <param name="directory">The tenants; none in a host that keeps no tenants, where the store's default tenant is every call's scope.</param>
-public sealed class Authorizer(TenantDirectory? directory = null)
+internal sealed class Authorizer(TenantDirectory? directory = null)
 {
     /// <summary>Checks the call's role and resolves its tenant.</summary>
     /// <param name="principal">The caller.</param>
