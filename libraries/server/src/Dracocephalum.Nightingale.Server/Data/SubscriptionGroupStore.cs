@@ -89,7 +89,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             return null;
         }
 
-        return ToDefinition(row);
+        return row.ToDefinition();
     }
 
     /// <inheritdoc/>
@@ -224,14 +224,14 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
         var lease = SubscriptionGroupRegistry.GetLeaseName(row.Id);
         var now = timeProvider.GetUtcNow();
         var held = await context.Leases.AsNoTracking().SingleOrDefaultAsync(held => held.Name == lease, cancellationToken).ConfigureAwait(false);
-        var holder = held is null || held.ExpiresAt <= now ? null : ToHolder(held);
+        var holder = held is null || held.ExpiresAt <= now ? null : held.ToHolder();
         return new SubscriptionGroupSummary(
-            ToDefinition(row),
+            row.ToDefinition(),
             row.CreatedAt,
             await context.SubscriptionParkedEvents.FilterByGroup(row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
             await context.SubscriptionOutboxEntries.FilterByGroup(row.Id).LongCountAsync(cancellationToken).ConfigureAwait(false),
             holder,
-            ToLive(row, holder));
+            row.ToLive(holder));
     }
 
     /// <inheritdoc/>
@@ -272,13 +272,13 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false))
             .Where(held => held.ExpiresAt > now)
-            .ToDictionary(held => held.Name, ToHolder, StringComparer.Ordinal);
+            .ToDictionary(held => held.Name, held => held.ToHolder(), StringComparer.Ordinal);
 
         return rows
             .Select(row =>
             {
                 var holder = leases.GetValueOrDefault(SubscriptionGroupRegistry.GetLeaseName(row.Id));
-                return new SubscriptionGroupSummary(ToDefinition(row), row.CreatedAt, parked.GetValueOrDefault(row.Id), outbox.GetValueOrDefault(row.Id), holder, ToLive(row, holder));
+                return new SubscriptionGroupSummary(row.ToDefinition(), row.CreatedAt, parked.GetValueOrDefault(row.Id), outbox.GetValueOrDefault(row.Id), holder, row.ToLive(holder));
             })
             .ToList();
     }
@@ -508,7 +508,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             }
             else if (lease.Owner != owner && lease.ExpiresAt > now)
             {
-                return ToHolder(lease);
+                return lease.ToHolder();
             }
             else
             {
@@ -530,7 +530,7 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
             {
                 context.ChangeTracker.Clear();
                 var holder = await context.Leases.AsNoTracking().SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
-                return holder is null || holder.Owner == owner ? null : ToHolder(holder);
+                return holder is null || holder.Owner == owner ? null : holder.ToHolder();
             }
         }
     }
@@ -540,49 +540,8 @@ public sealed class SubscriptionGroupStore(IDbContextFactory<NightingaleDbContex
     {
         await using var context = await contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var lease = await context.Leases.AsNoTracking().SingleOrDefaultAsync(row => row.Name == name, cancellationToken).ConfigureAwait(false);
-        return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : ToHolder(lease);
+        return lease is null || lease.ExpiresAt <= timeProvider.GetUtcNow() ? null : lease.ToHolder();
     }
-
-    private static SubscriptionGroupDefinition ToDefinition(SubscriptionGroup row)
-    {
-        var settings = new GroupSettings(
-            row.StartPosition is { } start ? StreamPosition.From(start) : StreamPosition.End,
-            TimeSpan.FromMilliseconds(row.MessageTimeoutMs),
-            row.MaxRetryCount,
-            row.CheckpointUpperBound,
-            TimeSpan.FromMilliseconds(row.CheckpointAfterMs),
-            row.CheckpointLowerBound,
-            row.BufferSize,
-            row.MaxSubscriberCount,
-            row.Numbering,
-            row.ConsumerStrategy,
-            FilterColumn.FromColumn(row.Filter));
-
-        // The names are the row's own: a case-insensitive database finds the row under another
-        // spelling, and the group still goes by the names it was created with.
-        return new SubscriptionGroupDefinition(row.Stream, row.Name, settings, row.CheckpointPosition) { Id = row.Id, TenantId = row.TenantId };
-    }
-
-    /// <summary>
-    /// The row's snapshot, while the group's lease is held. Without a holder the columns are
-    /// what an instance that stopped without clearing them left behind, and say nothing.
-    /// </summary>
-    private static SubscriptionGroupLive? ToLive(SubscriptionGroup row, LeaseHolder? holder) =>
-        holder is null || row.LiveSnapshotAt is not { } asOf
-            ? null
-            : new SubscriptionGroupLive(
-                row.LiveConnectedAt ?? asOf,
-                row.LiveInFlightCount ?? 0,
-                row.LiveAwaitingRetryCount ?? 0,
-                row.LiveConsumerBufferSize ?? 0,
-                row.LiveCheckpointPosition,
-                row.LiveOldestInFlightAt,
-                row.LiveConsumerAddress,
-                asOf,
-                row.LiveConsumerCount ?? 1);
-
-    private static LeaseHolder ToHolder(Lease lease) =>
-        new(lease.Owner, lease.OwnerAddress is null ? null : new Uri(lease.OwnerAddress, UriKind.Absolute));
 
     /// <inheritdoc/>
     public async Task ReleaseLeaseAsync(string name, string owner, CancellationToken cancellationToken)

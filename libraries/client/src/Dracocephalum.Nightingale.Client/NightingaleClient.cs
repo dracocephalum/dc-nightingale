@@ -208,7 +208,7 @@ public sealed class NightingaleClient : IAsyncDisposable
             Count = (ulong)maxCount,
             Numbering = numbering.ToWire(),
         };
-        SetFrom(request, from);
+        request.SetFrom(from);
         return new ReadStreamResult(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
 
@@ -225,26 +225,10 @@ public sealed class NightingaleClient : IAsyncDisposable
         }
     }
 
-    private static void SetFrom(ReadRequest request, StreamPosition from)
-    {
-        if (from.IsEnd)
-        {
-            request.End = new Google.Protobuf.WellKnownTypes.Empty();
-        }
-        else if (from == StreamPosition.Start)
-        {
-            request.Start = new Google.Protobuf.WellKnownTypes.Empty();
-        }
-        else
-        {
-            request.Position = from.Value;
-        }
-    }
-
     private StreamSubscription Subscribe(string stream, StreamPosition from, Numbering numbering, Filter? filter, CancellationToken cancellationToken)
     {
         var request = new ReadRequest { Stream = stream, Direction = ReadDirection.Forwards, Subscription = new SubscriptionOptions(), Numbering = numbering.ToWire(), Filter = filter };
-        SetFrom(request, from);
+        request.SetFrom(from);
         return new StreamSubscription(stream, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
 
@@ -270,7 +254,7 @@ public sealed class NightingaleClient : IAsyncDisposable
             Count = (ulong)maxCount,
             Filter = filter?.ToWire(),
         };
-        SetFrom(request, from);
+        request.SetFrom(from);
         return new ReadStreamResult(StreamNames.All, _streams.Read(request, cancellationToken: cancellationToken), cancellationToken);
     }
 

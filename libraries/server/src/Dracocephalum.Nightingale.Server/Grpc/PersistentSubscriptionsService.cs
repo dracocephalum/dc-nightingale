@@ -210,7 +210,7 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
             throw NightingaleErrors.GroupOwnedElsewhere(definition.Stream, definition.Group, elsewhere);
         }
 
-        var info = ToInfo(summary);
+        var info = summary.ToInfo();
         if (await LastKnownAsync(definition, context.CancellationToken).ConfigureAwait(false) is { } last)
         {
             info.LastKnownPosition = last;
@@ -220,7 +220,7 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
         // send the client, what it last wrote to its row is the answer, already in the info.
         if (here && registry.Describe(definition.Id) is { } live)
         {
-            info.Live = ToLiveInfo(live, fromOwner: true);
+            info.Live = live.ToLiveInfo(fromOwner: true);
         }
 
         return new GetInfoResponse { Info = info };
@@ -239,12 +239,12 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
         {
             // A group this instance runs is asked directly, which costs nothing and is as of
             // now; the others are as their rows have them.
-            var info = ToInfo(summary);
+            var info = summary.ToInfo();
             if (summary.Holder is { } holder
                 && string.Equals(holder.Owner, registry.InstanceId, StringComparison.Ordinal)
                 && registry.Describe(summary.Definition.Id) is { } live)
             {
-                info.Live = ToLiveInfo(live, fromOwner: true);
+                info.Live = live.ToLiveInfo(fromOwner: true);
             }
 
             response.Groups.Add(info);
@@ -522,68 +522,6 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
         var group = RequireGroupName(groupName);
         return await groups.GetAsync(stream, group, cancellationToken).ConfigureAwait(false)
             ?? throw NightingaleErrors.GroupNotFound(stream, group);
-    }
-
-    /// <summary>What the store holds about a group, in its wire form.</summary>
-    private static GroupInfo ToInfo(SubscriptionGroupSummary summary)
-    {
-        var definition = summary.Definition;
-        var info = new GroupInfo
-        {
-            Stream = definition.Stream,
-            Group = definition.Group,
-            Settings = definition.Settings.ToWire(),
-            CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(summary.CreatedAt),
-            ParkedCount = summary.ParkedCount,
-            OutboxCount = summary.OutboxCount,
-            Running = summary.Holder is not null,
-            OwnerAddress = summary.Holder?.Address?.ToString() ?? string.Empty,
-            Live = summary.Live is null ? null : ToLiveInfo(summary.Live, fromOwner: false),
-        };
-        if (definition.Checkpoint >= 0)
-        {
-            info.Checkpoint = definition.Checkpoint;
-        }
-
-        return info;
-    }
-
-    /// <summary>How a running group stands, in its wire form.</summary>
-    private static GroupLiveInfo ToLiveInfo(SubscriptionGroupLive live, bool fromOwner)
-    {
-        var info = new GroupLiveInfo
-        {
-            ConnectedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.ConnectedAt),
-            InFlightCount = live.InFlightCount,
-            AwaitingRetryCount = live.AwaitingRetryCount,
-            ConsumerBufferSize = live.ConsumerBufferSize,
-            ConsumerAddress = live.ConsumerAddress ?? string.Empty,
-            AsOf = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(live.AsOf),
-            FromOwner = fromOwner,
-            ConsumerCount = live.ConsumerCount,
-        };
-        foreach (var consumer in live.Consumers)
-        {
-            info.Consumers.Add(new ConsumerInfo
-            {
-                ConnectedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(consumer.ConnectedAt),
-                Address = consumer.Address ?? string.Empty,
-                BufferSize = consumer.BufferSize,
-                InFlightCount = consumer.InFlightCount,
-            });
-        }
-
-        if (live.Checkpoint is { } checkpoint)
-        {
-            info.Checkpoint = checkpoint;
-        }
-
-        if (live.OldestInFlightAt is { } oldest)
-        {
-            info.OldestInFlightAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(oldest);
-        }
-
-        return info;
     }
 
     /// <summary>
