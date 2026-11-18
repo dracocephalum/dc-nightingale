@@ -1163,7 +1163,7 @@ internal sealed class StreamsService(ITenantStores stores, StreamRouters routers
                 return;
             }
 
-            from = direction == Direction.Forwards ? GetOrdinal(page[^1]) + 1 : GetOrdinal(page[^1]) - 1;
+            from = direction == Direction.Forwards ? page[^1].RequireOrdinal() + 1 : page[^1].RequireOrdinal() - 1;
         }
     }
 
@@ -1208,7 +1208,7 @@ internal sealed class StreamsService(ITenantStores stores, StreamRouters routers
                     // Ordinals are dense, so the distance to the highest assigned one is the count,
                     // holes included.
                     var head = (await store.OrdinalHeadAsync(stream, cancellationToken).ConfigureAwait(false))?.Last ?? own;
-                    if (head > GetOrdinal(page[^1]))
+                    if (head > page[^1].RequireOrdinal())
                     {
                         behind = true;
                         await responseStream.WriteAsync(FellBehindAt(head, head - next + 1, timeProvider.GetUtcNow()), cancellationToken).ConfigureAwait(false);
@@ -1218,7 +1218,7 @@ internal sealed class StreamsService(ITenantStores stores, StreamRouters routers
                 foreach (var record in page)
                 {
                     await responseStream.WriteEventAsync(record, cancellationToken).ConfigureAwait(false);
-                    own = GetOrdinal(record);
+                    own = record.RequireOrdinal();
                     delivered = true;
                 }
 
@@ -1241,9 +1241,6 @@ internal sealed class StreamsService(ITenantStores stores, StreamRouters routers
             observed = await EventSource.AwaitNumberingAsync(tail, numbered, observed, cancellationToken).ConfigureAwait(false);
         }
     }
-
-    private static long GetOrdinal(EventRecord record) =>
-        record.Ordinal ?? throw new InvalidOperationException("The store returned an event without its ordinal from an ordinal read.");
 
     /// <summary>One page of a plain stream; a bounded read accepts a view that may lag, a subscription does not.</summary>
     private static async Task<StreamSlice?> ReadPage(IStreamStore store, string stream, Direction direction, long? from, int count, CancellationToken cancellationToken, bool eventual = false)

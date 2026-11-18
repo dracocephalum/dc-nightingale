@@ -22,4 +22,16 @@ public sealed record SubscriptionGroupDefinition(string Stream, string Group, Gr
     /// A group store writes its own tenant on creation, whatever a new definition says here.
     /// </summary>
     public string TenantId { get; init; } = Tenant.DefaultStoreTenantId;
+
+    /// <summary>
+    /// Says which of a parked message's numbers the group goes by: the ordinal under ordinal
+    /// numbering, else the global position over <c>$all</c> or a virtual stream, else the revision.
+    /// </summary>
+    /// <returns>The kind of number.</returns>
+    public SubscriptionParkedNumber GetNumberKind() =>
+        Settings.Numbering == Numbering.Ordinal
+            ? SubscriptionParkedNumber.Ordinal
+            : StreamNames.IsReserved(Stream)
+                ? SubscriptionParkedNumber.Position
+                : SubscriptionParkedNumber.Revision;
 }
