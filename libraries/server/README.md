@@ -8,7 +8,7 @@ the default host.
 | Category | `libraries/` |
 | Kind | library, plus a service library |
 | Solution | `Dracocephalum.Nightingale.Server.slnx` |
-| Projects | `src/Dracocephalum.Nightingale.Server`, `src/Dracocephalum.Nightingale.Server.Polecat`, `test/Dracocephalum.Nightingale.Server.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration`, `test/Dracocephalum.Nightingale.Server.Contracts` |
+| Projects | `src/Dracocephalum.Nightingale.Server`, `src/Dracocephalum.Nightingale.Server.Polecat`, `test/Dracocephalum.Nightingale.Server.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests`, `test/Dracocephalum.Nightingale.Server.Polecat.Tests.Integration`, `test/Dracocephalum.Nightingale.Server.Tests.Contracts` |
 
 ## What it does
 
@@ -29,7 +29,7 @@ its sequences: `SequenceTails`, the one tail of a process that keeps every
 sequence head, and the ordinal sequencer, registered by
 `AddNightingaleOrdinalSequencer`; each over the ports a backend implements,
 its head strategy and `IOrdinalSequencer` (`DESIGN.md`, seams 4 and 6).
-`test/Dracocephalum.Nightingale.Server.Contracts` holds those ports'
+`test/Dracocephalum.Nightingale.Server.Tests.Contracts` holds those ports'
 contracts as abstract tests, a library and not a test project: a backend's
 integration project derives a class from each and supplies its database,
 and the contract's tests run there.

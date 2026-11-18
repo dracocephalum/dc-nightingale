@@ -2,7 +2,7 @@ using System.Data.Common;
 using Dracocephalum.Nightingale.Server.Sequencing;
 using Shouldly;
 
-namespace Dracocephalum.Nightingale.Server.Contracts;
+namespace Dracocephalum.Nightingale.Server.Tests.Contracts;
 
 /// <summary>
 /// What every backend's horizon by store partition must do besides the

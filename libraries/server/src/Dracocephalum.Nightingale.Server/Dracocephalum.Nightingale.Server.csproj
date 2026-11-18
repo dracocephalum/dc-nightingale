@@ -26,7 +26,7 @@
        are granted in Directory.Build.props. -->
   <ItemGroup>
     <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Polecat" />
-    <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Contracts" />
+    <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Tests.Contracts" />
     <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Polecat.Tests" />
     <InternalsVisibleTo Include="Dracocephalum.Nightingale.Server.Polecat.Tests.Integration" />
     <!-- The assembly FakeItEasy generates its fakes into, so a test can fake an internal port. -->
