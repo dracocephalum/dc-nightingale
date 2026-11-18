@@ -69,3 +69,19 @@ undecided adds it here rather than mentioning it once in a conversation.
   back, by stream and by subscription. Another of the set: the total of an
   append to several streams, held today to one append's count though the
   store writes each stream as its own command (`PENDING.md`).
+
+## Tooling to revisit
+
+- **The unused-using check reports nothing.** `dotnet format style
+  <solution> --diagnostics IDE0005 --severity info --verify-no-changes`
+  found no unnecessary `using` in any of the four solutions, on SDK
+  10.0.400, while seven files imported a namespace they already sat inside
+  and both C# language servers flagged them (CS8019, IDE0005). Those seven
+  are removed; a scan for that one pattern is all that vouches for the
+  rest, and a `using` that is unused for another reason would not be
+  caught. Whether the rule is switched off by the shared `.editorconfig`
+  or the ruleset, or the SDK's formatter skips it, is not known. Close by:
+  find which, and either have the build or the formatter report
+  unnecessary usings, or record here that the language servers are the
+  check. If the cause is in the shared configuration, the fix belongs to
+  the toolkit and arrives by a sync.
