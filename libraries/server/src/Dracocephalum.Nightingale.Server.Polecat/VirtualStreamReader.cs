@@ -257,39 +257,10 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
         var records = new EventRecord[rows.Count];
         for (var i = 0; i < rows.Count; i++)
         {
-            records[i] = Hydrate(rows[i]);
+            records[i] = rows[i].ToEventRecord();
         }
 
         return records;
-    }
-
-    private static EventRecord Hydrate(Raw row)
-    {
-        // The body is re-serialized through the shared options rather than copied from the column,
-        // so it comes back as the store adapter returns it, whatever escaping the store wrote.
-        using var body = JsonDocument.Parse(row.Data);
-        var metadata = row.Headers is null ? [] : JsonNode.Parse(row.Headers) as JsonObject ?? [];
-        if (row.CorrelationId is not null)
-        {
-            metadata[MetadataKeys.CorrelationId] = row.CorrelationId;
-        }
-
-        if (row.CausationId is not null)
-        {
-            metadata[MetadataKeys.CausationId] = row.CausationId;
-        }
-
-        return new EventRecord(
-            row.Id,
-            row.StreamId,
-            row.Version - 1,
-            row.SeqId,
-            row.Type,
-            row.Timestamp,
-            JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Default),
-            metadata,
-            row.Ordinal,
-            row.Bdata);
     }
 
     private EventsDbContext OpenContext() => contexts();
@@ -330,5 +301,36 @@ internal sealed class VirtualStreamReader(Func<EventsDbContext> contexts, string
     }
 
     /// <summary>The columns a read selects: never the whole row, since only a store partitioned by tenant has a partition key.</summary>
-    internal sealed record Raw(long SeqId, Guid Id, string StreamId, long Version, string Data, string Type, DateTimeOffset Timestamp, string? CorrelationId, string? CausationId, string? Headers, long? Ordinal, byte[]? Bdata);
+    internal sealed record Raw(long SeqId, Guid Id, string StreamId, long Version, string Data, string Type, DateTimeOffset Timestamp, string? CorrelationId, string? CausationId, string? Headers, long? Ordinal, byte[]? Bdata)
+    {
+        /// <summary>The event the columns hold, read the way the store adapter returns it.</summary>
+        public EventRecord ToEventRecord()
+        {
+            // The body is re-serialized through the shared options rather than copied from the column,
+            // so it comes back as the store adapter returns it, whatever escaping the store wrote.
+            using var body = JsonDocument.Parse(Data);
+            var metadata = Headers is null ? [] : JsonNode.Parse(Headers) as JsonObject ?? [];
+            if (CorrelationId is not null)
+            {
+                metadata[MetadataKeys.CorrelationId] = CorrelationId;
+            }
+
+            if (CausationId is not null)
+            {
+                metadata[MetadataKeys.CausationId] = CausationId;
+            }
+
+            return new EventRecord(
+                Id,
+                StreamId,
+                Version - 1,
+                SeqId,
+                Type,
+                Timestamp,
+                JsonSerializer.SerializeToUtf8Bytes(body.RootElement, NightingaleJson.Default),
+                metadata,
+                Ordinal,
+                Bdata);
+        }
+    }
 }

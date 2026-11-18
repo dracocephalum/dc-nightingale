@@ -34,41 +34,41 @@ internal static class NightingaleErrorMapping
                 conflicts.Conflicts.Select(conflict => new StreamConflict(conflict.Index, conflict.Stream, StreamState.FromInt64(conflict.ExpectedRevision), conflict.ActualRevision)).ToList()),
             ErrorReason.RevisionConflict => new RevisionConflictException(
                 stream,
-                StreamState.FromInt64(GetNumber(info, "expected", (long)ExpectedRevision.Any)),
-                GetNumber(info, "actual", -1)),
+                StreamState.FromInt64(info.GetNumber("expected", (long)ExpectedRevision.Any)),
+                info.GetNumber("actual", -1)),
             ErrorReason.StreamDeleted => new StreamDeletedException(stream),
             ErrorReason.StreamNotFound => new StreamNotFoundException(stream),
             ErrorReason.DeletionDisabled => new DeletionDisabledException(exception.Status.Detail),
-            ErrorReason.GroupExists => new GroupExistsException(stream, GetText(info, "group")),
-            ErrorReason.GroupNotFound => new GroupNotFoundException(stream, GetText(info, "group")),
-            ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, GetText(info, "group"), GetText(info, "owner"), GetAddress(info)),
-            ErrorReason.ConsumerLimitReached => new ConsumerLimitReachedException(stream, GetText(info, "group")),
-            ErrorReason.AppendSizeExceeded => new AppendSizeExceededException(stream, (int)GetNumber(info, "limit", 0)),
-            ErrorReason.GroupUpdated => new GroupUpdatedException(stream, GetText(info, "group")),
-            ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, GetText(info, "group")),
+            ErrorReason.GroupExists => new GroupExistsException(stream, info.GetText("group")),
+            ErrorReason.GroupNotFound => new GroupNotFoundException(stream, info.GetText("group")),
+            ErrorReason.GroupOwnedElsewhere => new GroupOwnedElsewhereException(stream, info.GetText("group"), info.GetText("owner"), info.GetAddress()),
+            ErrorReason.ConsumerLimitReached => new ConsumerLimitReachedException(stream, info.GetText("group")),
+            ErrorReason.AppendSizeExceeded => new AppendSizeExceededException(stream, (int)info.GetNumber("limit", 0)),
+            ErrorReason.GroupUpdated => new GroupUpdatedException(stream, info.GetText("group")),
+            ErrorReason.ParkedMessageNotFound => new ParkedMessageNotFoundException(stream, info.GetText("group")),
             ErrorReason.OrdinalsNotEnabled => new OrdinalsNotEnabledException(stream),
             ErrorReason.SequencerDisabled => new OrdinalSequencerDisabledException(),
-            ErrorReason.SequencerFaulted => new OrdinalSequencerFaultedException(GetText(info, "cause")),
+            ErrorReason.SequencerFaulted => new OrdinalSequencerFaultedException(info.GetText("cause")),
             ErrorReason.AuthenticationFailed => new AuthenticationFailedException(exception.Status.Detail),
-            ErrorReason.AccessDenied => Enum.TryParse<CredentialRole>(GetText(info, "required"), true, out var required) ? new AccessDeniedException(exception.Status.Detail, required) : new AccessDeniedException(exception.Status.Detail),
-            ErrorReason.TenantNotFound => new TenantNotFoundException(Guid.TryParse(GetText(info, "tenant"), out var missing) ? missing : null),
+            ErrorReason.AccessDenied => Enum.TryParse<CredentialRole>(info.GetText("required"), true, out var required) ? new AccessDeniedException(exception.Status.Detail, required) : new AccessDeniedException(exception.Status.Detail),
+            ErrorReason.TenantNotFound => new TenantNotFoundException(Guid.TryParse(info.GetText("tenant"), out var missing) ? missing : null),
             ErrorReason.CredentialExists => new CredentialExistsException(exception.Status.Detail),
             ErrorReason.CredentialNotFound => new CredentialNotFoundException(exception.Status.Detail),
             ErrorReason.TenantExists => new TenantExistsException(exception.Status.Detail),
-            ErrorReason.TenantDisabled => new TenantDisabledException(Guid.TryParse(GetText(info, "tenant"), out var disabled) ? disabled : Guid.Empty),
+            ErrorReason.TenantDisabled => new TenantDisabledException(Guid.TryParse(info.GetText("tenant"), out var disabled) ? disabled : Guid.Empty),
             ErrorReason.InvalidStreamName or ErrorReason.FilterNotAllowed or ErrorReason.InvalidArgument =>
                 new ArgumentException(exception.Status.Detail),
             _ => exception,
         };
     }
 
-    private static string GetText(ErrorInfo info, string key) =>
+    private static string GetText(this ErrorInfo info, string key) =>
         info.Metadata.TryGetValue(key, out var text) ? text : string.Empty;
 
-    private static Uri? GetAddress(ErrorInfo info) =>
+    private static Uri? GetAddress(this ErrorInfo info) =>
         info.Metadata.TryGetValue("address", out var text) && Uri.TryCreate(text, UriKind.Absolute, out var address) ? address : null;
 
-    private static long GetNumber(ErrorInfo info, string key, long fallback) =>
+    private static long GetNumber(this ErrorInfo info, string key, long fallback) =>
         info.Metadata.TryGetValue(key, out var text) && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
             ? value
             : fallback;
