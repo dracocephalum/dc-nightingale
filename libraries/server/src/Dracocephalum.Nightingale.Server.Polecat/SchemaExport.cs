@@ -14,7 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// apply asks the default host for it: <c>--export-schema &lt;file&gt;</c>. Nothing is connected
 /// to; the script is built from the definitions alone.
 /// </summary>
-public static class SchemaExport
+internal static class SchemaExport
 {
     /// <summary>The command-line switch the default host answers.</summary>
     public const string Switch = "--export-schema";

@@ -42,6 +42,12 @@ is granted them by name: its project and its test projects are listed as
 project in the contracts' project file. A later backend adds its names in
 both places.
 
+The backend's package follows the same rule. Its surface is
+`AddNightingalePolecat` with `NightingaleOptions` and `SchemaMode`, the
+three schema operations on a built host with the `SchemaReport` they
+return, and `StoreInitializationException`, which a refused database
+raises at startup. The default host's command-line switches are its own.
+
 `Dracocephalum.Nightingale.Server.Polecat` is the backend over the Polecat
 event-sourcing framework and the default host: one project that packs as a
 library another host mounts through `AddNightingalePolecat()`, and runs on its
