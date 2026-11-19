@@ -9,7 +9,7 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// anything is served. How the comparer follows the collation, where the two engines can differ and
 /// the exact alternative are <c>DESIGN.md</c>, seam 5.
 /// </summary>
-public sealed class NameComparison
+internal sealed class NameComparison
 {
     private const int IgnoreCase = 1;
     private const int IgnoreAccent = 2;

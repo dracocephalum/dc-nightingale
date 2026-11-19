@@ -8,4 +8,4 @@ namespace Dracocephalum.Nightingale.Server.Polecat;
 /// <param name="CodePage">Its code page, or <see langword="null"/> when the server reports none.</param>
 /// <param name="ComparisonStyle">Its comparison style: a mask of what it ignores, 0 for one that ignores nothing; <see langword="null"/> when the server reports none.</param>
 /// <param name="Lcid">Its locale, or <see langword="null"/> when the server reports none.</param>
-public sealed record DatabaseCollation(string Name, int? CodePage, int? ComparisonStyle, int? Lcid);
+internal sealed record DatabaseCollation(string Name, int? CodePage, int? ComparisonStyle, int? Lcid);
