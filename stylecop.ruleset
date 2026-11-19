@@ -9,8 +9,8 @@
   comment on each says which case it is.
 
   `dotnet format analyzers` is in the loop - the repair when a build fails on
-  a fixable rule, and a step before every commit - so a Warning on a rule that
-  has a code fix costs one command, never an edit. That is what makes the
+  a fixable rule, and a step of every pull request - so a Warning on a rule
+  that has a code fix costs one command, never an edit. That is what makes the
   spacing rules safe to enforce and the ordering rules not. Measured, not
   assumed: StyleCop ships no fix for SA1201-SA1204, and `dotnet format`
   reports "no associated code fix" for each of them.
