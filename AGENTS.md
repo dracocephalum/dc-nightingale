@@ -165,10 +165,13 @@ incomplete.
 
     dotnet format analyzers <solution>
 
-corrects every one at once; rebuild. Run the same command before each commit
-regardless. It costs about as much as a build, and `--include` does not make
-it cheaper, so it is a repair and a pre-commit step rather than a prefix to
-every build.
+corrects every one at once; rebuild. Run the same command once before a
+pull request is opened, and again before its last push if C# changed in
+between. It is a repair and a step of the pull request, not of every commit
+or every build: the build fails on the same rules, so a commit that builds
+is already clean of them, and the pass is slow. It was measured at a minute
+on a solution that builds in eight seconds, and `--include` does not make
+it cheaper.
 
 **Keep build output out of context.** Build with `--nologo -v:q` and grep for
 `error|warning`. Test output is already terse, so grep it for
