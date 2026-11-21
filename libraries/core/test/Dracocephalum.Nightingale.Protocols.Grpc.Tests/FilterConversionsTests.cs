@@ -36,6 +36,22 @@ public sealed class FilterConversionsTests
     }
 
     [Fact]
+    public void ToWire_ThenToEventFilter_ShouldRoundTripARegularExpressionOverStreamNames()
+    {
+        // Arrange
+        var byRegex = StreamFilter.RegularExpression("^orders-");
+
+        // Act
+        var wire = byRegex.ToWire();
+        var back = wire.ToEventFilter();
+
+        // Assert
+        wire.StreamName.Regex.ShouldBe("^orders-");
+        back.Target.ShouldBe(EventFilterTarget.StreamName);
+        back.Regex.ShouldBe("^orders-");
+    }
+
+    [Fact]
     public void ToWire_ThenToEventFilter_ShouldRoundTripExactValuesOfEitherTarget()
     {
         // Arrange
