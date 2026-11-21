@@ -69,14 +69,6 @@ undecided adds it here rather than mentioning it once in a conversation.
   back, by stream and by subscription. Another of the set: the total of an
   append to several streams, held today to one append's count though the
   store writes each stream as its own command (`PENDING.md`).
-- **A group that retries nothing cannot be asked for over the wire.**
-  `GroupSettings.Validate` accepts `MaxRetryCount = 0`, and the wire's
-  `max_retry_count` is a plain `int32` whose zero means "the default", so
-  the settings arrive with 10: seen in a round trip through
-  `ToWire` and `ToGroupSettings`. `max_subscriber_count` has no such gap,
-  its default being zero. Close by, with the protocol revision: the field
-  becomes `optional`, or zero retries is refused by `Validate` and said in
-  `VARIANCES.md`.
 
 ## Tooling to revisit
 

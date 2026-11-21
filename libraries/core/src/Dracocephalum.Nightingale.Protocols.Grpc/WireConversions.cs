@@ -257,12 +257,12 @@ public static class WireConversions
         return new GroupSettings(
             start,
             settings.MessageTimeout?.ToTimeSpan() ?? defaults.MessageTimeout,
-            settings.MaxRetryCount > 0 ? settings.MaxRetryCount : defaults.MaxRetryCount,
+            settings.HasMaxRetryCount ? settings.MaxRetryCount : defaults.MaxRetryCount,
             settings.CheckpointUpperBound > 0 ? settings.CheckpointUpperBound : defaults.CheckpointUpperBound,
             settings.CheckpointAfter?.ToTimeSpan() ?? defaults.CheckpointAfter,
             settings.CheckpointLowerBound > 0 ? settings.CheckpointLowerBound : defaults.CheckpointLowerBound,
             settings.BufferSize > 0 ? settings.BufferSize : defaults.BufferSize,
-            settings.MaxSubscriberCount > 0 ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount,
+            settings.HasMaxSubscriberCount ? settings.MaxSubscriberCount : defaults.MaxSubscriberCount,
             settings.Numbering.ToNumbering(),
             settings.ConsumerStrategy.ToConsumerStrategy(),
             settings.Filter?.ToEventFilter());

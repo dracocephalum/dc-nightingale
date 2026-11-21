@@ -142,12 +142,12 @@ internal sealed class PersistentSubscriptionsService(ITenantStores stores, Subsc
         var settings = current with
         {
             MessageTimeout = asked.MessageTimeout?.ToTimeSpan() ?? current.MessageTimeout,
-            MaxRetryCount = asked.MaxRetryCount > 0 ? asked.MaxRetryCount : current.MaxRetryCount,
+            MaxRetryCount = asked.HasMaxRetryCount ? asked.MaxRetryCount : current.MaxRetryCount,
             CheckpointUpperBound = asked.CheckpointUpperBound > 0 ? asked.CheckpointUpperBound : current.CheckpointUpperBound,
             CheckpointAfter = asked.CheckpointAfter?.ToTimeSpan() ?? current.CheckpointAfter,
             CheckpointLowerBound = asked.CheckpointLowerBound > 0 ? asked.CheckpointLowerBound : current.CheckpointLowerBound,
             BufferSize = asked.BufferSize > 0 ? asked.BufferSize : current.BufferSize,
-            MaxSubscriberCount = asked.MaxSubscriberCount > 0 ? asked.MaxSubscriberCount : current.MaxSubscriberCount,
+            MaxSubscriberCount = asked.HasMaxSubscriberCount ? asked.MaxSubscriberCount : current.MaxSubscriberCount,
             ConsumerStrategy = asked.ConsumerStrategy == Protocols.Grpc.V1.ConsumerStrategy.Unspecified ? current.ConsumerStrategy : asked.ConsumerStrategy.ToConsumerStrategy(),
         };
         try
