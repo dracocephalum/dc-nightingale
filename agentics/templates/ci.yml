@@ -1,0 +1,127 @@
+# Builds and tests every pull request and every push to the default branch.
+# A push to the default branch also deploys: its packages go to the host's
+# own package registry as a ci version, and the oldest ci versions there are
+# removed. A repository that packs nothing never deploys. Releases are not
+# made here.
+#
+# Copied from agentics/templates/ci.yml and used as it is: it finds the
+# solutions itself. agentics/rules/delivery/github.md has the reasons.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to a pull request makes the run for the older one pointless;
+# a run on the default branch is never cancelled, since it deploys.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # MSBuild reads its properties from the environment, so every dotnet
+  # command below builds the same kind of build with the same number:
+  # Packaging.props turns the two into the version, 0.1.0-ci.42.
+  BuildKind: ci
+  BuildNumber: ${{ github.run_number }}
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    outputs:
+      packed: ${{ steps.pack.outputs.packed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      # Every solution the repository tracks: the one of a standalone
+      # repository, or each component's in a monorepo.
+      - name: Find the solutions
+        run: |
+          solutions="$(git ls-files '*.slnx' '*.sln' | tr '\n' ' ')"
+          [ -n "$solutions" ] || { echo "No solution is tracked."; exit 1; }
+          echo "SOLUTIONS=$solutions" >> "$GITHUB_ENV"
+      # The lock files are the dependency graph; a restore that would change
+      # one fails here and is not passed over.
+      - name: Restore
+        run: for s in $SOLUTIONS; do dotnet restore "$s" --locked-mode || exit 1; done
+      - name: Build
+        run: for s in $SOLUTIONS; do dotnet build "$s" -c Release --no-restore || exit 1; done
+      # Unit tests only: a test project that needs a live dependency runs
+      # nothing unless it is asked to.
+      - name: Test
+        run: for s in $SOLUTIONS; do dotnet test "$s" -c Release --no-build || exit 1; done
+      - name: Pack
+        id: pack
+        run: |
+          mkdir -p packages
+          for s in $SOLUTIONS; do dotnet pack "$s" -c Release --no-build -o packages || exit 1; done
+          if ls packages/*.nupkg > /dev/null 2>&1; then echo "packed=true" >> "$GITHUB_OUTPUT"; else echo "packed=false" >> "$GITHUB_OUTPUT"; fi
+      # What is deployed is what was tested. The artifact is only the way
+      # from this job to the next, so it is kept a day and no longer.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.pack.outputs.packed == 'true'
+        with:
+          name: packages
+          path: packages/*.nupkg
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Deploy
+    needs: build-and-test
+    if: github.event_name == 'push' && needs.build-and-test.outputs.packed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # The run's own token: it may write this repository's packages and
+      # nothing else, and it is gone when the run ends. No secret is stored.
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      KEEP_CI_VERSIONS: 20
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: packages
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      # A run that is started again keeps its number, so its versions may be
+      # there already: those are passed over, and the job can be repeated.
+      - name: Publish to GitHub Packages
+        run: >
+          dotnet nuget push "packages/*.nupkg"
+          --source "https://nuget.pkg.github.com/$OWNER/index.json"
+          --api-key "$GH_TOKEN"
+          --skip-duplicate
+      # The registry's space is limited, and a ci version is of no use once
+      # a few newer ones exist. Only ci versions are removed: a release
+      # published here, if there ever is one, stays.
+      - name: Remove old ci versions
+        run: |
+          set -euo pipefail
+          case "$(gh api "users/$OWNER" --jq .type)" in
+            Organization) scope="orgs/$OWNER" ;;
+            *) scope="users/$OWNER" ;;
+          esac
+          for file in packages/*.nupkg; do
+            name="$(basename "$file" | sed -E 's/\.[0-9]+\.[0-9]+\.[0-9]+.*$//')"
+            gh api --paginate "$scope/packages/nuget/$name/versions" \
+              --jq '.[] | select(.name | test("-ci\\.")) | "\(.created_at) \(.id) \(.name)"' \
+              | sort -r | tail -n "+$((KEEP_CI_VERSIONS + 1))" \
+              | while read -r _ id version; do
+                  echo "Removing $name $version"
+                  gh api -X DELETE "$scope/packages/nuget/$name/versions/$id"
+                done
+          done

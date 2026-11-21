@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    The version of every package built beneath this folder: major for a change
+    that breaks a caller, minor for one that does not, patch for a fix.
+
+    This is the number a release is published under, so it is always the NEXT
+    release's: raise it in the change that follows a release. What is appended
+    to it for a build that is not a release is decided in Packaging.props, by
+    the build, never here.
+
+    A component that is versioned on its own carries a Version.props of its
+    own in its folder, which is found before this one.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+
+</Project>
