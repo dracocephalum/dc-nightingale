@@ -72,24 +72,6 @@ internal static class Authorization
         }
     }
 
-    /// <summary>Checks the call's role only: for a management call, which is authorized by the caller's binding, not by a header.</summary>
-    /// <param name="context">The call.</param>
-    /// <param name="required">The role the call needs.</param>
-    /// <returns>The principal.</returns>
-    /// <exception cref="RpcException">The role is too low, or the caller's tenant is gone or disabled.</exception>
-    public static async Task<NightingalePrincipal> RequireRoleAsync(this ServerCallContext context, CredentialRole required)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        try
-        {
-            return await GetAuthorizer(context).RequireRoleAsync(context.GetPrincipal(), required, context.CancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (NightingaleErrors.TryTranslate(exception, out var status))
-        {
-            throw status;
-        }
-    }
-
     private static Authorizer GetAuthorizer(ServerCallContext context) =>
         context.GetHttpContext().RequestServices.GetRequiredService<Authorizer>();
 }

@@ -188,6 +188,22 @@ public sealed class AuthorizationTests : IAsyncLifetime
         A.CallTo(() => _stores.GetStreams(A<TenantScope>.That.Matches(scope => scope.TenantId == Shipping))).MustNotHaveHappened();
     }
 
+    [Fact]
+    public async Task TenantHeader_WhenItIsNeitherAnIdNorTheWildcard_ShouldBeRefusedAsATenantNotFound()
+    {
+        // Arrange
+        var client = new Streams.StreamsClient(_channel);
+        var request = new ReadRequest { Stream = "orders-1", Start = new(), Count = 1 };
+
+        // Act
+        var refusal = await Refusal(async () => await ReadAll(client, request, Headers("auditor", "auditor-password-12", "billing")));
+
+        // Assert: no store is asked for a tenant the header does not name.
+        refusal.StatusCode.ShouldBe(StatusCode.NotFound);
+        refusal.GetRpcStatus().ShouldNotBeNull().GetDetail<ErrorInfo>().ShouldNotBeNull().Reason.ShouldBe("TENANT_NOT_FOUND");
+        A.CallTo(() => _stores.GetStreams(A<TenantScope>._)).MustNotHaveHappened();
+    }
+
     private static Metadata Headers(string name, string password, object? tenant = null)
     {
         var headers = new Metadata { { "authorization", "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(name + ":" + password)) } };

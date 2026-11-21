@@ -12,9 +12,6 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
-  <!-- TEMPORARY: cross-component project reference. Components reference each
-       other as packages (agentics/rules/layout.md); this stands in until a
-       package feed exists. Listed in TODO.md. -->
   <ItemGroup>
     <ProjectReference Include="../../../../libraries/client/src/Dracocephalum.Nightingale.Client/Dracocephalum.Nightingale.Client.csproj" />
     <ProjectReference Include="../../../../libraries/server/src/Dracocephalum.Nightingale.Server.Polecat/Dracocephalum.Nightingale.Server.Polecat.csproj" />

@@ -19,16 +19,17 @@ undecided adds it here rather than mentioning it once in a conversation.
   `agentics/rules/layout.md`, *Components reference each other as packages*,
   allows this as a recorded workaround while no package feed exists; each
   such reference carries the standard comment in its project file: the
-  server's two projects and the client reference `core`, the sample
-  program references the client and the server's backend. Close by: publish `core`,
-  `client` and the server's two packages to a feed and replace every
-  `ProjectReference` that crosses a component folder with a
-  `PackageReference` at a version. Until then the line rate at the root of a
-  coverage report is wrong for a component that references another: the
-  referenced component's assembly is built from source and instrumented too,
-  and counts for only as much of it as this component's tests happen to
-  reach. Read the rate of the component's own assemblies, each a `package`
-  element of the cobertura file, not the root's.
+  server's two projects and the client reference `core`. Close by: publish
+  `core` to a feed and replace each of those with a `PackageReference` at a
+  version. The sample program references the client and the server's
+  backend by project too, and stays so: the same rule allows it to a
+  component that is never released, with no comment. Wherever a project
+  reference stands, the line rate at the root of a coverage report is wrong
+  for a component that references another: the referenced component's
+  assembly is built from source and instrumented too, and counts for only
+  as much of it as this component's tests happen to reach. Read the rate
+  of the component's own assemblies, each a `package` element of the
+  cobertura file, not the root's.
 - **An archive's expected-revision check is not atomic with the archive.**
   The store reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,
