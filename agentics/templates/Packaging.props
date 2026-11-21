@@ -1,0 +1,102 @@
+<Project>
+
+  <!--
+    What a package is called, numbered and made of. Imported by
+    Directory.Build.props, so every project inherits it; a test project is
+    never packed, whatever is here.
+  -->
+
+  <!--
+    The version comes from the nearest Version.props above the project: the
+    repository's, or a component's own where it has one.
+  -->
+  <PropertyGroup>
+    <_VersionFile>$([MSBuild]::GetPathOfFileAbove('Version.props', '$(MSBuildProjectDirectory)'))</_VersionFile>
+  </PropertyGroup>
+  <Import Project="$(_VersionFile)" Condition="'$(_VersionFile)' != ''" />
+
+  <!--
+    The kind of build decides what follows the version, and the build says
+    which kind it is; nobody edits a version to make a build of another kind.
+
+      dev      0.1.0-dev      a build on a developer's machine, the default
+      ci       0.1.0-ci.42    a pipeline's build of the default branch, with
+                              BuildNumber the pipeline's own counter
+      release  0.1.0          a release, built by the pipeline a release starts
+
+    The counter stands after a dot so that it is compared as a number: ci.9
+    comes before ci.10, where ci9 would come after ci10. `dev` sorts after
+    `ci`, so a package built on a machine is preferred there to the
+    pipeline's of the same version. The commit hash is appended to the
+    informational version by Directory.Build.targets in every kind.
+  -->
+  <PropertyGroup>
+    <BuildKind Condition="'$(BuildKind)' == ''">dev</BuildKind>
+    <VersionSuffix Condition="'$(BuildKind)' == 'dev'">dev</VersionSuffix>
+    <!--
+      A ci build with no counter is refused by CheckBuildKind below. Until
+      that target runs the suffix is still a valid one, so that the refusal
+      is what the build reports and not a restore that cannot read "ci.".
+    -->
+    <VersionSuffix Condition="'$(BuildKind)' == 'ci' and '$(BuildNumber)' == ''">ci</VersionSuffix>
+    <VersionSuffix Condition="'$(BuildKind)' == 'ci' and '$(BuildNumber)' != ''">ci.$(BuildNumber)</VersionSuffix>
+    <VersionSuffix Condition="'$(BuildKind)' == 'release'"></VersionSuffix>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>{{PACKAGE_AUTHORS}}</Authors>
+    <PackageLicenseExpression>{{LICENCE}}</PackageLicenseExpression>
+
+    <!--
+      The repository's address and the commit are read from git and written
+      into the package, which is also what ties a package to its repository
+      on a host that keeps packages beside it. Sources that are generated
+      during the build are embedded, and the symbols travel inside the
+      assembly, since not every feed takes a symbol package.
+    -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>embedded</DebugType>
+
+    <!-- A build that is not a developer's is the same bytes wherever it is run. -->
+    <ContinuousIntegrationBuild Condition="'$(BuildKind)' != 'dev'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- A kind nobody defined, or a pipeline that forgot its counter, would otherwise give a version that looks like a release. -->
+  <Target Name="CheckBuildKind" BeforeTargets="PrepareForBuild;GenerateNuspec">
+    <Error Condition="'$(BuildKind)' != 'dev' and '$(BuildKind)' != 'ci' and '$(BuildKind)' != 'release'" Text="BuildKind is '$(BuildKind)'; it is dev, ci or release." />
+    <Error Condition="'$(BuildKind)' == 'ci' and '$(BuildNumber)' == ''" Text="A ci build needs BuildNumber." />
+    <!-- The file, not VersionPrefix: the SDK has given that its own 1.0.0 by now. -->
+    <Error Condition="'$(_VersionFile)' == ''" Text="No Version.props was found above $(MSBuildProjectDirectory)." />
+  </Target>
+
+  <!--
+    A package names its commit in full. Directory.Build.targets shortens the
+    hash for the informational version and marks an uncommitted tree there;
+    what a package records of where it came from is the whole hash, as the
+    SDK writes it when left alone. A commit somebody set by hand is kept, and
+    so is the short one where git does not answer.
+  -->
+  <Target Name="SetRepositoryCommit" BeforeTargets="GenerateNuspec">
+    <Exec Command="git rev-parse HEAD"
+          Condition="'$(RepositoryCommit)' == '$(SourceRevisionId)'"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitHeadOutput" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitHeadExitCode" />
+    </Exec>
+    <PropertyGroup Condition="'$(_GitHeadExitCode)' == '0' and '$(_GitHeadOutput)' != ''">
+      <RepositoryCommit>$(_GitHeadOutput)</RepositoryCommit>
+    </PropertyGroup>
+  </Target>
+
+  <!-- A notice file, where the repository has one, travels with what is distributed. -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)NOTICE" Pack="true" PackagePath="" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)NOTICE')" />
+  </ItemGroup>
+
+</Project>

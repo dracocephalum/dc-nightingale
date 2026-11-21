@@ -5,7 +5,7 @@
 
 toolkit:
   url: https://github.com/dracocephalum/dc-agentics
-  commit: "e06325d57a31"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
+  commit: "629866061361"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
   payload-path: "repo/payload"         # where the payload lived AT that commit - the toolkit restructures, and an upgrade diffing the wrong root sees every file as new. Fixed value, not a placeholder
   initialized: "2026-09-14"            # yyyy-mm-dd
   by: "Claude Code / claude-fable-5-1" # e.g. Claude Code / claude-fable-5-1
@@ -57,6 +57,7 @@ guidelines:
   # Fixed values, not placeholders - they describe the toolkit, not this repo.
   model-baseline: "claude-opus-5, claude-fable-5-1, claude-fable-5-2"
   verified: "2026-11-17"               # last end-to-end initialization trial on that line
+
 rules:
   # What the toolkit owns and what this repository adds - agentics/rules/layout.md,
   # "The toolkit's rules and the repository's". agentics/ and the toolkit's shims under
@@ -67,3 +68,12 @@ rules:
                                       # (coding/csharp/csharp-ef-core-rules.md); the sync removes the file and its
                                       # row. Excluding and writing a local replacement is the one override that
                                       # holds; a local rule beside a toolkit rule it contradicts has no referee
+
+delivery:
+  # Versions, pipelines and registries - agentics/rules/delivery/delivery.md. Opt-in: a repository has
+  # none of it until it adopts it, at initialization or later, by "Adopting it" there. A pipeline needs
+  # versioning; versioning stands without a pipeline.
+  versioning: false                   # true once Version.props and Packaging.props are at the root
+  pipeline: none                      # github | none - none means nothing builds the repository but its developers
+  packages-token-variable: "GITHUB_PACKAGES_TOKEN"   # the environment variable a developer's machine keeps its token for
+                                      # reading packages in; a name, never a token; confirmed with the user at adoption

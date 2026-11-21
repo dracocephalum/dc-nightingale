@@ -313,7 +313,7 @@ update it instead.
 | `SA1513` or `SA1508` in `Worker.cs` | `worker` sample code — replace with the shell |
 | `SA1505`, `SA1508` in `UnitTest1.cs` | delete the file |
 | `CA1707` on a test method name | the project is not named `*.Tests`, so `Tests.props` (which suppresses it) was never applied |
-| `NU1100`/`NU1101` package not found, on a private package | `nuget.config` source mapping has no pattern routing it to the private feed |
+| `NU1100`/`NU1101` package not found, on a private package | `nuget.config` source mapping has no pattern routing it to the private feed — or the package is a `ci` build read through files git ignores, and they are not on this machine: `agentics/rules/delivery/`, the host file, *Reading a package* |
 | zero tests, green exit | wrong runner version, or no tests written yet |
 | a `*.Tests.Integration` project builds but `dotnet test` reports none of its tests | by design — run with `-p:RunIntegrationTests=true` |
 | `CS0246` on `Fact`, `Theory` or `InlineData` | the project is not named `*.Tests`, so `Tests.props` — which supplies the `Xunit` global using — was never applied |

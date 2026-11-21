@@ -503,6 +503,7 @@ $RECYCLE.BIN/
 # Local configuration - never commit machine-specific values
 *.local.json
 *.local.props
+*.local.config
 appsettings.Local.json
 .env
 .env.*
