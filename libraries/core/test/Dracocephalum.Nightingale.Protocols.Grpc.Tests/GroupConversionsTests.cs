@@ -65,6 +65,33 @@ public sealed class GroupConversionsTests
     }
 
     [Fact]
+    public void GroupSettings_WhenNothingIsRetried_ShouldCarryTheZeroOnTheWireAndBack()
+    {
+        // Arrange: a zero is a setting, not an absence that the default would fill.
+        var settings = GroupSettings.Default with { MaxRetryCount = 0 };
+
+        // Act
+        var wire = settings.ToWire();
+
+        // Assert
+        wire.HasMaxRetryCount.ShouldBeTrue();
+        wire.ToGroupSettings().MaxRetryCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void ToGroupSettings_WhenTheConsumerLimitIsSet_ShouldCarryIt()
+    {
+        // Arrange
+        var wire = new Protocols.Grpc.V1.GroupSettings { MaxSubscriberCount = 4 };
+
+        // Act
+        var settings = wire.ToGroupSettings();
+
+        // Assert
+        settings.MaxSubscriberCount.ShouldBe(4);
+    }
+
+    [Fact]
     public void GroupSettings_ShouldCarryEverySettingOnTheWireAndBack()
     {
         // Arrange

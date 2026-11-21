@@ -105,6 +105,23 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Refusing_WithRetry_WhenTheGroupRetriesNothing_ShouldParkAtOnce()
+    {
+        // Arrange: no retry allowed.
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._))
+            .Returns(new StreamSlice(new StreamHead(0, 0), [Record("orders-1", 0, 10)]));
+        await using var sut = Group("orders-1", -1, 1, settings => settings with { Start = StreamPosition.Start, MaxRetryCount = 0 });
+        var first = await Next(sut);
+
+        // Act
+        await sut.RefuseAsync([first.Record.Id], NackAction.Retry, "not yet");
+
+        // Assert
+        A.CallTo(() => _groups.ParkAsync(A<SubscriptionParkedMessage>.That.Matches(parked => parked.Position == 10 && parked.Attempts == 0 && parked.Reason == "not yet"), A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        sut.Checkpoint.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Refusing_SeveralWithRetry_ShouldRedeliverThemAllAheadOfTheEventWaitingForRoom()
     {
         // Arrange: room for two; the third event waits for it.
