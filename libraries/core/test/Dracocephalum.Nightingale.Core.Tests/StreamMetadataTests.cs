@@ -78,6 +78,7 @@ public sealed class StreamMetadataTests
 
     [Theory]
     [InlineData("[]")]
+    [InlineData("{\"$maxCount\":")]
     [InlineData("{\"$maxCount\":\"ten\"}")]
     [InlineData("{\"$tb\":1.5}")]
     [InlineData("{\"$tmp\":1}")]
