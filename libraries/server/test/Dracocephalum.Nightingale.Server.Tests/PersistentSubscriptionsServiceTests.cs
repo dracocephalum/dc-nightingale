@@ -334,6 +334,43 @@ public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Update_WhenItNamesAZero_ShouldTakeTheRetriesAndTheConsumerLimitAway()
+    {
+        // Arrange: a group with a retry limit and a consumer limit of its own.
+        var settings = GroupSettings.Default with { MaxRetryCount = 3, MaxSubscriberCount = 4 };
+        var definition = new SubscriptionGroupDefinition("orders-1", "billing", settings, -1);
+        GroupSettings? written = null;
+        A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(definition);
+        A.CallTo(() => _groups.UpdateSettingsAsync(definition.Id, A<GroupSettings>._, A<CancellationToken>._))
+            .Invokes(call => written = call.GetArgument<GroupSettings>(1))
+            .Returns(true);
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act: a zero that is named is a setting, where a field left unset keeps its value.
+        await client.UpdateAsync(
+            new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { MaxRetryCount = 0, MaxSubscriberCount = 0 } },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        written.ShouldBe(settings with { MaxRetryCount = 0, MaxSubscriberCount = 0 });
+    }
+
+    [Fact]
+    public async Task Create_WhenTheGroupRetriesNothing_ShouldStoreTheZero()
+    {
+        // Arrange
+        SubscriptionGroupDefinition? captured = null;
+        A.CallTo(() => _groups.CreateAsync(A<SubscriptionGroupDefinition>._, A<CancellationToken>._)).Invokes(call => captured = call.GetArgument<SubscriptionGroupDefinition>(0));
+        var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
+
+        // Act
+        await client.CreateAsync(new CreateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { MaxRetryCount = 0 } }, cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert
+        captured.ShouldNotBeNull().Settings.MaxRetryCount.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Update_WhenItNamesAnotherStartOrNumbering_ShouldRefuseAndChangeNothing()
     {
         // Arrange

@@ -136,7 +136,9 @@ message GroupSettings {
   google.protobuf.Duration message_timeout = 4;
 
   // How many times an event is redelivered before it is parked. Default 10.
-  int32 max_retry_count = 5;
+  // Zero is a setting, an event parked the first time it is refused or
+  // times out, so the field says whether it is set.
+  optional int32 max_retry_count = 5;
 
   // The checkpoint is written when this many events have been acknowledged
   // since the last write, or when checkpoint_after has passed with at least
@@ -149,8 +151,9 @@ message GroupSettings {
   int32 buffer_size = 9;
 
   // How many consumers may connect at once; one more is refused with
-  // CONSUMER_LIMIT_REACHED. Default 0: no limit.
-  int32 max_subscriber_count = 10;
+  // CONSUMER_LIMIT_REACHED. Default 0: no limit. The field says whether it
+  // is set, so that an Update can take a limit away again.
+  optional int32 max_subscriber_count = 10;
 
   // How the group's numbers are meant, fixed when the group is created: its
   // start position, its checkpoint, and the position a parked message is
