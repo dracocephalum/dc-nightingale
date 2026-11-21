@@ -27,10 +27,33 @@ switch to packages as what closes it.
          other as packages (agentics/rules/layout.md); this stands in until a
          package feed exists. Listed in TODO.md. -->
 
-It is not a pipeline's job to police this. A pipeline builds its component as
-though the references were packages; while the workaround stands, its trigger
-has to include the referenced components' paths, and that is the whole of the
+**A component that is never released may reference another by project.**
+The rule above protects a release: two components that are each released,
+as a package or as a deployment, must each be releasable alone. A component
+under `tools/` or `examples/` has no release, and is of little use except
+against the others as they are in the tree: a benchmark that measured the
+last published package would say nothing of the change being made. So such
+a component may hold a `ProjectReference` into any other, with no comment
+and no `TODO.md` entry, because it is not a workaround. Three things keep it
+from spreading:
+
+- **One direction only.** A released component, whatever its category,
+  never references one under `tools/` or `examples/`, and still reaches
+  another released one only as a package. Between two that are never
+  released there is no release to protect, and either may reference the
+  other.
+- **It is allowed, not required.** A tool the build itself runs may prefer
+  the last released package, so that a broken tree cannot break the tool
+  that builds it; a sample may prefer it to show what a consumer gets.
+- **Nothing of it is packed.** The referencing project is
+  `<IsPackable>false</IsPackable>`, as its category already asks.
+
+It is not a pipeline's job to police any of this. A pipeline builds its
+component as though the references were packages; where a project reference
+stands, by the workaround or by the paragraph above, the trigger has to
+include the referenced components' paths, and that is the whole of the
 pipeline's involvement.
+
 Split into two components when the code genuinely diverges — separate
 dependencies, separate lifecycles, a change to one that cannot break the
 other — not merely because there are two things to deploy.
@@ -143,7 +166,7 @@ noise, and a folder that exists implies a decision that has not been made:
 | `services/` | deployable C# services |
 | `libraries/` | packages published to NuGet |
 | `jobs/` | scheduled executables (Kubernetes CronJobs and similar) |
-| `tools/` | never shipped to production |
+| `tools/` | never shipped to production: what builds, tests or measures the rest, a benchmark project among them |
 | `examples/` | runnable samples of the repository's own libraries, a component per subject holding its scenarios; never shipped — see *Samples* below |
 | `infrastructure/` | Terraform and similar provisioning |
 | `ui/` | front-end applications that are **deployed** — a shared component library is a package and belongs in `libraries/` |

@@ -165,9 +165,12 @@ product, each its own component — is a `PackageReference`, per
 [`layout.md`](../../layout.md), *Components reference each other as packages*.
 While no feed exists, the `ProjectReference` workaround there is permitted
 exactly as that section states it: the verbatim comment above the reference,
-and the `TODO.md` entry. Relative paths climb out of the component:
-`../../../core/src/<Prefix>.Core/<Prefix>.Core.csproj` from a project under
-`<component>/src/`.
+and the `TODO.md` entry. A component that is never released, under `tools/`
+or `examples/`, may reference another by project with neither, as
+*A component that is never released may reference another by project*
+there has it; never the other way. Relative paths climb out of the
+component: `../../../core/src/<Prefix>.Core/<Prefix>.Core.csproj` from a
+project under `<component>/src/`.
 
 The namespace is derived automatically: a trailing `.Core` is dropped
 (`<Prefix>.Core` → namespace `<Prefix>`).

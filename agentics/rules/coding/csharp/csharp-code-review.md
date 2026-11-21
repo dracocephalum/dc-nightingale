@@ -88,5 +88,5 @@ Project and packages:
 | Package added without `nuget-license -t` passing on the whole graph | [`dependencies.md`](../../dependencies.md) | `issue (blocking)` |
 | A `LicenseRef-` override or allow-list entry without its record in `license-exceptions.json` and its text under `licenses/` | [`dependencies.md`](../../dependencies.md) | `issue (blocking)` |
 | `Directory.Build.props` or `Directory.Packages.props` below the root | layout | `issue (blocking)` — severs the subtree |
-| `.csproj` in `services/`, `jobs/`, `tools/` without `IsPackable=false` | layout | `todo` |
+| `.csproj` in `services/`, `jobs/`, `tools/`, `examples/` without `IsPackable=false` | layout | `todo` |
 | A root-level solution in a monorepo | layout | `issue` |
