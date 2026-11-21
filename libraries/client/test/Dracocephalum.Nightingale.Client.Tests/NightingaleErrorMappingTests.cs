@@ -164,6 +164,106 @@ public sealed class NightingaleErrorMappingTests
         ]);
     }
 
+    [Theory]
+    [InlineData("AUTHENTICATION_FAILED", typeof(AuthenticationFailedException))]
+    [InlineData("CREDENTIAL_EXISTS", typeof(CredentialExistsException))]
+    [InlineData("CREDENTIAL_NOT_FOUND", typeof(CredentialNotFoundException))]
+    [InlineData("TENANT_EXISTS", typeof(TenantExistsException))]
+    public void ToException_WhenAManagementCallIsRefused_ShouldMapToItsExceptionWithTheServersMessage(string reason, System.Type expected)
+    {
+        // Arrange
+        var failure = Failure(StatusCode.FailedPrecondition, reason);
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        mapped.ShouldBeOfType(expected);
+        mapped.Message.ShouldBe(failure.Status.Detail);
+    }
+
+    [Theory]
+    [InlineData("GROUP_EXISTS", typeof(GroupExistsException))]
+    [InlineData("GROUP_NOT_FOUND", typeof(GroupNotFoundException))]
+    [InlineData("CONSUMER_LIMIT_REACHED", typeof(ConsumerLimitReachedException))]
+    [InlineData("PARKED_MESSAGE_NOT_FOUND", typeof(ParkedMessageNotFoundException))]
+    public void ToException_WhenAGroupCallIsRefused_ShouldMapToItsExceptionNamingTheStreamAndTheGroup(string reason, System.Type expected)
+    {
+        // Arrange
+        var failure = Failure(StatusCode.FailedPrecondition, reason, ("stream", "orders-1"), ("group", "billing"));
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        mapped.ShouldBeOfType(expected);
+        mapped.Message.ShouldContain("orders-1");
+        mapped.Message.ShouldContain("billing");
+    }
+
+    [Theory]
+    [InlineData("ops", CredentialRole.Ops)]
+    [InlineData("ADMIN", CredentialRole.Admin)]
+    [InlineData("", null)]
+    [InlineData("auditor", null)]
+    public void ToException_WhenAccessIsDenied_ShouldSayWhichRoleWasNeededWhenTheServerNamedOne(string named, CredentialRole? required)
+    {
+        // Arrange
+        var failure = Failure(StatusCode.PermissionDenied, "ACCESS_DENIED", ("required", named));
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        var denied = mapped.ShouldBeOfType<AccessDeniedException>();
+        denied.Required.ShouldBe(required);
+        denied.Message.ShouldBe(failure.Status.Detail);
+    }
+
+    [Theory]
+    [InlineData("11111111-1111-1111-1111-111111111111", "11111111-1111-1111-1111-111111111111")]
+    [InlineData("not-an-id", null)]
+    public void ToException_WhenTheTenantIsNotFound_ShouldCarryItsIdWhenTheServerGaveOne(string named, string? expected)
+    {
+        // Arrange
+        var failure = Failure(StatusCode.NotFound, "TENANT_NOT_FOUND", ("tenant", named));
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        mapped.ShouldBeOfType<TenantNotFoundException>().TenantId.ShouldBe(expected is null ? null : Guid.Parse(expected));
+    }
+
+    [Theory]
+    [InlineData("11111111-1111-1111-1111-111111111111", "11111111-1111-1111-1111-111111111111")]
+    [InlineData("", "00000000-0000-0000-0000-000000000000")]
+    public void ToException_WhenTheTenantIsDisabled_ShouldCarryItsId(string named, string expected)
+    {
+        // Arrange
+        var failure = Failure(StatusCode.PermissionDenied, "TENANT_DISABLED", ("tenant", named));
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        mapped.ShouldBeOfType<TenantDisabledException>().TenantId.ShouldBe(Guid.Parse(expected));
+    }
+
+    [Fact]
+    public void ToException_WhenTheReasonIsAnotherProductsOwn_ShouldReturnTheOriginal()
+    {
+        // Arrange: a reason this build knows, under a domain that is not the server's.
+        var info = new ErrorInfo { Domain = "storage.example", Reason = "STREAM_DELETED" };
+        var failure = new Google.Rpc.Status { Code = (int)StatusCode.FailedPrecondition, Message = "failed", Details = { Any.Pack(info) } }.ToRpcException();
+
+        // Act
+        var mapped = NightingaleErrorMapping.ToException(failure);
+
+        // Assert
+        mapped.ShouldBeSameAs(failure);
+    }
+
     private static RpcException Failure(StatusCode code, string reason, params (string Key, string Value)[] metadata)
     {
         var info = new ErrorInfo { Domain = "nightingale", Reason = reason };

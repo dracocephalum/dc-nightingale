@@ -194,6 +194,40 @@ public sealed class StreamSubscriptionTests
     }
 
     [Fact]
+    public async Task Messages_WhenTheServerSendsSomethingASubscriptionDoesNotCarry_ShouldPassOverIt()
+    {
+        // Arrange: a message with no content this build knows, as a newer server might send.
+        var (invoker, _) = FakeStreamsCall.Read(
+        [
+            new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = "s-1", Head = 0 } },
+            new ReadResponse(),
+            new ReadResponse { Event = Recorded("orders-1", 0, 10) },
+        ]);
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        await using var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, cancellationToken: TestContext.Current.CancellationToken);
+        var messages = await subscription.Messages.ToListAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        messages.Count.ShouldBe(2);
+        messages[1].ShouldBeOfType<SubscriptionMessage.Recorded>().Record.Position.ShouldBe(10);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WhenCalledAgain_ShouldDoNothing()
+    {
+        // Arrange
+        var (invoker, _) = FakeStreamsCall.Read([new ReadResponse { Confirmed = new SubscriptionConfirmed { SubscriptionId = "s-1", Head = 0 } }]);
+        await using var sut = new NightingaleClient(invoker);
+        var subscription = sut.SubscribeToStreamAsync("orders-1", StreamPosition.Start, cancellationToken: TestContext.Current.CancellationToken);
+        await subscription.DisposeAsync();
+
+        // Act & Assert
+        await Should.NotThrowAsync(async () => await subscription.DisposeAsync());
+    }
+
+    [Fact]
     public async Task ReadAllAsync_ShouldReadAllAndReportTheHead()
     {
         // Arrange

@@ -71,23 +71,47 @@ public sealed class PersistentSubscriptionTests
         ended.Task.IsCompleted.ShouldBeTrue();
     }
 
-    [Fact]
-    public async Task NackAsync_ShouldSendTheActionTheReasonAndTheIds()
+    [Theory]
+    [InlineData(NackAction.Retry, Protocols.Grpc.V1.NackAction.Retry)]
+    [InlineData(NackAction.Park, Protocols.Grpc.V1.NackAction.Park)]
+    [InlineData(NackAction.Skip, Protocols.Grpc.V1.NackAction.Skip)]
+    public async Task NackAsync_ShouldSendTheActionTheReasonAndTheIds(NackAction action, Protocols.Grpc.V1.NackAction sent)
     {
         // Arrange
-        var (invoker, sent) = DuplexRead([new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = "p-1", Checkpoint = -1 } }]);
+        var (invoker, requests) = DuplexRead([new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = "p-1", Checkpoint = -1 } }]);
         await using var sut = new NightingaleClient(invoker);
         await using var subscription = await sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken);
         var id = Guid.NewGuid();
 
         // Act
-        await subscription.NackAsync(NackAction.Park, "poison", id);
+        await subscription.NackAsync(action, "poison", id);
 
         // Assert
-        var nack = sent.Last().Nack;
-        nack.Action.ShouldBe(Protocols.Grpc.V1.NackAction.Park);
+        var nack = requests.Last().Nack;
+        nack.Action.ShouldBe(sent);
         nack.Reason.ShouldBe("poison");
         nack.Ids.ShouldBe([id.ToString("D")]);
+    }
+
+    [Fact]
+    public async Task Messages_WhenTheServerSendsSomethingThisBuildDoesNotKnow_ShouldPassOverIt()
+    {
+        // Arrange: a message with no content this build knows, as a newer server might send.
+        var (invoker, _) = DuplexRead(
+        [
+            new PersistentReadResponse { Confirmed = new PersistentSubscriptionConfirmed { SubscriptionId = "p-1", Checkpoint = -1 } },
+            new PersistentReadResponse(),
+            new PersistentReadResponse { Event = new PersistentEvent { Event = Recorded("orders-1", 0, 10), RetryCount = 1 } },
+        ]);
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        await using var subscription = await sut.SubscribeToPersistentSubscriptionAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken);
+        var messages = await subscription.Messages.ToListAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        messages.Count.ShouldBe(2);
+        messages[1].ShouldBeOfType<PersistentSubscriptionMessage.Recorded>().RetryCount.ShouldBe(1);
     }
 
     [Fact]

@@ -14,11 +14,14 @@ public sealed class NightingaleClientTests
         Should.Throw<FormatException>(() => new NightingaleClient("ftp://nightingale.example"));
     }
 
-    [Fact]
-    public async Task Constructor_WhenAConnectionString_ShouldOpenWithoutConnecting()
+    [Theory]
+    [InlineData("nightingale://one.example:5001,two.example:5002?tls=false&defaultDeadline=5000")]
+    [InlineData("nightingale://reader:a-long-password@one.example:5001?tls=false")]
+    [InlineData("nightingale://one.example:5001?tls=false&tenant=*")]
+    public async Task Constructor_WhenAConnectionString_ShouldOpenWithoutConnecting(string connectionString)
     {
         // Act & Assert: nothing listens there, and nothing is asked of it yet.
-        await using var sut = new NightingaleClient("nightingale://one.example:5001,two.example:5002?tls=false&defaultDeadline=5000");
+        await using var sut = new NightingaleClient(connectionString);
     }
 
     [Fact]
@@ -49,7 +52,7 @@ public sealed class NightingaleClientTests
         // Arrange: the server refused the first event and ended the call, so the next write fails
         // without a reason, and the reason is in the response.
         var refusal = new RpcException(new Status(StatusCode.InvalidArgument, "An event carries JSON data, binary data, or both."));
-        var writer = new EndingWriter(writesBeforeEnd: 2);
+        var writer = new EndingWriter<AppendRequest>(writesBeforeEnd: 2);
         var invoker = A.Fake<CallInvoker>();
         A.CallTo(() => invoker.AsyncClientStreamingCall(A<Method<AppendRequest, AppendResponse>>._, A<string>._, A<CallOptions>._))
             .Returns(new AsyncClientStreamingCall<AppendRequest, AppendResponse>(writer, Task.FromException<AppendResponse>(refusal), Task.FromResult(new Metadata()), () => refusal.Status, () => [], () => { }));
@@ -100,6 +103,116 @@ public sealed class NightingaleClientTests
         results.ShouldBe([new StreamAppendResult("orders-1", 4, 40), new StreamAppendResult("$$payments-1", 0, 41)]);
     }
 
+    [Fact]
+    public async Task AppendToStreamAsync_ShouldSendTheOptionsThenEachEventAndReturnWhereTheLastLanded()
+    {
+        // Arrange
+        var writer = new RecordingWriter<AppendRequest>();
+        var invoker = A.Fake<CallInvoker>();
+        A.CallTo(() => invoker.AsyncClientStreamingCall(A<Method<AppendRequest, AppendResponse>>._, A<string>._, A<CallOptions>._))
+            .Returns(new AsyncClientStreamingCall<AppendRequest, AppendResponse>(writer, Task.FromResult(new AppendResponse { Revision = 4, Position = 40 }), Task.FromResult(new Metadata()), () => Status.DefaultSuccess, () => [], () => { }));
+        await using var sut = new NightingaleClient(invoker);
+        EventData[] events = [new(Guid.NewGuid(), "a", "{}"u8.ToArray()), new(Guid.NewGuid(), "b", "{}"u8.ToArray())];
+
+        // Act
+        var result = await sut.AppendToStreamAsync("orders-1", StreamState.StreamRevision(2), events, TestContext.Current.CancellationToken);
+
+        // Assert
+        result.ShouldBe(new AppendResult(4, 40));
+        writer.Written.Select(part => part.ContentCase).ShouldBe([AppendRequest.ContentOneofCase.Options, AppendRequest.ContentOneofCase.Event, AppendRequest.ContentOneofCase.Event]);
+        (writer.Written[0].Options.Stream, writer.Written[0].Options.ExpectedRevision).ShouldBe(("orders-1", 2L));
+        writer.Written.Skip(1).Select(part => part.Event.EventType).ShouldBe(["a", "b"]);
+        writer.Completed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task AppendToStreamAsync_WhenTheStreamIsNotInTheExpectedState_ShouldThrowTheConflict()
+    {
+        // Arrange
+        var refusal = FakeUnaryCall.Failure(StatusCode.FailedPrecondition, "REVISION_CONFLICT", ("stream", "orders-1"), ("expected", "2"), ("actual", "5"));
+        var invoker = A.Fake<CallInvoker>();
+        A.CallTo(() => invoker.AsyncClientStreamingCall(A<Method<AppendRequest, AppendResponse>>._, A<string>._, A<CallOptions>._))
+            .Returns(new AsyncClientStreamingCall<AppendRequest, AppendResponse>(new RecordingWriter<AppendRequest>(), Task.FromException<AppendResponse>(refusal), Task.FromResult(new Metadata()), () => refusal.Status, () => [], () => { }));
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        var conflict = await Should.ThrowAsync<RevisionConflictException>(() => sut.AppendToStreamAsync("orders-1", StreamState.StreamRevision(2), [new EventData(Guid.NewGuid(), "a", "{}"u8.ToArray())], TestContext.Current.CancellationToken));
+
+        // Assert
+        (conflict.Stream, conflict.Expected, conflict.ActualRevision).ShouldBe(("orders-1", StreamState.StreamRevision(2), 5L));
+    }
+
+    [Fact]
+    public async Task AppendToStreamsAsync_WhenTheServerEndsTheCallPartWay_ShouldThrowItsReasonRatherThanTheWriteFailure()
+    {
+        // Arrange: the server refused at the first stream's header and ended the call.
+        var refusal = FakeUnaryCall.Failure(StatusCode.FailedPrecondition, "STREAM_DELETED", ("stream", "orders-1"));
+        var writer = new EndingWriter<AppendToStreamsRequest>(writesBeforeEnd: 1);
+        var invoker = A.Fake<CallInvoker>();
+        A.CallTo(() => invoker.AsyncClientStreamingCall(A<Method<AppendToStreamsRequest, AppendToStreamsResponse>>._, A<string>._, A<CallOptions>._))
+            .Returns(new AsyncClientStreamingCall<AppendToStreamsRequest, AppendToStreamsResponse>(writer, Task.FromException<AppendToStreamsResponse>(refusal), Task.FromResult(new Metadata()), () => refusal.Status, () => [], () => { }));
+        await using var sut = new NightingaleClient(invoker);
+        StreamAppend[] appends = [new StreamAppend.OfEvents("orders-1", StreamState.Any, [new EventData(Guid.NewGuid(), "a", "{}"u8.ToArray())])];
+
+        // Act
+        var deleted = await Should.ThrowAsync<StreamDeletedException>(() => sut.AppendToStreamsAsync(appends, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Assert
+        deleted.Stream.ShouldBe("orders-1");
+        writer.Writes.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ArchiveStreamAsync_ShouldSendTheStreamAndItsExpectation()
+    {
+        // Arrange
+        var asked = new List<ArchiveRequest>();
+        await using var sut = new NightingaleClient(FakeUnaryCall.Answering(asked, new ArchiveResponse()));
+
+        // Act
+        await sut.ArchiveStreamAsync("orders-1", StreamState.StreamRevision(5), TestContext.Current.CancellationToken);
+
+        // Assert
+        asked.ShouldHaveSingleItem().ShouldBe(new ArchiveRequest { Stream = "orders-1", ExpectedRevision = 5 });
+    }
+
+    [Fact]
+    public async Task ArchiveStreamAsync_WhenTheServerDoesNotAllowIt_ShouldThrowThatDeletionIsDisabled()
+    {
+        // Arrange
+        await using var sut = new NightingaleClient(FakeUnaryCall.Failing<ArchiveRequest, ArchiveResponse>(FakeUnaryCall.Failure(StatusCode.PermissionDenied, "DELETION_DISABLED", ("stream", "orders-1"))));
+
+        // Act & Assert
+        await Should.ThrowAsync<DeletionDisabledException>(() => sut.ArchiveStreamAsync("orders-1", StreamState.Any, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task DeleteStreamAsync_ShouldSendTheStreamAndItsExpectation()
+    {
+        // Arrange
+        var asked = new List<DeleteRequest>();
+        await using var sut = new NightingaleClient(FakeUnaryCall.Answering(asked, new DeleteResponse()));
+
+        // Act
+        await sut.DeleteStreamAsync("orders-1", StreamState.StreamExists, TestContext.Current.CancellationToken);
+
+        // Assert
+        asked.ShouldHaveSingleItem().ShouldBe(new DeleteRequest { Stream = "orders-1", ExpectedRevision = StreamState.StreamExists.ToInt64() });
+    }
+
+    [Fact]
+    public async Task DeleteStreamAsync_WhenTheStreamHasNoEvents_ShouldThrowThatItIsNotFound()
+    {
+        // Arrange
+        await using var sut = new NightingaleClient(FakeUnaryCall.Failing<DeleteRequest, DeleteResponse>(FakeUnaryCall.Failure(StatusCode.NotFound, "STREAM_NOT_FOUND", ("stream", "orders-1"))));
+
+        // Act
+        var missing = await Should.ThrowAsync<StreamNotFoundException>(() => sut.DeleteStreamAsync("orders-1", StreamState.Any, TestContext.Current.CancellationToken));
+
+        // Assert
+        missing.Stream.ShouldBe("orders-1");
+    }
+
     /// <summary>A request stream that keeps what was written to it.</summary>
     private sealed class RecordingWriter<T> : IClientStreamWriter<T>
     {
@@ -125,15 +238,15 @@ public sealed class NightingaleClientTests
     }
 
     /// <summary>A request stream whose call the server ends after so many writes, as grpc-dotnet's does: later writes fail.</summary>
-    private sealed class EndingWriter(int writesBeforeEnd) : IClientStreamWriter<AppendRequest>
+    private sealed class EndingWriter<T>(int writesBeforeEnd) : IClientStreamWriter<T>
     {
         public int Writes { get; private set; }
 
         public WriteOptions? WriteOptions { get; set; }
 
-        public Task WriteAsync(AppendRequest message) => WriteAsync(message, CancellationToken.None);
+        public Task WriteAsync(T message) => WriteAsync(message, CancellationToken.None);
 
-        public Task WriteAsync(AppendRequest message, CancellationToken cancellationToken)
+        public Task WriteAsync(T message, CancellationToken cancellationToken)
         {
             if (Writes == writesBeforeEnd)
             {

@@ -105,6 +105,24 @@ public sealed class ParkedMessagesTests
         asked.ShouldHaveSingleItem().ShouldBe(new ReplayParkedRequest { Stream = "orders-1", Group = "billing", Before = 5 });
     }
 
+    [Fact]
+    public async Task Replay_ShouldAskForAllOrTheOneAndReturnHowManyWentBack()
+    {
+        // Arrange
+        var asked = new List<ReplayParkedRequest>();
+        var invoker = Answering(asked, new ReplayParkedResponse { Replayed = 2 });
+        await using var sut = new NightingaleClient(invoker);
+
+        // Act
+        var all = await sut.ReplayParkedMessagesAsync("orders-1", "billing", cancellationToken: TestContext.Current.CancellationToken);
+        await sut.ReplayParkedMessagesAsync("orders-1", "billing", position: 7, TestContext.Current.CancellationToken);
+
+        // Assert
+        all.ShouldBe(2);
+        asked.Select(request => request.WhichCase).ShouldBe([ReplayParkedRequest.WhichOneofCase.All, ReplayParkedRequest.WhichOneofCase.Position]);
+        (asked[1].Stream, asked[1].Group, asked[1].Position).ShouldBe(("orders-1", "billing", 7L));
+    }
+
     private static CallInvoker Answering<TRequest, TResponse>(List<TRequest> asked, TResponse response)
         where TRequest : class
         where TResponse : class
