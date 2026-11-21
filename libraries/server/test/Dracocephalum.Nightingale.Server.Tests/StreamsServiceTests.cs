@@ -16,7 +16,7 @@ using Shouldly;
 
 namespace Dracocephalum.Nightingale.Server.Tests;
 
-public sealed class StreamsServiceTests : IAsyncLifetime
+public sealed partial class StreamsServiceTests : IAsyncLifetime
 {
     private static readonly DateTimeOffset Created = new(2026, 9, 17, 8, 0, 0, TimeSpan.Zero);
 

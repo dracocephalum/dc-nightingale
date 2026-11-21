@@ -20,7 +20,7 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 /// The service over fakes of both stores: the unary calls and their errors, and one consumer's
 /// conversation from options to acknowledgement.
 /// </summary>
-public sealed class PersistentSubscriptionsServiceTests : IAsyncLifetime
+public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
 {
     private static readonly DateTimeOffset Created = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
 
