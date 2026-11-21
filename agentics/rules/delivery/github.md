@@ -4,25 +4,31 @@ The mechanics of [`delivery.md`](delivery.md) on GitHub: the pipeline is a
 GitHub Actions workflow, and the registry for `ci` builds is GitHub Packages.
 
 Verified on a private repository of a personal account, with two packages:
-the build job, the publishing, the listing of versions, and a restore of a
-published package on a developer's machine. **Not yet verified:** the
-removal of a version, which first happens when a package has more `ci`
-versions than are kept; a deploy run a second time; an organization's
-repository; a repository with several solutions; another repository's
-workflow reading a package.
+the build job, the publishing, the listing of versions, a restore of a
+published package on a developer's machine, and the list of paths as it is
+written, started by a pull request that changes one of them; and, in a
+second repository, its workflow restoring the first one's packages. **Not
+yet verified:** a change to none of the paths starting nothing; the removal
+of a version, which first happens when a package has more `ci` versions
+than are kept; a deploy run a second time; an organization's repository; a
+repository with several solutions.
 
 ## Adding the pipeline
 
-Copy `agentics/templates/ci.yml` to `.github/workflows/ci.yml`. Nothing in it
-is filled in: it builds every solution git tracks. It deploys from `main`,
-and a repository whose default branch has another name changes that one
-line, under `on:`. Open a pull request with it; *Build and test* runs on
-that pull request, and *Deploy* first runs when it is merged. Never push it
-to the default branch directly, a new repository's first push included:
-that push deploys at once.
+Copy `agentics/templates/ci.yml` to `.github/workflows/ci.yml`. One part of
+it is the repository's: the list under `on:` of what the build reads, *It
+runs for what it builds* below. It comes as a standalone repository's; a
+monorepo puts its category folders where `src/**` and `test/**` stand, and
+an entry for a file the repository does not have, `NOTICE` where there is
+no licence, is taken out. The rest is used as it is, and builds every
+solution git tracks. It deploys from `main`, and a repository whose default
+branch has another name changes that one line, under `on:`. Open a pull
+request with it; *Build and test* runs on that pull request, and *Deploy*
+first runs when it is merged. Never push it to the default branch directly,
+a new repository's first push included: that push deploys at once.
 
-A repository may have any number of workflows, one file each. This one is
-the only one the toolkit ships.
+A repository may have any number of workflows, one file each, and each
+with a list of its own. This one is the only one the toolkit ships.
 
 **What is the user's to do**, and to be reminded of when the pipeline is
 added:
@@ -58,6 +64,34 @@ None of it is needed for the pipeline itself to build and publish.
 - **The runner is Linux.** It is the cheapest, and a build that passes on a
   developer's Windows machine and on a Linux runner has been tried on two
   platforms.
+
+## It runs for what it builds
+
+The workflow starts for a change to a path on its list, `paths:` under
+`on:`, and for no other.
+
+- **On the list**: the workflow itself; the root files every project
+  inherits, with `.editorconfig`, which the analyzers read, and
+  `.gitattributes`, which decides the bytes of a checkout; what is packed
+  beside the assemblies; and the folders of code. The root files are not
+  optional: a list of the code alone stays silent when a root file changes
+  what every project builds as.
+- **Not on it**: documents, `agentics/`, the settings and whatever no step
+  reads. A file that a new step reads is added in the change that adds the
+  step.
+- **Written once.** The list is under `pull_request` with a YAML anchor, and
+  `push` names the anchor, so the two events cannot come to differ.
+- **Order matters.** The last entry, `'!**/*.md'`, takes every markdown file
+  away again, a component's `README.md` among them. An entry after it puts
+  one back: a readme that is packed is named there.
+- **A pull request that touches nothing on the list has no run and shows no
+  check.** That is the point of it, and it is why the workflow cannot be a
+  required status check as it stands: such a pull request would wait for a
+  check that never reports. A repository that requires the check moves the
+  filter into the job, which then starts every time and ends at once.
+
+The list is checked against the tree by
+[`../scrub.md`](../scrub.md), *A pipeline's trigger list is still true*.
 
 ## No stored secret
 
@@ -176,5 +210,44 @@ they hold no secret. What goes wrong reads as follows:
 | `NU1301` with `401 (Unauthorized)`, and a warning that the request could not be authenticated | the variable is not set where the build runs, or the token lacks `read:packages` or has expired |
 | `NU1100`/`NU1101` on a package from nuget.org | `nuget.local.config` has fallen behind `nuget.config` |
 
-**Not yet verified**: the same on Linux and macOS, and an editor's own
-restore.
+The same holds on Linux, seen in a pipeline, below. **Not yet verified**:
+macOS, and an editor's own restore.
+
+### Another repository's pipeline
+
+For a repository under the same exception whose pipeline must restore a
+`-ci.` package another repository published. Verified with two private
+repositories of one personal account: a restore on the host's Linux
+runner, in locked mode for one package and of a scratch project for a
+second. The order is the rule's, and the second step is why none of this
+is offered at initialization:
+
+1. **The repository is on GitHub.** A package cannot be told about one
+   that is not.
+2. **The user gives it read access**, for each package it restores: the
+   package's page, *Package settings*, *Manage Actions access*, *Add
+   repository*, role *Read*. An agent cannot do this and says so, naming
+   the packages - every one the restore fetches, a dependency of a
+   package included, and again for a package added later. The same page
+   has *Manage Codespaces access* beside it, which looks alike and does
+   nothing here.
+3. **The pipeline is added**, as a change request of its own, with three
+   things the template carries commented out, each marked `TEMPORARY`.
+   Take the comment marks off all three and fill in the one value, the
+   pattern of the packages that come from the registry:
+   - `packages: read` under the build job's `permissions`;
+   - a step before the restore that writes the two files of the section
+     above, since they are in no checkout;
+   - the variable those files name, set on the restore step to the run's
+     own token, `${{ github.token }}`. No stored secret is added.
+4. **Two entries in `TODO.md`**, one for the committed `-ci.` reference and
+   one for the pipeline's three additions, both closed by the package's
+   first release: the reference then names it, and the additions go.
+
+A restore that fails with `NU1301` and `403 (Forbidden)` on the package,
+while the run's log shows `Packages: read` for the token, is step 2: the
+package has not been given the repository under *Manage Actions access*,
+or was given it under *Manage Codespaces access*.
+
+The registry keeps only the newest `ci` versions of a package, so a
+committed reference is raised before the version it names is removed.
