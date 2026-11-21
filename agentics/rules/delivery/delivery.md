@@ -78,6 +78,15 @@ publishes `ci` builds only.
 - **Deploy**, for the default branch only: publish exactly the packages the
   first job tested. A repository that packs nothing has no deploy.
 
+**A pipeline runs for what it builds.** It names the folders and files its
+build reads: the code, the build files every project inherits, what is
+packed. A change that touches none of them starts no run, so a change to a
+document builds nothing and publishes nothing. The list is the pipeline's
+own account of its sources, and a repository drifts from it in silence: a
+build file left off it is a change nothing builds. A scrub compares it with
+the tree, [`../scrub.md`](../scrub.md), *A pipeline's trigger list is still
+true*.
+
 A pipeline is given no stored secret where the host can do without one, and
 the host file says how.
 
@@ -99,12 +108,32 @@ read. What it commits still names public sources alone: the registry is
 reached through files git ignores, which the host file describes under
 *Reading a package*.
 
+The exception is taken in two places, and each is temporary and has a
+`TODO.md` entry of its own, closed by the same first release:
+
+| Where | What is relaxed | Offered |
+|---|---|---|
+| a developer's machine | the committed reference is a `-ci.` version, restored from the host's registry | when the reference is added; at initialization only where the user names such a package there, never as a question of its own |
+| the repository's pipeline | its restore reads the host's registry as well | only once the repository is on its host |
+
+**The second cannot be offered at initialization, and the order is
+fixed.** A pipeline reads another repository's package only after that
+package has been told to let it, and a package can only be told about a
+repository that exists on the host. So: the repository is pushed; the user
+gives it read access on each package it needs, which is theirs to do and
+no agent's; and only then is the pipeline added, as its own change
+request. A pipeline added before the access is given fails at restore, and
+reads as a broken pipeline and not as a missing permission. The host file
+has the steps, under *Another repository's pipeline*.
+
 ## Adopting it
 
 Offered when the repository is initialized, and again whenever a pipeline,
 a package or a version is asked for in a repository whose `.agentics.yaml`
-still says `delivery.versioning: false`. A pipeline needs versioning, so
-asking for one is asking for both; versioning alone is a complete answer.
+still says `delivery.versioning: false`. A pipeline that packs or publishes
+needs versioning, and the shipped one does both, so asking for it is asking
+for both; versioning alone is a complete answer. A pipeline a repository
+writes for itself that only builds and tests needs none.
 
 **Confirm first, in one message**, what is not already said:
 

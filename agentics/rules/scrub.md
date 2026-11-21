@@ -145,6 +145,7 @@ silently, because nothing enforces it:
 | `licence` | the `LICENSE` file — present, and the same licence |
 | `copyright-holder` | the holder named in `LICENSE` or `NOTICE` |
 | `layout` | the actual tree: `standalone` has one solution at the root, `monorepo` has category folders and none |
+| `delivery.pipeline` | the pipeline files git tracks: `none` has none, a host's name has that host's |
 
 ### 7. `AGENTS.md` index is complete in both directions
 
@@ -246,3 +247,53 @@ The sentences it finds are rarely the entry about the decision itself, which
 gets rewritten. They are the other entries that leaned on it: a "close by"
 that names the dropped slice as next, a pending item waiting on work that
 will now never happen.
+
+### 11. A pipeline's trigger list is still true
+
+Skipped where the repository tracks no pipeline; one that is tracked while
+`.agentics.yaml` says `delivery.pipeline: none` is a finding of check 6. A pipeline
+names the paths its build reads and starts for no other
+([`delivery/delivery.md`](delivery/delivery.md), *The pipeline is two
+jobs*). Nothing fails when the list falls behind the tree: the pipeline is
+only never started for the file it does not name, and stays green from its
+last run.
+
+    triggers() {
+      awk '/^ *paths:/ { if (seen) exit; seen = 1; next }
+           seen && /^ *#/ { next }
+           seen && /^ *- / { sub(/^ *- */, ""); gsub(/["\047]/, ""); print; next }
+           seen { exit }' "$1"
+    }
+
+    for w in $(git ls-files '.github/workflows/*.yml'); do
+      [ -n "$(triggers "$w")" ] || { echo "$w: no list, so every change starts it"; continue; }
+      triggers "$w" | grep -v '^!' | while read -r p; do
+        [ -n "$(git ls-files -- ":(glob)$p")" ] || echo "$w: matches nothing: $p"
+      done
+      git ls-files -- . $(triggers "$w" | grep -v '^!' | sed 's/^/:(exclude,glob)/') \
+        | grep -v '^agentics/' \
+        | grep -E '\.(cs|csproj|slnx?|props|targets|ruleset)$|(^|/)(packages\.lock\.json|BannedSymbols\.txt|\.editorconfig|\.gitattributes|global\.json|nuget\.config|stylecop\.json)$' \
+        | sed "s|^|$w: read by a build, and no entry matches it: |"
+    done
+
+It prints nothing when the list stands. What it prints is one of three:
+
+| Line | Means |
+|---|---|
+| `matches nothing` | an entry for a path that was moved, renamed or never there; the folder it was meant for is the one to look for |
+| `read by a build, and no entry matches it` | a project, a source, a lock file or a root build file whose change starts nothing |
+| `no list` | a workflow every change starts; a finding for one that builds, not for one that is meant to |
+
+**Then read what no entry matches**, since the second line knows a build
+file only by its name:
+
+    git ls-files -- . $(triggers <workflow> | grep -v '^!' | sed 's/^/:(exclude,glob)/')
+
+A finding there is a file some project includes by its path, a file that is
+packed, or one a step of the workflow reads. Read the entries that begin
+with `!` as well: each takes away what an earlier one gave, and a file a
+build reads may be among them.
+
+The entries are matched as git matches a glob, which agrees with the host
+for a name, a folder and `**`. The check reads the first list of each file,
+which is the only one where the events share it.
