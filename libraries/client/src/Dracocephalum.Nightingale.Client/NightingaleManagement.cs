@@ -146,16 +146,4 @@ public sealed class NightingaleManagement
             throw NightingaleErrorMapping.ToException(exception);
         }
     }
-
-    private static async Task CallAsync(Func<Task> call)
-    {
-        try
-        {
-            await call().ConfigureAwait(false);
-        }
-        catch (RpcException exception)
-        {
-            throw NightingaleErrorMapping.ToException(exception);
-        }
-    }
 }

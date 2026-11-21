@@ -55,6 +55,51 @@ public sealed class CredentialsInterceptorTests
             .MustHaveHappenedOnceExactly();
     }
 
+    [Fact]
+    public void AsyncServerStreamingCall_ShouldSendTheCredentials()
+    {
+        // Arrange
+        var method = new Method<DeleteRequest, DeleteResponse>(MethodType.ServerStreaming, Unary.ServiceName, "Read", Unary.RequestMarshaller, Unary.ResponseMarshaller);
+        var sut = _inner.Intercept(new CredentialsInterceptor(new UserCredentials("reader", "secret"), null));
+
+        // Act
+        sut.AsyncServerStreamingCall(method, null, default, new DeleteRequest());
+
+        // Assert: "reader:secret" in base64.
+        A.CallTo(() => _inner.AsyncServerStreamingCall(method, null, A<CallOptions>.That.Matches(options => Has(options, "authorization", "Basic cmVhZGVyOnNlY3JldA==")), A<DeleteRequest>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public void AsyncClientStreamingCall_ShouldSendTheCredentials()
+    {
+        // Arrange
+        var method = new Method<DeleteRequest, DeleteResponse>(MethodType.ClientStreaming, Unary.ServiceName, "Append", Unary.RequestMarshaller, Unary.ResponseMarshaller);
+        var sut = _inner.Intercept(new CredentialsInterceptor(new UserCredentials("reader", "secret"), null));
+
+        // Act
+        sut.AsyncClientStreamingCall(method, null, default);
+
+        // Assert
+        A.CallTo(() => _inner.AsyncClientStreamingCall(method, null, A<CallOptions>.That.Matches(options => Has(options, "authorization", "Basic cmVhZGVyOnNlY3JldA=="))))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public void AsyncDuplexStreamingCall_ShouldSendTheCredentials()
+    {
+        // Arrange
+        var method = new Method<DeleteRequest, DeleteResponse>(MethodType.DuplexStreaming, Unary.ServiceName, "Read", Unary.RequestMarshaller, Unary.ResponseMarshaller);
+        var sut = _inner.Intercept(new CredentialsInterceptor(new UserCredentials("reader", "secret"), null));
+
+        // Act
+        sut.AsyncDuplexStreamingCall(method, null, default);
+
+        // Assert
+        A.CallTo(() => _inner.AsyncDuplexStreamingCall(method, null, A<CallOptions>.That.Matches(options => Has(options, "authorization", "Basic cmVhZGVyOnNlY3JldA=="))))
+            .MustHaveHappenedOnceExactly();
+    }
+
     [Theory]
     [InlineData("nightingale://admin:pw@events.example?tls=false&tenant=*", "*")]
     [InlineData("nightingale://admin:pw@events.example?tenant=11111111-1111-1111-1111-111111111111", "11111111-1111-1111-1111-111111111111")]

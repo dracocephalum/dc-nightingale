@@ -11,7 +11,11 @@ namespace Dracocephalum.Nightingale.Client.Tests;
 internal static class FakeStreamsCall
 {
     /// <summary>Builds an invoker that answers every <c>Read</c> with the given responses, then the given status.</summary>
-    public static (CallInvoker Invoker, Func<ReadRequest?> Request) Read(IEnumerable<ReadResponse> responses, Status? endStatus = null)
+    public static (CallInvoker Invoker, Func<ReadRequest?> Request) Read(IEnumerable<ReadResponse> responses, Status? endStatus = null) =>
+        Read(responses, endStatus is { StatusCode: not StatusCode.OK } status ? new RpcException(status) : null);
+
+    /// <summary>Builds an invoker that answers every <c>Read</c> with the given responses, then the given failure, which can carry a reason.</summary>
+    public static (CallInvoker Invoker, Func<ReadRequest?> Request) Read(IEnumerable<ReadResponse> responses, RpcException? failure)
     {
         ReadRequest? captured = null;
         var invoker = A.Fake<CallInvoker>();
@@ -19,13 +23,13 @@ internal static class FakeStreamsCall
             .ReturnsLazily(call =>
             {
                 captured = call.GetArgument<ReadRequest>(3);
-                var reader = new ScriptedReader(responses, endStatus ?? Status.DefaultSuccess);
+                var reader = new ScriptedReader(responses, failure);
                 return new AsyncServerStreamingCall<ReadResponse>(reader, Task.FromResult(new Metadata()), () => reader.Status, () => new Metadata(), () => { });
             });
         return (invoker, () => captured);
     }
 
-    private sealed class ScriptedReader(IEnumerable<ReadResponse> responses, Status endStatus) : IAsyncStreamReader<ReadResponse>
+    private sealed class ScriptedReader(IEnumerable<ReadResponse> responses, RpcException? failure) : IAsyncStreamReader<ReadResponse>
     {
         private readonly IEnumerator<ReadResponse> _responses = responses.GetEnumerator();
 
@@ -41,10 +45,10 @@ internal static class FakeStreamsCall
                 return Task.FromResult(true);
             }
 
-            if (endStatus.StatusCode != StatusCode.OK)
+            if (failure is not null)
             {
-                Status = endStatus;
-                throw new RpcException(endStatus);
+                Status = failure.Status;
+                throw failure;
             }
 
             return Task.FromResult(false);
