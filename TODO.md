@@ -23,12 +23,12 @@ undecided adds it here rather than mentioning it once in a conversation.
   program references the client and the server's backend. Close by: publish `core`,
   `client` and the server's two packages to a feed and replace every
   `ProjectReference` that crosses a component folder with a
-  `PackageReference` at a version. Until then the coverage number of a
-  component that references another is wrong: the referenced component's
-  assembly is built from source and instrumented too, and its classes count
-  at 0% (`server` reads 63% and `polecat` 71% with every class of their own
-  at 100%). Read the per-class rates in the cobertura file for those two, not
-  the total.
+  `PackageReference` at a version. Until then the line rate at the root of a
+  coverage report is wrong for a component that references another: the
+  referenced component's assembly is built from source and instrumented too,
+  and counts for only as much of it as this component's tests happen to
+  reach. Read the rate of the component's own assemblies, each a `package`
+  element of the cobertura file, not the root's.
 - **An archive's expected-revision check is not atomic with the archive.**
   The store reads the stream's revision, compares, then archives in the same
   session; an append that lands between the two is archived with the rest,
