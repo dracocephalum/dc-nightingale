@@ -450,8 +450,8 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // Act
         var response = await client.UpdateAsync(new UpdateRequest { Stream = "orders-1", Group = "billing", Settings = new Protocols.Grpc.V1.GroupSettings { MaxRetryCount = 7 } }, cancellationToken: TestContext.Current.CancellationToken);
-        var ended = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
-        var otherEnded = await Should.ThrowAsync<RpcException>(async () => await other.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+        var ended = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNextOrFailAsync([]));
+        var otherEnded = await Should.ThrowAsync<RpcException>(async () => await other.ResponseStream.MoveNextOrFailAsync([]));
 
         // Assert: the change is made, and each consumer is told why its call ended.
         response.Settings.MaxRetryCount.ShouldBe(7);
@@ -490,11 +490,11 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
         // Act: the owner describes both consumers; then the first leaves cleanly, and what it held goes to the second.
         var info = (await client.GetInfoAsync(new GetInfoRequest { Stream = "orders-1", Group = "billing" }, cancellationToken: TestContext.Current.CancellationToken)).Info;
         await first.RequestStream.CompleteAsync();
-        var firstEnded = await first.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
+        var firstEnded = await first.ResponseStream.MoveNextOrFailAsync([]);
         await second.RequestStream.WriteAsync(new PersistentReadRequest { Ack = new Ack { Ids = { toSecond[1].Event.Event.Id } } }, TestContext.Current.CancellationToken);
         var handedOver = await Next(second, 1);
         await second.RequestStream.CompleteAsync();
-        await second.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
+        await second.ResponseStream.MoveNextOrFailAsync([]);
 
         // Assert
         toFirst[1].Event.Event.Revision.ShouldBe(0);
@@ -564,7 +564,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
         // Act: a second consumer and a replay, both under the other spelling.
         using var second = client.Read(cancellationToken: TestContext.Current.CancellationToken);
         await second.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "Orders-1", Group = "Billing" } }, TestContext.Current.CancellationToken);
-        var refused = await Should.ThrowAsync<RpcException>(async () => await second.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+        var refused = await Should.ThrowAsync<RpcException>(async () => await second.ResponseStream.MoveNextOrFailAsync([]));
         await client.ReplayParkedAsync(new ReplayParkedRequest { Stream = "Orders-1", Group = "Billing", All = new() }, cancellationToken: TestContext.Current.CancellationToken);
         await first.RequestStream.CompleteAsync();
 
@@ -607,7 +607,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // Act
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing" } }, TestContext.Current.CancellationToken);
-        var exception = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+        var exception = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNextOrFailAsync([]));
 
         // Assert
         exception.StatusCode.ShouldBe(StatusCode.Unavailable);
@@ -627,7 +627,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // Act
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "nobody" } }, TestContext.Current.CancellationToken);
-        var exception = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+        var exception = await Should.ThrowAsync<RpcException>(async () => await call.ResponseStream.MoveNextOrFailAsync([]));
 
         // Assert
         exception.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason.ShouldBe("GROUP_NOT_FOUND");
@@ -856,7 +856,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
     private static async Task<List<PersistentReadResponse>> Next(AsyncDuplexStreamingCall<PersistentReadRequest, PersistentReadResponse> call, int count)
     {
         var messages = new List<PersistentReadResponse>();
-        while (messages.Count < count && await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken))
+        while (messages.Count < count && await call.ResponseStream.MoveNextOrFailAsync(messages))
         {
             messages.Add(call.ResponseStream.Current);
         }

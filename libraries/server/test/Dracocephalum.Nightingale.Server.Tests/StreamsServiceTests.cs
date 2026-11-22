@@ -1528,11 +1528,11 @@ public sealed partial class StreamsServiceTests : IAsyncLifetime
         return messages;
     }
 
-    /// <summary>Reads the next messages of a subscription, which never completes on its own.</summary>
+    /// <summary>Reads the next messages of a subscription, which never completes on its own; a message that does not come fails the test.</summary>
     private static async Task<List<ReadResponse>> Next(AsyncServerStreamingCall<ReadResponse> call, int count)
     {
         var messages = new List<ReadResponse>();
-        while (messages.Count < count && await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken))
+        while (messages.Count < count && await call.ResponseStream.MoveNextOrFailAsync(messages))
         {
             messages.Add(call.ResponseStream.Current);
         }
