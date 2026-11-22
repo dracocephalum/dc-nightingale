@@ -122,6 +122,85 @@ public sealed class CredentialManagerTests
         _hasher.Verify("reader-password-14", stored).Matches.ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task SetPasswordAsync_ShouldStoreTheHashOfTheNewPasswordAndNothingElse()
+    {
+        // Arrange
+        var reader = new Credential { Id = Guid.NewGuid(), Name = "reader", PasswordHash = _hasher.Hash("reader-password-12"), Role = CredentialRole.User, TenantId = Billing };
+        A.CallTo(() => _credentials.FindAsync("reader", A<CancellationToken>._)).Returns(reader);
+        string? stored = null;
+        A.CallTo(() => _credentials.UpdateAsync(reader.Id, null, null, null, A<string?>._, A<CancellationToken>._))
+            .Invokes((Guid _, CredentialRole? _, Guid? _, bool? _, string? hash, CancellationToken _) => stored = hash)
+            .Returns(reader);
+
+        // Act
+        var updated = await _sut.SetPasswordAsync(BillingAdmin, "reader", "reader-password-14", TestContext.Current.CancellationToken);
+
+        // Assert
+        updated.ShouldBeSameAs(reader);
+        _hasher.Verify("reader-password-14", stored.ShouldNotBeNull()).Matches.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SetPasswordAsync_WhenItCannotBeDone_ShouldSayWhyAndStoreNothing()
+    {
+        // Arrange: a credential of another tenant, and one of the caller's own.
+        A.CallTo(() => _credentials.FindAsync("shipping-reader", A<CancellationToken>._)).Returns(new Credential { Id = Guid.NewGuid(), Name = "shipping-reader", PasswordHash = string.Empty, Role = CredentialRole.User, TenantId = Shipping });
+        A.CallTo(() => _credentials.FindAsync("billing-reader", A<CancellationToken>._)).Returns(new Credential { Id = Guid.NewGuid(), Name = "billing-reader", PasswordHash = string.Empty, Role = CredentialRole.User, TenantId = Billing });
+        var user = new NightingalePrincipal("billing-reader", CredentialRole.User, Billing, "Basic");
+
+        // Act
+        var notAnAdmin = await Should.ThrowAsync<AccessDeniedException>(async () => await _sut.SetPasswordAsync(user, "billing-reader", "reader-password-14", TestContext.Current.CancellationToken));
+        var hidden = await Should.ThrowAsync<CredentialNotFoundException>(async () => await _sut.SetPasswordAsync(BillingAdmin, "shipping-reader", "reader-password-14", TestContext.Current.CancellationToken));
+        var tooShort = await Should.ThrowAsync<ArgumentException>(async () => await _sut.SetPasswordAsync(BillingAdmin, "billing-reader", "short", TestContext.Current.CancellationToken));
+
+        // Assert
+        notAnAdmin.ShouldNotBeNull();
+        hidden.Message.ShouldContain("shipping-reader");
+        tooShort.Message.ShouldContain("password");
+        A.CallTo(() => _credentials.UpdateAsync(A<Guid>._, A<CredentialRole?>._, A<Guid?>._, A<bool?>._, A<string?>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task SetPasswordAsync_WhenTheCredentialIsDeletedMeanwhile_ShouldSayItIsNotThere()
+    {
+        // Arrange: found, and gone when the store is asked to change it.
+        var reader = new Credential { Id = Guid.NewGuid(), Name = "reader", PasswordHash = string.Empty, Role = CredentialRole.User, TenantId = Billing };
+        A.CallTo(() => _credentials.FindAsync("reader", A<CancellationToken>._)).Returns(reader);
+        A.CallTo(() => _credentials.UpdateAsync(reader.Id, null, null, null, A<string?>._, A<CancellationToken>._)).Returns((Credential?)null);
+
+        // Act
+        var gone = await Should.ThrowAsync<CredentialNotFoundException>(async () => await _sut.SetPasswordAsync(GlobalAdmin, "reader", "reader-password-14", TestContext.Current.CancellationToken));
+
+        // Assert
+        gone.Message.ShouldContain("reader");
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ShouldDeleteWhatTheCallerManagesAndSayWhenItIsNotThere()
+    {
+        // Arrange: one credential the store deletes, one it no longer finds when asked to, and one of another tenant.
+        var reader = new Credential { Id = Guid.NewGuid(), Name = "reader", PasswordHash = string.Empty, Role = CredentialRole.User, TenantId = Billing };
+        var vanished = new Credential { Id = Guid.NewGuid(), Name = "vanished", PasswordHash = string.Empty, Role = CredentialRole.User, TenantId = Billing };
+        var other = new Credential { Id = Guid.NewGuid(), Name = "shipping-reader", PasswordHash = string.Empty, Role = CredentialRole.User, TenantId = Shipping };
+        A.CallTo(() => _credentials.FindAsync("reader", A<CancellationToken>._)).Returns(reader);
+        A.CallTo(() => _credentials.FindAsync("vanished", A<CancellationToken>._)).Returns(vanished);
+        A.CallTo(() => _credentials.FindAsync("shipping-reader", A<CancellationToken>._)).Returns(other);
+        A.CallTo(() => _credentials.DeleteAsync(reader.Id, A<CancellationToken>._)).Returns(true);
+        A.CallTo(() => _credentials.DeleteAsync(vanished.Id, A<CancellationToken>._)).Returns(false);
+
+        // Act
+        await _sut.DeleteAsync(BillingAdmin, "reader", TestContext.Current.CancellationToken);
+        var gone = await Should.ThrowAsync<CredentialNotFoundException>(async () => await _sut.DeleteAsync(BillingAdmin, "vanished", TestContext.Current.CancellationToken));
+        var hidden = await Should.ThrowAsync<CredentialNotFoundException>(async () => await _sut.DeleteAsync(BillingAdmin, "shipping-reader", TestContext.Current.CancellationToken));
+
+        // Assert
+        A.CallTo(() => _credentials.DeleteAsync(reader.Id, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        gone.Message.ShouldContain("vanished");
+        hidden.Message.ShouldContain("shipping-reader");
+        A.CallTo(() => _credentials.DeleteAsync(other.Id, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
     private sealed class TestOptions : NightingaleOptionsBase
     {
     }

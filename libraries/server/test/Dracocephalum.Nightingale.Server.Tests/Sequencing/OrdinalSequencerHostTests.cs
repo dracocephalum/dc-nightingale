@@ -122,6 +122,153 @@ public sealed class OrdinalSequencerHostTests
         faults.Writes.ShouldBe([(null, null)]);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Run_WhenACatchUpOutlastsTheRenewalInterval_ShouldRenewTheLeaseAndStopNumberingIfItIsLost(bool renewed)
+    {
+        // Arrange: the head is at 10 and the first batch reaches 4, taking a renewal interval;
+        // the lease is then asked for again, and is this instance's still or another's.
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 16, 8, 0, 0, TimeSpan.Zero));
+        var leases = A.Fake<ISubscriptionGroupStore>();
+        var asked = 0;
+        var askedAgain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        A.CallTo(() => leases.AcquireLeaseAsync(OrdinalSequencing.LeaseName, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._))
+            .ReturnsLazily(_ =>
+            {
+                var holder = Interlocked.Increment(ref asked) == 1 || renewed ? null : new LeaseHolder("another-instance", null);
+                if (asked == 2)
+                {
+                    askedAgain.TrySetResult();
+                }
+
+                return Task.FromResult(holder);
+            });
+        var tail = new FollowedTail();
+        tail.Followed.Publish(10);
+        var sequences = new SharedSequence(tail, tail.Numbering);
+        var sequencer = A.Fake<IOrdinalSequencer>();
+        var follower = new OrdinalSequencingFollower(sequences, new FakeOrdinalSequencingProgressReader(), time, NullLogger<OrdinalSequencingFollower>.Instance);
+        using var sut = new OrdinalSequencerHost(leases, sequences, follower, new SubscriptionGroupRegistry(), sequencer, new FakeOrdinalSequencingFaults(), time, NullLogger<OrdinalSequencerHost>.Instance);
+        var batches = 0;
+        A.CallTo(() => sequencer.SequenceBatchAsync(null, A<long>._, A<CancellationToken>._))
+            .ReturnsLazily((string? _, long head, CancellationToken _) =>
+            {
+                if (Interlocked.Increment(ref batches) > 1)
+                {
+                    return Task.FromResult(head);
+                }
+
+                time.Advance(sut.RenewInterval);
+                return Task.FromResult(4L);
+            });
+
+        // Act
+        await sut.StartAsync(TestContext.Current.CancellationToken);
+        await askedAgain.Task.WaitAsync(TestContext.Current.CancellationToken);
+        if (renewed)
+        {
+            await tail.WaitForNumberedAsync(10, TestContext.Current.CancellationToken);
+        }
+
+        await sut.StopAsync(TestContext.Current.CancellationToken);
+
+        // Assert: with the lease lost the numbering stays where the first batch left it, and the
+        // lease, another's now, is not given back.
+        tail.Numbered.ShouldBe(renewed ? 10 : 4);
+        batches.ShouldBe(renewed ? 2 : 1);
+        var released = A.CallTo(() => leases.ReleaseLeaseAsync(OrdinalSequencing.LeaseName, A<string>._, A<CancellationToken>._));
+        if (renewed)
+        {
+            released.MustHaveHappenedOnceExactly();
+        }
+        else
+        {
+            released.MustNotHaveHappened();
+        }
+    }
+
+    [Fact]
+    public async Task Stop_WhenGivingTheLeaseBackFails_ShouldStillStop()
+    {
+        // Arrange: this instance holds the lease and has numbered up to the head.
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 16, 8, 0, 0, TimeSpan.Zero));
+        var leases = A.Fake<ISubscriptionGroupStore>();
+        A.CallTo(() => leases.AcquireLeaseAsync(A<string>._, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns(Task.FromResult<LeaseHolder?>(null));
+        A.CallTo(() => leases.ReleaseLeaseAsync(A<string>._, A<string>._, A<CancellationToken>._)).ThrowsAsync(new InvalidOperationException("The database is down."));
+        var tail = new FollowedTail();
+        tail.Followed.Publish(5);
+        var sequences = new SharedSequence(tail, tail.Numbering);
+        var sequencer = A.Fake<IOrdinalSequencer>();
+        A.CallTo(() => sequencer.SequenceBatchAsync(null, A<long>._, A<CancellationToken>._)).ReturnsLazily((string? _, long head, CancellationToken _) => Task.FromResult(head));
+        var follower = new OrdinalSequencingFollower(sequences, new FakeOrdinalSequencingProgressReader(), time, NullLogger<OrdinalSequencingFollower>.Instance);
+        using var sut = new OrdinalSequencerHost(leases, sequences, follower, new SubscriptionGroupRegistry(), sequencer, new FakeOrdinalSequencingFaults(), time, NullLogger<OrdinalSequencerHost>.Instance);
+        await sut.StartAsync(TestContext.Current.CancellationToken);
+        await tail.WaitForNumberedAsync(5, TestContext.Current.CancellationToken);
+
+        // Act
+        await sut.StopAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the lease was offered back, and its lapse is what frees it.
+        A.CallTo(() => leases.ReleaseLeaseAsync(OrdinalSequencing.LeaseName, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task Run_WhenAFaultCannotBeRecorded_ShouldStillStopTheNumberingHereAndRecordItsEndOnceItCan()
+    {
+        // Arrange: the first three batches fail, and so do the write of the fault and the first
+        // write of its end.
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 16, 8, 0, 0, TimeSpan.Zero));
+        var leases = A.Fake<ISubscriptionGroupStore>();
+        A.CallTo(() => leases.AcquireLeaseAsync(A<string>._, A<string>._, A<Uri?>._, A<TimeSpan>._, A<CancellationToken>._)).Returns(Task.FromResult<LeaseHolder?>(null));
+        var tail = new FollowedTail();
+        tail.Followed.Publish(10);
+        var sequences = new SharedSequence(tail, tail.Numbering);
+        var sequencer = A.Fake<IOrdinalSequencer>();
+        var batches = 0;
+        A.CallTo(() => sequencer.SequenceBatchAsync(null, A<long>._, A<CancellationToken>._))
+            .ReturnsLazily((string? _, long head, CancellationToken _) => Interlocked.Increment(ref batches) <= OrdinalSequencerHost.FaultAfter
+                ? Task.FromException<long>(new InvalidOperationException("the batch timed out"))
+                : Task.FromResult(head));
+        var faults = A.Fake<IOrdinalSequencingFaults>();
+        var written = new List<string?>();
+        A.CallTo(() => faults.WriteAsync(null, A<string?>._, A<DateTimeOffset>._, A<CancellationToken>._))
+            .ReturnsLazily((string? _, string? fault, DateTimeOffset _, CancellationToken _) =>
+            {
+                lock (written)
+                {
+                    written.Add(fault);
+                    return written.Count <= 2 ? Task.FromException(new InvalidOperationException("The database is down.")) : Task.CompletedTask;
+                }
+            });
+        var follower = new OrdinalSequencingFollower(sequences, new FakeOrdinalSequencingProgressReader(), time, NullLogger<OrdinalSequencingFollower>.Instance);
+        using var sut = new OrdinalSequencerHost(leases, sequences, follower, new SubscriptionGroupRegistry(), sequencer, faults, time, NullLogger<OrdinalSequencerHost>.Instance);
+
+        // Act: a pass a renewal interval, until the fault; then until its end has been written.
+        await sut.StartAsync(TestContext.Current.CancellationToken);
+        await PassUntilAsync(time, sut, () => tail.NumberingStopped is not null);
+        var stopped = tail.NumberingStopped;
+        await PassUntilAsync(time, sut, () => WrittenCount() >= 3);
+        var lifted = tail.NumberingStopped;
+        await PassUntilAsync(time, sut, () => batches >= OrdinalSequencerHost.FaultAfter + 4);
+        await sut.StopAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the fault and its end are each tried; the end is tried again at the next batch
+        // that succeeds, and no more once it is written.
+        stopped.ShouldBeOfType<OrdinalSequencerFaultedException>().Cause.ShouldBe("the batch timed out");
+        lifted.ShouldBeNull();
+        tail.Numbered.ShouldBe(10);
+        written.ShouldBe(["the batch timed out", null, null]);
+
+        int WrittenCount()
+        {
+            lock (written)
+            {
+                return written.Count;
+            }
+        }
+    }
+
     /// <summary>Lets the loop run a pass a renewal interval until a condition holds, or fails after a hundred.</summary>
     private static async Task PassUntilAsync(FakeTimeProvider time, OrdinalSequencerHost sut, Func<bool> condition)
     {
