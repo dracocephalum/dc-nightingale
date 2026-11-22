@@ -1,0 +1,67 @@
+# Builds and tests every pull request that changes what the build reads,
+# as a dev build: one that is published nowhere. Nothing this pipeline
+# does can reach a registry, which is what makes it safe to run on any
+# change anyone proposes.
+#
+# Copied from agentics/templates/dev.yml, with build.yml beside it. The
+# list under `on:` is the repository's own; the rest is used as it is.
+# agentics/rules/delivery/github.md has the reasons.
+name: Dev
+
+on:
+  pull_request:
+    # What the build reads, and nothing else. A change that touches none of
+    # these starts no run, so a change to a document builds nothing.
+    # agentics/rules/scrub.md checks the list against the tree.
+    paths:
+      # The pipeline itself, and the steps it shares.
+      - .github/workflows/dev.yml
+      - .github/workflows/build.yml
+      # What every project inherits from the root, and what decides the
+      # bytes of a checkout.
+      - .editorconfig
+      - .gitattributes
+      - BannedSymbols.txt
+      - Directory.Build.props
+      - Directory.Build.targets
+      - Directory.Packages.props
+      - global.json
+      - nuget.config
+      - Packaging.props
+      - StyleCop.props
+      - stylecop.json
+      - stylecop.ruleset
+      - Tests.props
+      - Version.props
+      # What is packed beside the assemblies.
+      - NOTICE
+      # All the code. These two are a standalone repository's; a monorepo
+      # names every category folder in their place, 'libraries/**',
+      # 'tools/**' and the others, those that are never published too.
+      - 'src/**'
+      - 'test/**'
+      # No document is built. One that is packed, or read by a build, is
+      # named after this line, which then no longer takes it away.
+      - '!**/*.md'
+
+# A newer push to a pull request makes the run for the older one pointless.
+concurrency:
+  group: dev-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    # TEMPORARY, 1 of 3, and commented out: for a repository that builds
+    # against a ci version another repository published to the host's
+    # registry. The other two are in build.yml, and all three are taken
+    # together or not at all.
+    # permissions:
+    #   contents: read
+    #   packages: read
+    uses: ./.github/workflows/build.yml
+    with:
+      build-kind: dev
