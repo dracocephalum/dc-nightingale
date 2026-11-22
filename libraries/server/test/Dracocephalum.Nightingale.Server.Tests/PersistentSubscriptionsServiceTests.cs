@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -5,6 +6,7 @@ using Dracocephalum.Nightingale.Protocols.Grpc;
 using Dracocephalum.Nightingale.Protocols.Grpc.V1;
 using Dracocephalum.Nightingale.Server.Grpc;
 using FakeItEasy;
+using FakeItEasy.Configuration;
 using Google.Rpc;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -23,6 +25,9 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
 {
     private static readonly DateTimeOffset Created = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
+
+    // How long a call the server makes on a task of its own is waited for: nothing else ends that wait.
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
 
     private readonly IStreamStore _store = A.Fake<IStreamStore>(options => options.Strict());
     private readonly ISubscriptionGroupStore _groups = A.Fake<ISubscriptionGroupStore>();
@@ -473,6 +478,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
             .ReturnsLazily(call => Task.FromResult<StreamSlice?>(new StreamSlice(new StreamHead(0, 2), call.GetArgument<long?>(2) == 0 ? [Record("orders-1", 0, 10), Record("orders-1", 1, 11), Record("orders-1", 2, 12)] : [])));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Backwards, null, 1, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 2), [Record("orders-1", 2, 12)]));
+        var released = Expect(A.CallTo(() => _groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<CancellationToken>._)), Task.CompletedTask);
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var first = client.Read(cancellationToken: TestContext.Current.CancellationToken);
         await first.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 1 } }, TestContext.Current.CancellationToken);
@@ -507,7 +513,8 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // One lease for the two, taken when the first arrived and given back when the last left.
         A.CallTo(() => _groups.AcquireLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<Uri?>._, PersistentSubscriptionsService.LeaseDuration, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
-        await Until(() => A.CallTo(() => _groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<CancellationToken>._)).MustHaveHappenedOnceExactly());
+        await released;
+        A.CallTo(() => _groups.ReleaseLeaseAsync(SubscriptionGroupRegistry.GetLeaseName(definition.Id), me, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<string>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
@@ -519,6 +526,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
         A.CallTo(() => _groups.GetAsync("orders-1", "billing", A<CancellationToken>._)).Returns(new SubscriptionGroupDefinition("orders-1", "billing", settings, -1));
         A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, settings.BufferSize, A<CancellationToken>._))
             .Returns(new StreamSlice(new StreamHead(0, 1), [Record("orders-1", 0, 10), Record("orders-1", 1, 11)]));
+        var saved = Expect(A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<string>._, A<CancellationToken>._)), Task.FromResult(true));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -526,7 +534,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
         var messages = await Next(call, 3);
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Ack = new Ack { Ids = { messages[1].Event.Event.Id } } }, TestContext.Current.CancellationToken);
-        await Until(() => A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<string>._, A<CancellationToken>._)).MustHaveHappened());
+        await saved;
         await call.RequestStream.CompleteAsync();
 
         // Assert
@@ -761,6 +769,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
             new(definition, Created, 0, 0, new LeaseHolder(me, new Uri("http://localhost")), stale),
             new(new SubscriptionGroupDefinition("orders-2", "billing", GroupSettings.Default, -1), Created, 0, 0, new LeaseHolder("other-instance", null), stale),
         });
+        var cleared = Expect(A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<string>._, A<CancellationToken>._)), Task.FromResult(true));
         var client = new PersistentSubscriptions.PersistentSubscriptionsClient(_channel);
         using var call = client.Read(cancellationToken: TestContext.Current.CancellationToken);
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
@@ -792,7 +801,7 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
 
         // The group wrote how it stands when its consumer connected, and cleared it when the consumer left.
         A.CallTo(() => _groups.SaveLiveAsync(definition.Id, A<SubscriptionGroupLive>.That.Matches(written => written != null && written.ConsumerBufferSize == 5), A<string>._, A<CancellationToken>._)).MustHaveHappened();
-        await Until(() => A.CallTo(() => _groups.SaveLiveAsync(definition.Id, null, A<string>._, A<CancellationToken>._)).MustHaveHappened());
+        await cleared;
     }
 
     [Fact]
@@ -855,24 +864,37 @@ public sealed partial class PersistentSubscriptionsServiceTests : IAsyncLifetime
         return messages;
     }
 
-    /// <summary>Retries an assertion for a moment: the acknowledgement is applied on the server's own task.</summary>
-    private static async Task Until(Action assertion)
+    /// <summary>
+    /// Gives a wait for the next such call to the group store, which is answered as given. The
+    /// server makes the call on a task of its own, so the test waits for the call and not for a
+    /// while; a call that never comes fails the test with what was expected.
+    /// </summary>
+    private static ExpectedCall Expect<T>(IReturnValueArgumentValidationConfiguration<T> call, T answer)
     {
-        for (var attempt = 0; ; attempt++)
-        {
-            try
-            {
-                assertion();
-                return;
-            }
-            catch (Exception) when (attempt < 50)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
-            }
-        }
+        var called = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        call.Invokes(() => called.TrySetResult()).Returns(answer);
+        return new ExpectedCall(called.Task, () => call.MustHaveHappened());
     }
 
     private sealed class TestOptions : NightingaleOptionsBase
     {
+    }
+
+    /// <summary>A call the test waits for. The patience is counted from the wait, not from the arrangement.</summary>
+    private sealed class ExpectedCall(Task called, Action assertMade)
+    {
+        public TaskAwaiter GetAwaiter() => WaitAsync().GetAwaiter();
+
+        private async Task WaitAsync()
+        {
+            try
+            {
+                await called.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                assertMade();
+            }
+        }
     }
 }
