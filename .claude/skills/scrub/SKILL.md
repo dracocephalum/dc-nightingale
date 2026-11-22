@@ -1,6 +1,6 @@
 ---
 name: scrub
-description: Sweep this repository for inconsistency and drift - markdown lint, unresolved links, unfilled placeholders, mixed line endings, privacy, settings that no longer match reality, an incomplete AGENTS.md index, stale TODO entries, a pipeline's trigger list that fell behind the tree, and drift in the files forked from dotnet new templates. Reports; does not fix.
+description: Sweep this repository for inconsistency and drift - markdown lint, unresolved links, unfilled placeholders, mixed line endings, privacy, settings that no longer match reality, an incomplete AGENTS.md index, stale TODO entries, a pipeline's trigger list that fell behind the tree, a package on the host that is not private, and drift in the files forked from dotnet new templates. Reports; does not fix.
 when_to_use: When asked to scrub, sweep, audit, or health-check a repository; to look for drift, staleness, or inconsistency; or after a move, rename, or restructure.
 argument-hint: "[paths...]"
 ---

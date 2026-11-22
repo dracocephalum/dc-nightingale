@@ -1,23 +1,25 @@
-# Builds and tests every pull request and every push to the default branch
-# that changes what the build reads. A push to the default branch also
-# deploys: its packages go to the host's own package registry as a ci
-# version, and the oldest ci versions there are removed. A repository that
-# packs nothing never deploys. Releases are not made here.
+# Builds, tests and deploys every push to the default branch that changes
+# what a package is built from, as a ci build: its packages go to the
+# host's own package registry as a ci version, and the oldest ci versions
+# there are removed. A repository that packs nothing never deploys.
+# Releases are not made here, and pull requests are dev.yml's.
 #
-# Copied from agentics/templates/ci.yml. The list under `on:` is the
-# repository's own; the rest is used as it is, and finds the solutions
-# itself. agentics/rules/delivery/github.md has the reasons.
+# Copied from agentics/templates/ci.yml, with build.yml beside it. The
+# list under `on:` is the repository's own; the rest is used as it is.
+# agentics/rules/delivery/github.md has the reasons.
 name: CI
 
 on:
-  pull_request:
-    # What the build reads, and nothing else. A change that touches none of
-    # these starts no run, so a change to a document builds nothing and
-    # publishes nothing. Written once and used for both events;
-    # agentics/rules/scrub.md checks it against the tree.
-    paths: &build-inputs
-      # The pipeline itself.
+  push:
+    branches: [main]
+    # What a package is built from, and nothing else. A change that touches
+    # none of these starts no run and publishes nothing: a change to a
+    # document, and a change to code that is never published.
+    # agentics/rules/scrub.md checks the list against the tree.
+    paths:
+      # The pipeline itself, and the steps it shares.
       - .github/workflows/ci.yml
+      - .github/workflows/build.yml
       # What every project inherits from the root, and what decides the
       # bytes of a checkout.
       - .editorconfig
@@ -32,114 +34,47 @@ on:
       - StyleCop.props
       - stylecop.json
       - stylecop.ruleset
-      - Tests.props
       - Version.props
       # What is packed beside the assemblies.
       - NOTICE
-      # The code. These two are a standalone repository's; a monorepo names
-      # its category folders in their place, 'libraries/**' and the others.
+      # The code that is published. This one is a standalone repository's;
+      # a monorepo names in its place the category folders whose components
+      # are published, 'libraries/**' and 'services/**' say, and leaves out
+      # those that never are, 'tools/**' and 'examples/**'. Tests are not
+      # on the list either: a change to them alone was built and run by
+      # dev.yml, and gives no package that differs from the last.
       - 'src/**'
-      - 'test/**'
       # No document is built. One that is packed, or read by a build, is
       # named after this line, which then no longer takes it away.
       - '!**/*.md'
-  push:
-    branches: [main]
-    paths: *build-inputs
 
-# A newer push to a pull request makes the run for the older one pointless;
-# a run on the default branch is never cancelled, since it deploys.
+# A run on the default branch is never cancelled, since it deploys.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
-env:
-  # MSBuild reads its properties from the environment, so every dotnet
-  # command below builds the same kind of build with the same number:
-  # Packaging.props turns the two into the version, 0.1.0-ci.42.
-  BuildKind: ci
-  BuildNumber: ${{ github.run_number }}
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY_OPTOUT: true
-
 jobs:
-  build-and-test:
+  build:
     name: Build and test
-    runs-on: ubuntu-latest
-    outputs:
-      packed: ${{ steps.pack.outputs.packed }}
     # TEMPORARY, 1 of 3, and commented out: for a repository that builds
     # against a ci version another repository published to the host's
-    # registry. All three are taken together or not at all, after the steps
-    # of agentics/rules/delivery/github.md, "Another repository's pipeline",
-    # and they go when the package has a release.
+    # registry. The other two are in build.yml, and all three are taken
+    # together or not at all.
     # permissions:
     #   contents: read
     #   packages: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: 10.0.x
-      # Every solution the repository tracks: the one of a standalone
-      # repository, or each component's in a monorepo.
-      - name: Find the solutions
-        run: |
-          solutions="$(git ls-files '*.slnx' '*.sln' | tr '\n' ' ')"
-          [ -n "$solutions" ] || { echo "No solution is tracked."; exit 1; }
-          echo "SOLUTIONS=$solutions" >> "$GITHUB_ENV"
-      # TEMPORARY, 2 of 3: the two files a developer's machine has and git
-      # ignores. The first is nuget.config with the registry added, made
-      # from it so that the two cannot come to differ; the second points
-      # the restore at it. The file holds the variable's name and never a
-      # token. PACKAGES is the one thing to fill in: the pattern of the
-      # packages that come from the registry, <Prefix>.<Component>*.
-      # - name: Point the restore at the host's registry
-      #   env:
-      #     PACKAGES: '<Prefix>.<Component>*'
-      #   run: |
-      #     sed -e 's|</packageSources>|  <add key="github" value="https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" />\n  </packageSources>|' \
-      #         -e 's|</packageSourceMapping>|  <packageSource key="github">\n      <package pattern="'"$PACKAGES"'" />\n    </packageSource>\n  </packageSourceMapping>\n  <packageSourceCredentials>\n    <github>\n      <add key="Username" value="token" />\n      <add key="ClearTextPassword" value="%GITHUB_PACKAGES_TOKEN%" />\n    </github>\n  </packageSourceCredentials>|' \
-      #         nuget.config > nuget.local.config
-      #     grep -q 'key="github"' nuget.local.config && grep -q '<packageSourceCredentials>' nuget.local.config || { echo "nuget.config has changed shape; the registry was not added whole."; exit 1; }
-      #     printf '%s\n' '<Project>' '  <PropertyGroup>' '    <RestoreConfigFile>$(MSBuildThisFileDirectory)nuget.local.config</RestoreConfigFile>' '  </PropertyGroup>' '</Project>' > Build.local.props
-      # The lock files are the dependency graph; a restore that would change
-      # one fails here and is not passed over.
-      - name: Restore
-        # TEMPORARY, 3 of 3: the run's own token, under the name the file
-        # reads. No secret is stored.
-        # env:
-        #   GITHUB_PACKAGES_TOKEN: ${{ github.token }}
-        run: for s in $SOLUTIONS; do dotnet restore "$s" --locked-mode || exit 1; done
-      - name: Build
-        run: for s in $SOLUTIONS; do dotnet build "$s" -c Release --no-restore || exit 1; done
-      # Unit tests only: a test project that needs a live dependency runs
-      # nothing unless it is asked to.
-      - name: Test
-        run: for s in $SOLUTIONS; do dotnet test "$s" -c Release --no-build || exit 1; done
-      - name: Pack
-        id: pack
-        run: |
-          mkdir -p packages
-          for s in $SOLUTIONS; do dotnet pack "$s" -c Release --no-build -o packages || exit 1; done
-          if ls packages/*.nupkg > /dev/null 2>&1; then echo "packed=true" >> "$GITHUB_OUTPUT"; else echo "packed=false" >> "$GITHUB_OUTPUT"; fi
-      # What is deployed is what was tested. The artifact is only the way
-      # from this job to the next, so it is kept a day and no longer.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: steps.pack.outputs.packed == 'true'
-        with:
-          name: packages
-          path: packages/*.nupkg
-          if-no-files-found: error
-          retention-days: 1
+    uses: ./.github/workflows/build.yml
+    with:
+      build-kind: ci
+      pack: true
 
   deploy:
     name: Deploy
-    needs: build-and-test
-    if: github.event_name == 'push' && needs.build-and-test.outputs.packed == 'true'
+    needs: build
+    if: needs.build.outputs.packed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

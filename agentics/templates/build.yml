@@ -1,0 +1,113 @@
+# The steps every pipeline shares: restore, build, test and, where it is
+# asked to, pack. It is never started by a change itself. dev.yml and
+# ci.yml call it, each saying what kind of build it wants, so that the
+# three cannot come to build differently.
+#
+# Copied from agentics/templates/build.yml and used as it is: it finds the
+# solutions itself. agentics/rules/delivery/github.md has the reasons.
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      # dev | ci | release - what Packaging.props turns into the version.
+      build-kind:
+        required: true
+        type: string
+      # Whether the packages are made and handed on to the job that
+      # publishes them. A build that publishes nowhere makes none.
+      pack:
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      packed:
+        description: Whether a package was made; false for a repository that packs nothing.
+        value: ${{ jobs.build-and-test.outputs.packed }}
+
+# No permissions are named here: a called workflow has what the job that
+# calls it was given, and naming fewer here would take away what a caller
+# asked for on purpose.
+
+env:
+  # MSBuild reads its properties from the environment, so every dotnet
+  # command below builds the same kind of build with the same number:
+  # Packaging.props turns the two into the version, 0.1.0-ci.42. The
+  # number is the calling run's, and a dev build has no use for it.
+  BuildKind: ${{ inputs.build-kind }}
+  BuildNumber: ${{ github.run_number }}
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # A check reads as the workflow, the job that calls this one and this
+  # job, so the name here only has to say what the calling job's does not.
+  build-and-test:
+    name: Solutions
+    runs-on: ubuntu-latest
+    outputs:
+      packed: ${{ steps.pack.outputs.packed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      # Every solution the repository tracks: the one of a standalone
+      # repository, or each component's in a monorepo.
+      - name: Find the solutions
+        run: |
+          solutions="$(git ls-files '*.slnx' '*.sln' | tr '\n' ' ')"
+          [ -n "$solutions" ] || { echo "No solution is tracked."; exit 1; }
+          echo "SOLUTIONS=$solutions" >> "$GITHUB_ENV"
+      # TEMPORARY, 2 of 3, and commented out: for a repository that builds
+      # against a ci version another repository published to the host's
+      # registry. All three are taken together or not at all, after the
+      # steps of agentics/rules/delivery/github.md, "Another repository's
+      # pipeline", and they go when the package has a release. The first
+      # is in each workflow that calls this one.
+      #
+      # These are the two files a developer's machine has and git ignores.
+      # The first is nuget.config with the registry added, made from it so
+      # that the two cannot come to differ; the second points the restore
+      # at it. The file holds the variable's name and never a token.
+      # PACKAGES is the one thing to fill in: the pattern of the packages
+      # that come from the registry, <Prefix>.<Component>*.
+      # - name: Point the restore at the host's registry
+      #   env:
+      #     PACKAGES: '<Prefix>.<Component>*'
+      #   run: |
+      #     sed -e 's|</packageSources>|  <add key="github" value="https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" />\n  </packageSources>|' \
+      #         -e 's|</packageSourceMapping>|  <packageSource key="github">\n      <package pattern="'"$PACKAGES"'" />\n    </packageSource>\n  </packageSourceMapping>\n  <packageSourceCredentials>\n    <github>\n      <add key="Username" value="token" />\n      <add key="ClearTextPassword" value="%GITHUB_PACKAGES_TOKEN%" />\n    </github>\n  </packageSourceCredentials>|' \
+      #         nuget.config > nuget.local.config
+      #     grep -q 'key="github"' nuget.local.config && grep -q '<packageSourceCredentials>' nuget.local.config || { echo "nuget.config has changed shape; the registry was not added whole."; exit 1; }
+      #     printf '%s\n' '<Project>' '  <PropertyGroup>' '    <RestoreConfigFile>$(MSBuildThisFileDirectory)nuget.local.config</RestoreConfigFile>' '  </PropertyGroup>' '</Project>' > Build.local.props
+      # The lock files are the dependency graph; a restore that would change
+      # one fails here and is not passed over.
+      - name: Restore
+        # TEMPORARY, 3 of 3: the run's own token, under the name the file
+        # reads. No secret is stored.
+        # env:
+        #   GITHUB_PACKAGES_TOKEN: ${{ github.token }}
+        run: for s in $SOLUTIONS; do dotnet restore "$s" --locked-mode || exit 1; done
+      - name: Build
+        run: for s in $SOLUTIONS; do dotnet build "$s" -c Release --no-restore || exit 1; done
+      # Unit tests only: a test project that needs a live dependency runs
+      # nothing unless it is asked to.
+      - name: Test
+        run: for s in $SOLUTIONS; do dotnet test "$s" -c Release --no-build || exit 1; done
+      - name: Pack
+        id: pack
+        if: inputs.pack
+        run: |
+          mkdir -p packages
+          for s in $SOLUTIONS; do dotnet pack "$s" -c Release --no-build -o packages || exit 1; done
+          if ls packages/*.nupkg > /dev/null 2>&1; then echo "packed=true" >> "$GITHUB_OUTPUT"; else echo "packed=false" >> "$GITHUB_OUTPUT"; fi
+      # What is deployed is what was tested. The artifact is only the way
+      # from this job to the next, so it is kept a day and no longer.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.pack.outputs.packed == 'true'
+        with:
+          name: packages
+          path: packages/*.nupkg
+          if-no-files-found: error
+          retention-days: 1

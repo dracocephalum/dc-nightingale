@@ -19,14 +19,16 @@
     The kind of build decides what follows the version, and the build says
     which kind it is; nobody edits a version to make a build of another kind.
 
-      dev      0.1.0-dev      a build on a developer's machine, the default
+      dev      0.1.0-dev      the default: a build that is published nowhere,
+                              on a developer's machine or by the pipeline of
+                              a change request
       ci       0.1.0-ci.42    a pipeline's build of the default branch, with
                               BuildNumber the pipeline's own counter
       release  0.1.0          a release, built by the pipeline a release starts
 
     The counter stands after a dot so that it is compared as a number: ci.9
     comes before ci.10, where ci9 would come after ci10. `dev` sorts after
-    `ci`, so a package built on a machine is preferred there to the
+    `ci`, so a package packed on a machine is preferred there to the
     pipeline's of the same version. The commit hash is appended to the
     informational version by Directory.Build.targets in every kind.
   -->
