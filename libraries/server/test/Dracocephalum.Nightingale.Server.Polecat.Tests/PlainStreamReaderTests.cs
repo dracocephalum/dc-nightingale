@@ -262,6 +262,39 @@ public sealed class PlainStreamReaderTests
         unaged.ShouldNotContain("[timestamp]");
     }
 
+    [Fact]
+    public async Task ReadIdsAsync_ShouldGiveTheIdsAndPositionsOfTheRunAsFarAsTheStreamGoes()
+    {
+        // Arrange: the ids the rows were stored with, by revision.
+        Dictionary<long, Guid> ids;
+        await using (var context = new Seeding(_root))
+        {
+            ids = await context.Set<EventRow>().Where(row => row.TenantId == Tenant && row.StreamId == Stream).ToDictionaryAsync(row => row.Version - 1, row => row.Id, TestContext.Current.CancellationToken);
+        }
+
+        // Act
+        var run = await _sut.ReadIdsAsync(Stream, 2, 3, TestContext.Current.CancellationToken);
+        var pastTheEnd = await _sut.ReadIdsAsync(Stream, 4, 10, TestContext.Current.CancellationToken);
+        var archived = await _sut.ReadIdsAsync("orders-9", 0, 10, TestContext.Current.CancellationToken);
+
+        // Assert: revisions from zero, positions as stored, and the other tenant's event of the same stream left out.
+        run.ShouldBe([new PlainStreamReader.StoredId(ids[2], 2, 3), new PlainStreamReader.StoredId(ids[3], 3, 4), new PlainStreamReader.StoredId(ids[4], 4, 5)]);
+        pastTheEnd.Select(stored => stored.Revision).ShouldBe([4, 5]);
+        archived.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ReadRevisionsAsync_ShouldGiveEachStreamFoundItsLastRevisionAndWhetherItIsArchived()
+    {
+        // Act
+        var found = await _sut.ReadRevisionsAsync([Stream, "orders-9", "orders-404"], TestContext.Current.CancellationToken);
+
+        // Assert: this tenant's rows only, and a stream with no row left out.
+        found.Count.ShouldBe(2);
+        found[Stream].ShouldBe((5, false));
+        found["orders-9"].ShouldBe((0, true));
+    }
+
     private async Task SetMetadataAsync(params string[] bodies)
     {
         await using var context = new Seeding(_root);
