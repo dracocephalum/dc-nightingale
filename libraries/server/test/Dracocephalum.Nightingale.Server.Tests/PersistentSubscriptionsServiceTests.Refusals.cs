@@ -140,8 +140,7 @@ public sealed partial class PersistentSubscriptionsServiceTests
         // Act
         var refusal = await Should.ThrowAsync<RpcException>(async () =>
         {
-            await call.RequestStream.WriteAsync(new PersistentReadRequest { Ack = new Ack() }, TestContext.Current.CancellationToken);
-            await call.RequestStream.CompleteAsync();
+            await WriteLastAsync(call.RequestStream, new PersistentReadRequest { Ack = new Ack() });
             await Next(call, 1);
         });
 
@@ -228,8 +227,7 @@ public sealed partial class PersistentSubscriptionsServiceTests
         // without a refusal and the test fails, where it would otherwise wait for good.
         var refusal = await Should.ThrowAsync<RpcException>(async () =>
         {
-            await call.RequestStream.WriteAsync(malformed, TestContext.Current.CancellationToken);
-            await call.RequestStream.CompleteAsync();
+            await WriteLastAsync(call.RequestStream, malformed);
             await Next(call, 1);
         });
 
@@ -239,4 +237,22 @@ public sealed partial class PersistentSubscriptionsServiceTests
     }
 
     private static string? ReasonOf(RpcException refusal) => refusal.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason;
+
+    /// <summary>
+    /// Writes the last request of a call the server is expected to refuse, and completes the requests.
+    /// A server that has ended the call by then fails the write or the completion too, with a status
+    /// and without the details, so that failure is left for the response to give in full.
+    /// </summary>
+    private static async Task WriteLastAsync<TRequest>(IClientStreamWriter<TRequest> requests, TRequest last)
+    {
+        try
+        {
+            await requests.WriteAsync(last, TestContext.Current.CancellationToken);
+            await requests.CompleteAsync();
+        }
+        catch (RpcException)
+        {
+            // The response says why.
+        }
+    }
 }
