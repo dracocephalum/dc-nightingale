@@ -612,6 +612,25 @@ public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
         }
     }
 
+    [Fact]
+    public async Task Delivery_WhenTheStoreFails_ShouldEndEveryConsumerWithTheCauseAndRefuseTheNext()
+    {
+        // Arrange
+        var cause = new InvalidOperationException("The store is gone.");
+        A.CallTo(() => _store.ReadAsync("orders-1", Direction.Forwards, 0, 500, A<CancellationToken>._)).ThrowsAsync(cause);
+        await using var sut = Group("orders-1", -1, 1, settings => settings with { Start = StreamPosition.Start });
+
+        // Act
+        var ended = await Should.ThrowAsync<InvalidOperationException>(async () => await _consumer!.Outgoing.Reader.Completion.WaitAsync(Wait, TestContext.Current.CancellationToken));
+        var delivery = await Should.ThrowAsync<InvalidOperationException>(async () => await sut.Delivery.WaitAsync(Wait, TestContext.Current.CancellationToken));
+        var late = sut.Join(1, "late");
+
+        // Assert
+        ended.ShouldBeSameAs(cause);
+        delivery.ShouldBeSameAs(cause);
+        late.Outgoing.Reader.Completion.IsFaulted.ShouldBeTrue();
+    }
+
     private static EventRecord Record(string stream, long revision, long position, string? correlationId = null) =>
         new(Guid.NewGuid(), stream, revision, position, "order_placed", Now, Encoding.UTF8.GetBytes("{}"), correlationId is null ? new JsonObject() : new JsonObject { [MetadataKeys.CorrelationId] = correlationId });
 
