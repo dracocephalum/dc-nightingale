@@ -184,9 +184,11 @@ public sealed partial class PersistentSubscriptionsServiceTests
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Options = new PersistentReadOptions { Stream = "orders-1", Group = "billing", BufferSize = 5 } }, TestContext.Current.CancellationToken);
         var messages = await Next(call, 2);
 
+        var saved = Expect(A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<string>._, A<CancellationToken>._)), Task.FromResult(true));
+
         // Act
         await call.RequestStream.WriteAsync(new PersistentReadRequest { Nack = new Nack { Action = action, Reason = "poison", Ids = { messages[1].Event.Event.Id } } }, TestContext.Current.CancellationToken);
-        await Until(() => A.CallTo(() => _groups.SaveCheckpointAsync(A<Guid>._, 0, A<string>._, A<CancellationToken>._)).MustHaveHappened());
+        await saved;
         await call.RequestStream.CompleteAsync();
 
         // Assert: parked, the event is kept with the reason; skipped, it is kept nowhere.
