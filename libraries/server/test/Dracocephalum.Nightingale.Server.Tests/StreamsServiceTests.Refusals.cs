@@ -179,11 +179,10 @@ public sealed partial class StreamsServiceTests
         using var call = client.Append(cancellationToken: TestContext.Current.CancellationToken);
         await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = "orders-1", ExpectedRevision = -2 } }, TestContext.Current.CancellationToken);
 
-        // Act: the server refuses at the second options, so completing the request can be what fails.
+        // Act
         var refusal = await Should.ThrowAsync<RpcException>(async () =>
         {
-            await call.RequestStream.WriteAsync(new AppendRequest { Options = new AppendOptions { Stream = "orders-2", ExpectedRevision = -2 } }, TestContext.Current.CancellationToken);
-            await call.RequestStream.CompleteAsync();
+            await WriteLastAsync(call.RequestStream, new AppendRequest { Options = new AppendOptions { Stream = "orders-2", ExpectedRevision = -2 } });
             await call.ResponseAsync;
         });
 
@@ -345,4 +344,22 @@ public sealed partial class StreamsServiceTests
     }
 
     private static string? ReasonOf(RpcException refusal) => refusal.GetRpcStatus()?.GetDetail<ErrorInfo>()?.Reason;
+
+    /// <summary>
+    /// Writes the last request of a call the server is expected to refuse, and completes the requests.
+    /// A server that has ended the call by then fails the write or the completion too, with a status
+    /// and without the details, so that failure is left for the response to give in full.
+    /// </summary>
+    private static async Task WriteLastAsync<TRequest>(IClientStreamWriter<TRequest> requests, TRequest last)
+    {
+        try
+        {
+            await requests.WriteAsync(last, TestContext.Current.CancellationToken);
+            await requests.CompleteAsync();
+        }
+        catch (RpcException)
+        {
+            // The response says why.
+        }
+    }
 }
