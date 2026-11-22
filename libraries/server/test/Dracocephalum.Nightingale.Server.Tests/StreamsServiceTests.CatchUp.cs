@@ -301,13 +301,13 @@ public sealed partial class StreamsServiceTests
 
     /// <summary>
     /// Reads a subscription through the next message saying it is caught up. A catch-up and a
-    /// batch of live events both end with that, so a test reading this way fails on what it got,
-    /// where one waiting for a number of messages waits for good when fewer come.
+    /// batch of live events both end with that, so a test reading this way fails at once on what
+    /// it got when fewer messages come, where one waiting for a number of them waits out its patience.
     /// </summary>
     private static async Task<List<ReadResponse>> ReadThroughCaughtUpAsync(AsyncServerStreamingCall<ReadResponse> call)
     {
         var messages = new List<ReadResponse>();
-        while (await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken))
+        while (await call.ResponseStream.MoveNextOrFailAsync(messages))
         {
             messages.Add(call.ResponseStream.Current);
             if (call.ResponseStream.Current.ContentCase == ReadResponse.ContentOneofCase.CaughtUp)
