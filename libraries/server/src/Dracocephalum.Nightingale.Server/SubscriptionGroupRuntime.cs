@@ -562,7 +562,12 @@ internal sealed class SubscriptionGroupRuntime : IAsyncDisposable
     {
         try
         {
+            // The dispatcher ends without a failure when the live buffer is completed, which a
+            // failing reader does on its way out, and the dispatcher can be seen to have ended
+            // before the reader is seen to have failed. The reader's own end says why, so it
+            // is waited for as well.
             await Task.WhenAny(_reader, _dispatcher).Unwrap().ConfigureAwait(false);
+            await _reader.ConfigureAwait(false);
         }
         catch (Exception cause) when (!_stopping.IsCancellationRequested)
         {
