@@ -14,7 +14,7 @@ namespace Dracocephalum.Nightingale.Server.Tests;
 /// then how several consumers share the events under each strategy, and what a consumer's
 /// leaving does to what it held.
 /// </summary>
-public sealed class SubscriptionGroupRuntimeTests : IAsyncDisposable
+public sealed partial class SubscriptionGroupRuntimeTests : IAsyncDisposable
 {
     private const string Me = "this-instance";
     private static readonly DateTimeOffset Now = new(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
