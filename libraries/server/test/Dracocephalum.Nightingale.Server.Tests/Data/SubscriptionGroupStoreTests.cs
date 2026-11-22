@@ -12,7 +12,7 @@ namespace Dracocephalum.Nightingale.Server.Tests.Data;
 /// tokens settle them. What the in-memory provider cannot stand in for, a real duplicate key
 /// and a real concurrent write, the integration project covers on SQL Server.
 /// </summary>
-public sealed class SubscriptionGroupStoreTests
+public sealed partial class SubscriptionGroupStoreTests
 {
     private const string Owner = "one";
     private static readonly DateTimeOffset Now = new(2026, 9, 22, 8, 0, 0, TimeSpan.Zero);
