@@ -18,7 +18,8 @@ undecided adds it here rather than mentioning it once in a conversation.
 - **Cross-component references are project references, not packages.**
   `agentics/rules/layout.md`, *Components reference each other as packages*,
   allows this as a recorded workaround while no package feed exists; each
-  such reference carries the standard comment in its project file: the
+  such reference carries the comment `agentics/rules/layout/dotnet.md`,
+  *References between components*, gives, in its project file: the
   server's two projects and the client reference `core`. Close by: publish
   `core` to a feed and replace each of those with a `PackageReference` at a
   version. The sample program references the client and the server's

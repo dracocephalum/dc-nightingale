@@ -534,13 +534,19 @@ per-tenant sequences of a store partitioned by tenant, and a second statement
 for the second store. Taken only on evidence: an append's round trip
 measured to matter, or appends larger than the limit asked for.
 
-## Server-computed lag counts
+## A count of events behind on `$all`
 
-For consumers that alert on an absolute number of events behind rather than a
-growing lag: a range count over the category or type index from the
-subscriber's position to the head, reported on the fell-behind message or by a
-small extra call. Under ordinal numbering the count is already a subtraction,
-holes included; this entry is for global numbering.
+A subscription that falls behind is told by how many events, for consumers
+that alert on an absolute number rather than a growing lag (`VARIANCES.md`,
+*Subscriptions report the head and a count when behind*). It is a count on a
+plain stream, by its revisions; on a virtual stream read by position, where
+the server counts the range in the category or type index; and by ordinal,
+where it is a subtraction, holes included. On `$all` it is the difference of
+positions, which counts every position between the subscriber and the head:
+those no event took, and on a sequence tenants share, the other tenants'.
+What is left is a count there, of the tenant's own events in the range, which
+wants the index *One tenant's `$all` by index* above describes before it is
+cheap.
 
 ## Resubscription after a dropped connection
 
