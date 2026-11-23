@@ -137,7 +137,11 @@ a position.
 
 **Nightingale:** the subscription confirmation carries the head at that
 moment, caught-up carries the head, and fell-behind carries the head and the
-number of events between the client and it, computed by the server.
+number of events between the client and it, computed by the server. On `$all`
+that number is the difference of positions, which is the count or more than
+it: a position no event took, and another tenant's event on a sequence
+tenants share, are in it (`PENDING.md`, *A count of events behind on
+`$all`*).
 
 **Why:** positions of virtual streams are sparse, so a difference of positions
 is not a count; consumers that alert on a count need the server to supply it.
