@@ -23,13 +23,25 @@
   generated copy by every sync, from this file and from the repository's own
   rule indexes: nothing inside it may carry a placeholder, and nothing outside
   it is the toolkit's to change afterwards.
+
+  A line that reads "toolchain: <name>" between four equals signs stands for
+  the part of that name in agentics/templates/<toolchain>/root-AGENTS.md, of
+  each toolchain the repository lists. The command in the toolkit's
+  repo/documents.md puts them in and takes the lines out; none is left in a
+  generated file.
+
+  A row of that table is one toolchain's when it links into a path the
+  toolchain's manifest names (agentics/templates/<toolchain>/manifest), and a
+  sync leaves it out of a repository that does not list the toolchain. So a
+  row that every repository is to have links into no toolchain's rules; it
+  says "the toolchain's file" and lets the rule it links name it.
 -->
 
 # {{REPO_NAME}}
 
 {{ONE_LINE_PURPOSE}}
 
-Primary framework: .NET. Namespace prefix: `{{PREFIX}}`.
+<!-- ==== toolchain: intro ==== -->
 
 ## Repository layout
 
@@ -37,49 +49,39 @@ Primary framework: .NET. Namespace prefix: `{{PREFIX}}`.
 
 | Path | Purpose |
 |---|---|
-| `src/` | production code |
-| `test/` | test projects, one per project under test |
-| `agentics/` | the toolkit's — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/`; replaced whole by a sync, never edited in place |
-| `docs/rules/` | this repository's own rules, once it has any, and `AGENTS.md` there is their index — started from `agentics/templates/rules-AGENTS.md`; the sync copies its rows into the table below |
-| `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync, a shim of the same name included |
-| `{{SOLUTION_NAME}}.slnx` | the solution — this repository is a single component |
+| `agentics/` | the toolkit's `rules/` and `templates/`; replaced whole by a sync, never edited in place |
+| `docs/rules/` | this repository's own rules, once it has any, with their index, `AGENTS.md` |
+| `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync |
+<!-- ==== toolchain: layout-standalone-rows ==== -->
 
 <!-- ==== MONOREPO variant - delete if this is standalone ==== -->
 
-Each component is a kebab-case folder holding its own `.slnx` — named after its
-main project — plus `src/`, `test/` and `README.md`. There is deliberately **no
-solution at the repository root**, and no component list here: **each category's
-`README.md` is the map** of what it contains, kept current by the new-project
-procedure. Read the category map before assuming a component does or does not
-exist.
+Each component is a kebab-case folder under its category, with a `README.md`
+and, inside, what its toolchain lays a component out as. Nothing at the
+repository root builds them all, and there is no component list here: **each
+category's `README.md` is the map** of what it contains, kept current by the
+new-project procedure. Read the category map before assuming a component does
+or does not exist.
+
+<!-- ==== toolchain: layout-monorepo ==== -->
 
 | Path | Purpose |
 |---|---|
-| `services/` | deployable C# services |
-| `libraries/` | packages published to NuGet |
+| `services/` | deployable services |
+| `libraries/` | packages published for others to consume |
 | `jobs/` | scheduled executables (Kubernetes CronJobs and similar) |
 | `tools/` | internal tooling, never shipped to production |
 | `examples/` | runnable samples of this repository's own libraries, never shipped |
 | `infrastructure/` | provisioning (Terraform and similar) |
 | `ui/` | front-end applications |
-| `agentics/` | the toolkit's — `rules/` this repository is held to, see *Agent guidelines* below, and `templates/`; replaced whole by a sync, never edited in place |
-| `docs/rules/` | this repository's own rules, once it has any, and `AGENTS.md` there is their index — started from `agentics/templates/rules-AGENTS.md`; the sync copies its rows into the table below |
-| `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync, a shim of the same name included |
+| `agentics/` | the toolkit's `rules/` and `templates/`; replaced whole by a sync, never edited in place |
+| `docs/rules/` | this repository's own rules, once it has any, with their index, `AGENTS.md` |
+| `.claude/skills/` | Claude Code shims; the toolkit's are replaced whole by a sync |
 | `build/` | CI/CD pipeline definitions |
 
 <!-- ==== end variants ==== -->
 
-Build configuration lives **once, at the repository root** — `Directory.Build.props`,
-`Directory.Build.targets`, `Directory.Packages.props`, `Tests.props`,
-`StyleCop.props`, `stylecop.ruleset`, `stylecop.json`, `.editorconfig`. Every
-project inherits it. The targets file stamps every assembly's informational
-version with the short commit hash (`1.2.3+abcdef12`, `-dirty` when the tree
-is not clean); it never fails the build.
-
-Never add a `Directory.Build.props`, `Directory.Build.targets`, or
-`Directory.Packages.props` inside a subfolder — a nested copy silently severs
-that subtree from everything above, with a green build and no warning.
-[`agentics/rules/layout.md`](agentics/rules/layout.md), *Config lives at the root only*.
+<!-- ==== toolchain: layout ==== -->
 
 ## Agent guidelines
 
@@ -92,46 +94,43 @@ makes it selectable from a plain-language request.
 | When you are | Read |
 |---|---|
 | Writing, reviewing or refactoring C# in this repository | [`agentics/rules/coding/csharp/csharp-coding-rules.md`](agentics/rules/coding/csharp/csharp-coding-rules.md) |
-| Shaping a boundary — where a type lives, what an assembly may reference, wrapping a generated or third-party API, adding a transport or a backend | [`agentics/rules/coding/architecture.md`](agentics/rules/coding/architecture.md) — language-neutral; the C# rules carry the spellings |
+| Shaping a boundary — where a type lives, what an assembly may reference, wrapping a generated or third-party API, adding a transport or a backend | [`agentics/rules/coding/architecture.md`](agentics/rules/coding/architecture.md) — language-neutral |
 | Writing a comment or a document, or unsure whether something belongs in the code or in a document | [`agentics/rules/coding/where-facts-live.md`](agentics/rules/coding/where-facts-live.md) — one home per fact; language-neutral |
 | Touching an entity, a `DbContext`, or a migration | [`agentics/rules/coding/csharp/csharp-ef-core-rules.md`](agentics/rules/coding/csharp/csharp-ef-core-rules.md) |
 | Adding a project, component, or test project | [`agentics/rules/coding/csharp/csharp-new-project.md`](agentics/rules/coding/csharp/csharp-new-project.md) |
-| Asking where something goes, how it should be named, or what the other layout looks like | [`agentics/rules/layout.md`](agentics/rules/layout.md) — both modes, so this repository can describe a shape it does not currently have |
+| Asking where something goes, how it should be named, or what the other layout looks like | [`agentics/rules/layout.md`](agentics/rules/layout.md) — both modes; then the file it names for the toolchain |
+| Asking how a solution, a project, a namespace or a test project is named, where build configuration lives, or how the test stack is kept current | [`agentics/rules/layout/dotnet.md`](agentics/rules/layout/dotnet.md) — the .NET half of the layout |
+| Starting to build with a toolchain this repository does not list yet | [`agentics/rules/layout.md`](agentics/rules/layout.md), *Adopting a toolchain* |
 | Checking a change for secrets, personal data, or local paths — or anything before a first push | [`agentics/rules/security-reminders.md`](agentics/rules/security-reminders.md) |
 | Adding, upgrading, or replacing a package (any ecosystem) | [`agentics/rules/dependencies.md`](agentics/rules/dependencies.md) |
 | Creating or finding a ticket, or asking which ticket a change is for | [`agentics/rules/change-tracking/change-tracking.md`](agentics/rules/change-tracking/change-tracking.md), then the tracker file it names |
 | Starting work on a ticket, naming a branch, publishing the repository, committing, or opening / updating / merging a pull request | [`agentics/rules/source-control/source-control.md`](agentics/rules/source-control/source-control.md), then the host file it names |
-| Giving the repository a version, adding or changing a pipeline, publishing a package, changing a version number, or referring to a package built here by a `-ci.` or `-dev` version | [`agentics/rules/delivery/delivery.md`](agentics/rules/delivery/delivery.md), then the host file it names — opt-in: a repository has no version file and no pipeline until it adopts them |
-| Reviewing a pull request, a diff, or a set of changes | [`agentics/rules/coding/code-review.md`](agentics/rules/coding/code-review.md) — then the C# or markdown checklist it names |
+| Giving the repository a version, adding or changing a pipeline, publishing a package, changing a version number, or referring to a package built here by a `-ci.` or `-dev` version | [`agentics/rules/delivery/delivery.md`](agentics/rules/delivery/delivery.md), then the toolchain's file and the host file it names — opt-in |
+| Reviewing a pull request, a diff, or a set of changes | [`agentics/rules/coding/code-review.md`](agentics/rules/coding/code-review.md) — then the checklist it names for the language of the change |
 | Scrubbing, sweeping or auditing this repository for drift or inconsistency — or after any move, rename or restructure | [`agentics/rules/scrub.md`](agentics/rules/scrub.md) |
 | Measuring what this repository's documents cost an agent to read, or compacting them | [`agentics/rules/optimize.md`](agentics/rules/optimize.md) — measures unless asked for more |
-| Bringing this repository up to a newer version of the toolkit it was initialized with | the toolkit's own `repo/upgrade.md`, operation 2 — its script replaces `agentics/` and the toolkit's shims whole and regenerates this block, so a checkout of dc-agentics must be present; `.agentics.yaml` records which commit this repository came from |
-| Finding what exists — which component does what, where something lives | `README.md` here; in a monorepo, each category's `README.md` is the map of its components, and each component's `README.md` says how to run it |
-| Understanding how the pieces fit, or why the code is shaped the way it is | `DESIGN.md` at the root — the seams and the reasons; type comments say what, it says why. Written the day a reader could not infer it; see *Root documents* in [`agentics/rules/layout.md`](agentics/rules/layout.md) |
+| Bringing this repository up to a newer version of the toolkit it was initialized with | the toolkit's own `repo/upgrade.md`, operation 2, run from a checkout of dc-agentics; `.agentics.yaml` records the commit this repository came from |
+| Finding what exists — which component does what, where something lives | `README.md` here; in a monorepo each category's `README.md` maps its components, and each component's says how to run it |
+| Understanding how the pieces fit, or why the code is shaped the way it is | `DESIGN.md` at the root, once it is written — the seams and the reasons; *Root documents* in [`agentics/rules/layout.md`](agentics/rules/layout.md) |
 | Starting any source-control action, or asked what this repository's settings and defaults are | [`.agentics.yaml`](.agentics.yaml) — the mode the agent works in (`auto`, `local`, `manual`) and every choice made at initialization |
 | Leaving something unfinished, blocked, or undecided — or asked what is still open | [`TODO.md`](TODO.md) — add it there; a remark in a conversation is lost |
 
 The documents above are the substance, for every tool. In Claude Code some
-are also invocable through a shim in `.claude/skills/` -
-`/new [project|component] <name>`, `/review [PR# | branch | paths | comments PR#]`,
-`/change-tracking new|find`, `/scrub [paths...]`, `/optimize`, `/upgrade`,
-`/source-control start|commit|pr|setup`, or just ask in plain language - each
-following the same document. `/review` is the rules pass; the built-in
-`/code-review` is the bug-hunting pass, and the two complement each other.
-`/scrub` is neither: it looks for drift and inconsistency, and reports rather
-than fixing. `/optimize` is about what the documents cost to read, and only
-measures unless asked for more.
+are also invocable through a shim in `.claude/skills/` — `/new`, `/review`,
+`/change-tracking`, `/scrub`, `/optimize`, `/upgrade`, `/source-control` — or
+just ask in plain language; each follows the same document. `/review` is the
+rules pass and the built-in `/code-review` the bug-hunting pass, and the two
+complement each other. `/scrub` is neither: it looks for drift and
+inconsistency, and reports rather than fixing.
 
-This block is generated: the toolkit's rows, then the rows of every index the
-`rules.local` folders in `.agentics.yaml` hold (`docs/rules/AGENTS.md`), and a
-sync rewrites it. A rule of this repository's own is a file under `docs/rules/`
-and a row in that index, never a row typed here — one typed here is gone at
-the next sync. Everything outside the block is this repository's and no sync
-touches it: a row that only points at a document of this repository's own,
-with no rule behind it, is a second table there, right after the block. A
-document nobody is pointed at will not be read. A local rule
-that disagrees with a toolkit rule has no referee: replace by excluding, amend
-by saying so in the document — *Precedence* in
+This block is generated, and a sync rewrites it: the toolkit's rows, then the
+rows of every index the `rules.local` folders in `.agentics.yaml` hold
+(`docs/rules/AGENTS.md`). A rule of this repository's own is a file under
+`docs/rules/` and a row in that index, never a row typed here. Everything
+outside the block is this repository's: a row that only points at one of its
+own documents, with no rule behind it, goes in a second table right after
+the block. A local rule that disagrees with a toolkit rule has no referee:
+replace by excluding, amend by saying so in the document — *Precedence* in
 [`agentics/rules/layout.md`](agentics/rules/layout.md).
 
 <!-- /agentics:guidelines -->
@@ -141,12 +140,9 @@ by saying so in the document — *Precedence* in
 | Thing | Convention | Example |
 |---|---|---|
 | Directories | lowercase, hyphenated | `proxy-gateway` |
-| Projects, assemblies, namespaces | PascalCase, prefixed | `{{PREFIX}}.ProxyGateway` |
-| Test projects | `test/<Project>.Tests/` mirrors `src/<Project>/` | `{{PREFIX}}.ProxyGateway.Tests` |
+<!-- ==== toolchain: conventions-rows ==== -->
 
-A trailing `.Core` names the assembly, not the namespace — `{{PREFIX}}.Core` has
-namespace `{{PREFIX}}` — applied by `Directory.Build.props`; the full rule and
-its edge cases are in [`agentics/rules/layout.md`](agentics/rules/layout.md).
+<!-- ==== toolchain: conventions ==== -->
 
 ## Code intelligence — use what is connected, fall back when it is not
 
@@ -163,16 +159,8 @@ is required, and neither is recorded in `.agentics.yaml`.
   then: from a folder of several repositories it loads the largest solution
   of any of them.
 
-  **Several solutions:** the C# server holds one — the one listing the most
-  projects — and answers for that one only, without saying so. A local
-  solution of every project makes it hold them all. Write it before the first
-  question of a session and again after adding a project; it is ignored by
-  git, never built, and safe to rewrite at any time:
+  <!-- ==== toolchain: code-intelligence-lsp ==== -->
 
-      mkdir -p .lsp && { echo '<Solution>'; git ls-files -co --exclude-standard '*.csproj' | sed 's|.*|  <Project Path="../&" />|'; echo '</Solution>'; } > .lsp/All.slnx
-
-  A type the workspace symbol search does not find is in a project the server
-  does not hold; references are then confirmed with Serena or a text search.
 - **[Serena](https://github.com/oraios/serena)**, for which this repository
   carries a project file (`.serena/project.yml`). Reads the same and also
   edits by symbol. **Connected:** call `initial_instructions` once per coding
@@ -185,44 +173,12 @@ is required, and neither is recorded in `.agentics.yaml`.
 - **Neither connected:** use the ordinary tools; do not stop, install, or ask
   about it mid-task.
 
-Both read the solution's projects — `dotnet restore` first if references look
-incomplete.
+<!-- ==== toolchain: code-intelligence ==== -->
 
 ## Building and testing
 
-    dotnet build <solution> --nologo -v:q
-    dotnet test  <solution>
+<!-- ==== toolchain: building ==== -->
 
-**If the build fails only on spacing rules** — `SA1009`, `SA1011`, `SA1111`,
-`SA1028`, `SA1518` — do not fix them by hand:
-
-    dotnet format analyzers <solution>
-
-corrects every one at once; rebuild. Run the same command once before a
-pull request is opened, and again before its last push if C# changed in
-between. It is a repair and a step of the pull request, not of every commit
-or every build: the build fails on the same rules, so a commit that builds
-is already clean of them, and the pass is slow. It was measured at a minute
-on a solution that builds in eight seconds, and `--include` does not make
-it cheaper.
-
-**Keep build output out of context.** Build with `--nologo -v:q` and grep for
-`error|warning`. Test output is already terse, so grep it for
-`total:|failed:|error` and report those lines, never a full log. **Never pass
-`--nologo` to `dotnet test`**: the platform's test host rejects it, and not
-with a message about the flag — it reports `Zero tests ran` and exit code 5,
-which reads as a flake and is not one.
-
-**Warnings are errors.** StyleCop rules set to `Warning` fail the build; rules
-at `Info` never surface at build time and appear only in the editor.
-
-A `*.Tests` project inherits the whole test stack from `Tests.props`, so its
-`.csproj` holds only `TargetFramework` and a `ProjectReference` —
-[`agentics/rules/coding/csharp/csharp-unit-tests-rules.md`](agentics/rules/coding/csharp/csharp-unit-tests-rules.md).
-It holds unit tests only. A `*.Tests.Integration` project holds tests that
-need a live dependency; a plain `dotnet test` builds it and runs none of it —
-pass `-p:RunIntegrationTests=true` to run them.
-
-Do not report work as complete until `dotnet build` and `dotnet test` both pass,
-with the test count you expect: zero tests and a green exit is a misconfigured
+Do not report work as complete until the build and the tests both pass, with
+the test count you expect: zero tests and a green exit is a misconfigured
 runner, not success.

@@ -3,18 +3,20 @@
 Applies when giving a repository a version of its own, adding or changing a
 pipeline, publishing a package, changing a version number, or referring to a
 package this organization builds. This file is the rules; the mechanics of
-one host are in the file the [Hosts](#hosts) section names.
+one toolchain and of one host are in the files the
+[Toolchains](#toolchains) and [Hosts](#hosts) sections name.
 
-A repository starts with none of this. It builds as the SDK's default
-`1.0.0`, with the commit hash the root targets file appends, and nothing
-builds it but its developers. That is a complete state, not an unfinished
-one: what follows is adopted when there is first something to publish, by
-the steps under [Adopting it](#adopting-it), and not before.
+A repository starts with none of this. It builds with the version its
+toolchain gives a build that was told none, and nothing builds it but its
+developers. That is a complete state, not an unfinished one: what follows is
+adopted when there is first something to publish, by the steps under
+[Adopting it](#adopting-it), and not before.
 
 ## The version is in the code
 
-`Version.props` at the repository root holds one number, and every package
-built beneath the file takes it:
+A file at the repository root holds one number, and every package built
+beneath the file takes it. Which file it is, is the toolchain's to say, and
+[Toolchains](#toolchains) names where. The number has three parts:
 
 | Part | Raised for |
 |---|---|
@@ -30,7 +32,7 @@ the release they came after.
 **Raising it is an ordinary change**, reviewed like any other, and the only
 edit a version ever gets. Nothing writes to the file during a build.
 
-**A component versioned apart carries a `Version.props` of its own**, in its
+**A component versioned apart carries a version file of its own**, in its
 folder, found before the root's. Packages of one component always share a
 number, which is what *build and version together* means in
 [`../layout.md`](../layout.md); a package that needs its own number is a
@@ -38,14 +40,14 @@ component of its own. Start with the root file alone.
 
 ## The build says what kind it is
 
-What follows the number is written nowhere. `Packaging.props` derives it
-from two properties the build is given:
+What follows the number is written nowhere. The build is told its kind and,
+for `ci`, the pipeline's counter, and derives the rest:
 
-| `BuildKind` | Version | Built by | Goes |
+| Kind | Version | Built by | Goes |
 |---|---|---|---|
 | `dev`, the default | `1.2.0-dev` | a developer's machine, and the pipeline of a change request | nowhere |
-| `ci` | `1.2.0-ci.42` | the pipeline of the default branch; `BuildNumber` is the pipeline's own counter | to the host's registry |
-| `release` | `1.2.0` | the pipeline a release starts, and nothing else | to nuget.org |
+| `ci` | `1.2.0-ci.42` | the pipeline of the default branch, numbered by the pipeline's own counter | to the host's registry |
+| `release` | `1.2.0` | the pipeline a release starts, and nothing else | to the public registry |
 
 - **`dev` is the kind that is safe.** Whatever a dev build does, it reaches
   no registry and nobody else's machine. A machine and a change request's
@@ -56,22 +58,21 @@ from two properties the build is given:
   one, so a version cannot claim to be what it is not.
 - The counter stands after a dot, where it is compared as a number: `ci.9`
   comes before `ci.10`, and `ci9` would come after `ci10`.
-- Never four numbers. `1.2.0.42` is a stable version to NuGet, and outranks
-  the `1.2.0` it was built towards.
 - `dev` sorts after `ci`, so a package packed on a machine is preferred there
   to the pipeline's of the same number.
-- The commit hash is appended to the informational version in every kind, as
-  before.
+
+How a toolchain's build is told its kind, and what its registry asks of a
+version besides, is in the toolchain's file.
 
 ## Two registries, one kind each
 
 | Registry | Takes | Kept |
 |---|---|---|
 | the host's own, beside the repository | `ci` builds | the newest few; the pipeline removes the rest |
-| nuget.org | releases | for good |
+| the toolchain's public registry | releases | for good |
 
-A `ci` or `dev` package never goes to nuget.org: a version there cannot be
-removed, and whoever finds it should be able to take it for finished. A
+A `ci` or `dev` package never goes to the public registry: a version there
+cannot be removed, and whoever finds it should be able to take it for finished. A
 `dev` package goes to neither. A release is not written yet in this
 toolkit; until it is, a repository publishes `ci` builds only.
 
@@ -90,7 +91,7 @@ far its work can reach:
 |---|---|---|---|
 | `dev` | a change request | builds and tests | nothing |
 | `ci` | a push to the default branch | builds, tests, packs, deploys | the host's registry |
-| `release` | a release | builds, tests, packs, deploys | nuget.org |
+| `release` | a release | builds, tests, packs, deploys | the public registry |
 
 - **They share their steps.** Restore from the lock files, build, run the
   unit tests and, for the two that publish, pack: written once, and each
@@ -189,44 +190,29 @@ which needs none.
 
 Then, each step leaving the repository building:
 
-1. Copy `agentics/templates/Version.props` to the repository root and set
-   the number: `0.1.0` for what has never been released.
-2. Copy `agentics/templates/Packaging.props` to the root. Replace
-   `{{PACKAGE_AUTHORS}}` with the name packages are published under, and
-   `{{LICENCE}}` with `repository.licence` from `.agentics.yaml`; where that
-   is `none`, delete the line.
-3. In `Directory.Build.props`, after the import of `StyleCop.props`, add:
-
-       <Import Project="$(MSBuildThisFileDirectory)Packaging.props" />
-
-4. Give every project that is packed a `<Description>` in its `.csproj`.
-5. Check the three kinds, from the component's folder:
-
-       dotnet pack <solution> -o <a folder outside the repository>
-       dotnet pack <solution> -o <the folder> -p:BuildKind=ci -p:BuildNumber=1
-       dotnet pack <solution> -o <the folder> -p:BuildKind=release
-
-   The folder then holds each package as `-dev`, `-ci.1` and with no label.
-6. Add the pipelines, by the host file, as a change request of their own.
+1. Give the repository its version and its packaging, by the toolchain's
+   file: the number set, the build able to make all three kinds, and each
+   kind checked.
+2. Add the pipelines, by the host file, as a change request of their own.
    They are never part of a repository's first push, which would deploy
    before anyone had looked: a repository that is being initialized takes
    this step once it is on its host, and stands until then as one that is
    versioned and has no pipeline.
-7. Say in `DESIGN.md` that the repository is versioned and where its packages
-   go, and add `Packaging.props` and `Version.props` to the list of root
-   build files in `AGENTS.md`.
-8. Record it in `.agentics.yaml`, under `delivery:` — `versioning: true`,
+3. Say in `DESIGN.md` that the repository is versioned and where its packages
+   go, and add the files step 1 put at the root to the list of root build
+   files in `AGENTS.md`.
+4. Record it in `.agentics.yaml`, under `delivery:` — `versioning: true`,
    the `pipeline`, and the variable's name as confirmed — and remove the
    entry initialization left in `TODO.md`. Remind the user of what is theirs
    to do and no agent can: the host file lists it.
 
-Steps 1 to 5, with 7 and 8, stand without the pipeline: a repository can be
+Step 1, with 3 and 4, stands without the pipeline: a repository can be
 versioned and have none. The `TODO.md` entry then stays, reworded to the
 pipeline alone.
 
-**The `dev` pipeline alone** is step 6 and step 8 and nothing else: the
-change request of step 6 adds `build.yml` and `dev.yml` and leaves `ci.yml`
-where it is, and step 8 records the `pipeline` with `versioning: false`.
+**The `dev` pipeline alone** is step 2 and step 4 and nothing else: the
+change request of step 2 adds `build.yml` and `dev.yml` and leaves `ci.yml`
+where it is, and step 4 records the `pipeline` with `versioning: false`.
 The `TODO.md` entry stays, reworded to the version and the pipeline that
 publishes. A repository that later publishes takes the other steps then,
 and adds `ci.yml` beside the two it has.
@@ -239,6 +225,17 @@ templates moved. After a sync, and before it is committed, look:
 
 Where one of them is listed, compare it with the copy and take what
 applies.
+
+## Toolchains
+
+| Toolchain | File |
+|---|---|
+| `dotnet` | [`dotnet.md`](dotnet.md) — `Version.props` and `Packaging.props`, the build's two properties, what NuGet asks of a version, and the first step of adopting |
+
+Only .NET today. Another toolchain gets a sibling file and a row; what it
+cannot do as this file says — a version that is a tag and not a file, a
+toolchain with no registry — is said there, and this file is then reworded
+to what both hold to.
 
 ## Hosts
 

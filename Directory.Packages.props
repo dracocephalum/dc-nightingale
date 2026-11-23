@@ -64,7 +64,7 @@
 
     These are a KNOWN-GOOD FLOOR, not a ceiling. At repository initialization,
     try to move the whole set forward - see "Keeping the test stack current" in
-    agentics/rules/layout.md. Update the marker above when you do.
+    agentics/rules/layout/dotnet.md. Update the marker above when you do.
 
     Known couplings - these move together or not at all:
       xunit.v3 4.x        <-> Microsoft.Testing.Platform

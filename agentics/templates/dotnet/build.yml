@@ -3,7 +3,7 @@
 # ci.yml call it, each saying what kind of build it wants, so that the
 # three cannot come to build differently.
 #
-# Copied from agentics/templates/build.yml and used as it is: it finds the
+# Copied from agentics/templates/dotnet/build.yml and used as it is: it finds the
 # solutions itself. agentics/rules/delivery/github.md has the reasons.
 name: Build
 

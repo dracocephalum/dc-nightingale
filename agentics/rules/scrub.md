@@ -23,6 +23,10 @@ a file to rewrite — and a check that silently edits is a check nobody trusts.
     | 1 | Markdown lint | pass | 0 issues, 41 files linted |
     | 4 | Line endings | **fail** | AGENTS.md: 12 CRLF lines, 160 LF |
 
+Most checks are any repository's. A check, or a part of one, that is one
+toolchain's says so where it stands, and is skipped in a repository that
+holds no code of that toolchain.
+
 State `pass`, `fail`, or `skipped` with the reason, and for every failure what
 would close it. Apply fixes only when asked, and then as a separate, reviewable
 change.
@@ -97,7 +101,7 @@ paranoia or a false alarm:
 So the finding is real in the working tree you are about to commit from, and
 real for good in an exempt file.
 
-**`dotnet format` is the likeliest source, not a stray `sed -i`.** When it
+**For .NET: `dotnet format` is the likeliest source, not a stray `sed -i`.** When it
 inserts a line — the blank separator between using groups, say — it writes
 that line with the OS-native ending, because nothing sets `end_of_line` in
 `.editorconfig`. Measured: a pure-LF file at 0 CR and 20 LF came back from
@@ -144,13 +148,16 @@ silently, because nothing enforces it:
 |---|---|
 | `licence` | the `LICENSE` file — present, and the same licence |
 | `copyright-holder` | the holder named in `LICENSE` or `NOTICE` |
-| `layout` | the actual tree: `standalone` has one solution at the root, `monorepo` has category folders and none |
+| `toolchains` | the actual tree: every toolchain listed has code here, and no code is of one that is not. `dotnet` is known by a `.csproj`, `go` by a `go.mod`, and the folder that holds one says which its component is. A file that still says `framework` is from before the list; the next sync renames the key |
+| `layout` | the actual tree: `standalone` has its one component at the root, for .NET a solution there; `monorepo` has category folders and no component at the root |
 | `delivery.pipeline` | the pipeline files git tracks: `none` has none, a host's name has that host's |
 
 ### 7. `AGENTS.md` index is complete in both directions
 
 Every document under `agentics/rules/` is **reachable** from the table, and every
-row's link resolves. A document nobody can arrive at will not be read, and a row
+row's link resolves. The documents of a toolchain the repository does not
+list are the exception: they are shipped and have no row, and its manifest,
+`agentics/templates/<toolchain>/manifest`, names them. A document nobody can arrive at will not be read, and a row
 pointing at nothing teaches an agent to distrust the table.
 
     find agentics/rules -name '*.md' | sort
@@ -178,7 +185,8 @@ does not exist is always a defect.
 
 ### 8. Baseline drift
 
-Three files were forked from `dotnet new` templates and carry a marker naming
+For .NET, and for a machine that has its SDK: skipped, saying which,
+without either. Three files were forked from `dotnet new` templates and carry a marker naming
 the SDK they were captured from and the SHA-256 of the pristine original:
 `.editorconfig`, `.gitignore`, `.gitattributes`.
 
@@ -286,6 +294,11 @@ last run.
       done
     fi
 
+The names the script takes for what a build reads, in its long `grep -E`
+line, are .NET's: sources, projects, solutions, the build files and the
+lock files. Another toolchain's are added to that line when the repository
+holds its code.
+
 It prints nothing when the lists stand, but for the last line, which it
 prints for whatever is left off the publishing list on purpose. What it
 prints is one of four:
@@ -334,7 +347,9 @@ again, so this is looked at while there is still nothing to regret.
     gh api --paginate "$scope/packages?package_type=nuget" \
       --jq ".[] | select(.repository.full_name == \"$repo\") | \"\(.name) \(.visibility)\""
 
-Every line is to end in `private`. A line that ends otherwise is a
+`nuget` is the host's name for .NET's packages; a toolchain that publishes
+no package to the host has nothing here to list. Every line is to end in
+`private`. A line that ends otherwise is a
 finding, and never one to fix: it is the user's to say whether the
 package was meant to be seen. A package the list has and no project of
 the repository packs any more is a second finding, a name left behind by
@@ -345,3 +360,36 @@ so that is not checked here. It shows where it matters, as a restore
 refused in the pipeline of the repository that was not given leave;
 [`delivery/github.md`](delivery/github.md), *When a package is first
 published*, is the list that keeps it from being forgotten.
+
+### 13. A toolchain's root files are where the list says
+
+Skipped where `agentics/templates/` holds no toolchain's folder. Only a
+toolchain that `repository.toolchains` lists has its files at the root
+([`layout.md`](layout.md), *A toolchain's own layout*). Nothing fails when
+the two part: a file of a toolchain that was dropped goes on being read by
+whatever looks for it, and a file that was deleted is missed only by the
+build that needed it.
+
+    toolchains=$(awk '{ sub(/\r$/, "") } /^  toolchains:/ {
+      v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v)
+      gsub(/[][ "]/, "", v); gsub(/,/, "\n", v); print v; exit }' .agentics.yaml)
+    for m in agentics/templates/*/manifest; do
+      [ -f "$m" ] || continue
+      tc=$(basename "$(dirname "$m")"); root="agentics/templates/$tc/root"
+      [ -d "$root" ] || continue
+      listed=$(echo "$toolchains" | grep -cx "$tc")
+      (cd "$root" && find . -type f) | sed 's|^\./||' | while read -r f; do
+        if [ "$listed" = 0 ] && [ -e "$f" ]; then echo "$f: a root file of $tc, which is not listed"; fi
+        if [ "$listed" != 0 ] && [ ! -e "$f" ]; then echo "$f: missing, and $tc is listed"; fi
+      done
+    done
+
+It prints nothing when they agree. What it prints is one of two:
+
+| Line | Means |
+|---|---|
+| `a root file of <toolchain>, which is not listed` | the toolchain was dropped and its files left, or its code is here and the list was never told. Check 6 says which: it compares the list with the code |
+| `missing, and <toolchain> is listed` | a file the toolchain puts at the root was removed or never copied. A finding where a build needs it; the user's to say where it was removed on purpose |
+
+A root file that differs from its template is not a finding: the file is
+the repository's, and the template is what it started from.

@@ -2,40 +2,41 @@
 
 Two modes. Ask which one; do not infer it from the path name.
 
-The unit of organization is the **component**: one solution, one `src/` and
-`test/` pair. A component may hold as many projects as it needs, and may produce
-**more than one deliverable** — an internal and an external API built from the
-same solution, each with its own pipeline and its own release cadence.
+The unit of organization is the **component**: what builds and versions
+together, in a folder of its own. What that is on disk is its toolchain's —
+for .NET one solution with its `src/` and `test/` pair — and *A toolchain's
+own layout* below names the file for each. A component may hold as many
+projects as it needs, and may produce **more than one deliverable** — an
+internal and an external API built from the same component, each with its
+own pipeline and its own release cadence.
 
-What makes it one component is that its projects **build and version together**,
-not that they deploy together. The solution boundary is a build decision; when
-each artifact ships is a pipeline decision, and the two are allowed to differ.
+What makes it one component is that its parts **build and version together**,
+not that they deploy together. The component's boundary is a build decision;
+when each artifact ships is a pipeline decision, and the two are allowed to
+differ.
 
-**Components reference each other as packages, never as projects.** A
-`ProjectReference` across component folders builds, and that is the problem: it
-quietly makes the two components one — a change to either rebuilds both, and
-neither can be released without the other — while the folders still claim they
-are separate. So a component consumes another through a `PackageReference`, at
-a version, from a feed.
+**Components reference each other as packages, never by path.** A reference
+from one component's folder into another's builds, and that is the problem:
+it quietly makes the two components one — a change to either rebuilds both,
+and neither can be released without the other — while the folders still claim
+they are separate. So a component consumes another as a package, at a
+version, from where packages are published.
 
-Until a feed exists, a `ProjectReference` is allowed as a **recorded**
-workaround, and the record is what keeps it temporary: this comment above each
-one, verbatim, and one entry under *Decisions pending* in `TODO.md` naming the
-switch to packages as what closes it.
+Until there is such a place, a reference by path is allowed as a **recorded**
+workaround, and the record is what keeps it temporary: the comment the
+toolchain's file gives, above each one, verbatim, and one entry under
+*Decisions pending* in `TODO.md` naming the switch to packages as what closes
+it.
 
-    <!-- TEMPORARY: cross-component project reference. Components reference each
-         other as packages (agentics/rules/layout.md); this stands in until a
-         package feed exists. Listed in TODO.md. -->
-
-**A component that is never released may reference another by project.**
+**A component that is never released may reference another by path.**
 The rule above protects a release: two components that are each released,
 as a package or as a deployment, must each be releasable alone. A component
 under `tools/` or `examples/` has no release, and is of little use except
 against the others as they are in the tree: a benchmark that measured the
 last published package would say nothing of the change being made. So such
-a component may hold a `ProjectReference` into any other, with no comment
-and no `TODO.md` entry, because it is not a workaround. Three things keep it
-from spreading:
+a component may reference any other by path, with no comment and no
+`TODO.md` entry, because it is not a workaround. Three things keep it from
+spreading:
 
 - **One direction only.** A released component, whatever its category,
   never references one under `tools/` or `examples/`, and still reaches
@@ -45,11 +46,12 @@ from spreading:
 - **It is allowed, not required.** A tool the build itself runs may prefer
   the last released package, so that a broken tree cannot break the tool
   that builds it; a sample may prefer it to show what a consumer gets.
-- **Nothing of it is packed.** The referencing project is
-  `<IsPackable>false</IsPackable>`, as its category already asks.
+- **Nothing of it is packed.** The referencing component is marked as never
+  packed, as its category already asks; the toolchain's file has the
+  spelling.
 
 It is not a pipeline's job to police any of this. A pipeline builds its
-component as though the references were packages; where a project reference
+component as though the references were packages; where a reference by path
 stands, by the workaround or by the paragraph above, the trigger has to
 include the referenced components' paths, and that is the whole of the
 pipeline's involvement.
@@ -75,18 +77,10 @@ implicit:
 | Thing | Convention | Example |
 |---|---|---|
 | Directories | lowercase, hyphenated | `proxy-gateway` |
-| Component folder | the main project's **last** name segment, kebab-cased | `Contoso.ProxyGateway.Core` → `core/` |
-| Solution file | its component's main project | `Contoso.ProxyGateway.slnx` |
-| .NET project + assembly | PascalCase, prefixed | `Contoso.ProxyGateway` |
-| Default namespace | project name, minus `.Core` | `Contoso.ProxyGateway` |
-| Test project | project name + `.Tests` | `Contoso.ProxyGateway.Tests` |
+| Component folder | the main deliverable's **last** name segment, kebab-cased | `Contoso.ProxyGateway.Core` → `core/` |
 
-The rule underneath: **directories are kebab-case, .NET artifacts are
-PascalCase.** The solution is a .NET artifact, not a directory-level one: its
-name is what appears in every build command, in the IDE title bar, and in the
-component README, so it takes the main project's name rather than the folder's.
-Where a component holds several projects, the main one is the deliverable the
-others support.
+What a toolchain names besides — a solution, a project, a namespace, a test
+project — is in its file, with the case it writes them in.
 
 **The folder takes the last segment only**, because the repository already
 carries the rest: `Contoso.Ordering.Core` in a repository called
@@ -98,63 +92,21 @@ when two components would otherwise collide — `Contoso.Ordering.Api` and
 repository, not a component, and the two stop being interchangeable the
 moment a second component exists.
 
-**When there is no single main deliverable** — two peer APIs, say, an internal
-and an external face of the same service — name the solution after the project
-they share, which is usually the core library, or after the namespace root they
-all sit under: `Contoso.Ordering.slnx` over `Contoso.Ordering.Api.Internal` and
-`Contoso.Ordering.Api.External`. Still never the folder name.
-
-### The `.Core` exception
-
-A `.Core` segment names the assembly, not the namespace, so it is dropped from
-the default namespace:
-
-| Project (assembly) | Namespace |
-|---|---|
-| `Contoso.Core` | `Contoso` |
-| `Contoso.Core.Tests` | `Contoso.Tests` |
-| `Contoso.ProxyGateway` | `Contoso.ProxyGateway` (unchanged) |
-| `Contoso.CoreBanking` | `Contoso.CoreBanking` (unchanged) |
-
-This is applied automatically by `Directory.Build.props` — it sets
-`RootNamespace` and leaves `AssemblyName` alone, so the DLL keeps its full name.
-A `.csproj` can override it, since the project body is evaluated afterwards.
-
-The condition matches a whole trailing `.Core` segment, not a substring — which
-is why `Contoso.CoreBanking` is left alone. A naive string replace would turn it
-into `ContosoBanking`.
-
-`Contoso` is a placeholder: the prefix comes from the user, usually an
-organization or product name, and is recorded in `.agentics.yaml` under
-`repository.namespace`.
-
 ## Standalone
+
+The component is the repository. Its code is at the root, beside the root
+documents, `agentics/` and, once there is something to put in it, `docs/`:
 
     <repo-root>/
       AGENTS.md
       README.md                      the component README - what it is, how to run it
-      .editorconfig
-      .gitattributes
-      .gitignore
-      Directory.Build.props
-      Directory.Build.targets
-      Directory.Packages.props
-      Tests.props
-      StyleCop.props
-      stylecop.json
-      stylecop.ruleset
-      Contoso.Thing.slnx             named after the main project, not the repo
       agentics/                      the toolkit's: rules/ this repository is held to, and templates/; replaced whole by a sync
       docs/
         rules/                     the repository's own rules and their index, AGENTS.md - once it has any
-      src/
-        Contoso.Thing/
-          Contoso.Thing.csproj
-      test/
-        Contoso.Thing.Tests/
-          Contoso.Thing.Tests.csproj
+      ...                            the component, as its toolchain lays it out
 
-Production code in `src/`, tests in `test/`. Both singular, matching `src/`.
+The whole tree, with the build files a toolchain puts at the root, is in the
+toolchain's file.
 
 ## Monorepo
 
@@ -163,8 +115,8 @@ noise, and a folder that exists implies a decision that has not been made:
 
 | Folder | Contents |
 |---|---|
-| `services/` | deployable C# services |
-| `libraries/` | packages published to NuGet |
+| `services/` | deployable services |
+| `libraries/` | packages published for others to consume |
 | `jobs/` | scheduled executables (Kubernetes CronJobs and similar) |
 | `tools/` | never shipped to production: what builds, tests or measures the rest, a benchmark project among them |
 | `examples/` | runnable samples of the repository's own libraries, a component per subject holding its scenarios; never shipped — see *Samples* below |
@@ -174,66 +126,35 @@ noise, and a folder that exists implies a decision that has not been made:
 | `agentics/` | what agents follow: `rules/` and `templates/`; the toolkit's, shipped with every repository and replaced whole by a sync |
 | `build/` | CI/CD pipeline definitions |
 
-Each C# component gets a kebab-case folder, and **inside it the standalone
-layout repeats**:
+Each component gets a kebab-case folder under its category, and **inside it
+the standalone layout of its toolchain repeats**:
 
     <repo-root>/
-      Directory.Build.props          <- one set at the root, inherited by all
-      Directory.Build.targets
-      Directory.Packages.props
-      .editorconfig
-      stylecop.ruleset
       README.md                      map of categories
       services/
         README.md                    map of components in this category - one row each
         proxy-gateway/
           README.md                  what it is, how to run it, configuration
-          Contoso.ProxyGateway.slnx
-          src/
-            Contoso.ProxyGateway/
-          test/
-            Contoso.ProxyGateway.Tests/
+          ...                        the component, as its toolchain lays it out
       libraries/
         README.md
         message-contracts/
           README.md
-          Contoso.MessageContracts.slnx
-          src/
-            Contoso.MessageContracts/
-          test/
-            Contoso.MessageContracts.Tests/
+          ...
 
-### One solution per component, none at the repository root
+### Nothing builds the repository as one
 
-Each component carries its own `.slnx`, named after its main project, covering
-only its own `src/` and `test/`.
+Each component is built by itself. No file at the root lists every component
+for a build, whatever a toolchain calls such a file: it grows with every
+component added, it makes an unrelated change rebuild the tree, and it is the
+one file every component's author has to touch. A pipeline builds only the
+components a change touches, which is the point of the layout.
 
-**Do not create a root solution spanning the repository.** It gets out of hand
-quickly: load times grow with every component added, an unrelated change forces
-a rebuild across the tree, and the file becomes a merge-conflict magnet that
-every component author has to touch.
-
-This is a decision, not a default — do not add one even if asked to "make a
-solution for the repo" without the tradeoff being discussed first.
-
-To build everything, build each `*.slnx` found under the repository; CI should
-build only the components a change touches, which is the point of the layout.
-`dotnet build` with no argument at the root fails with `MSB1003` — the expected
-consequence of having no root solution, not a misconfiguration.
-
-### Config lives at the root only
-
-`Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`,
-`.editorconfig` and the StyleCop files exist **once**, at the repository root.
-Every component inherits them.
-
-Do not copy them into component folders. All three `Directory.*` files
-resolve by searching upward and stopping at the first hit, so a copy inside
-`services/proxy-gateway/` silently cuts that component off from the root
-configuration — with a green build and no warning.
-
-Non-.NET folders (`infrastructure/`, `ui/`, `docs/`, `agentics/`) are unaffected: MSBuild
-files only apply to MSBuild projects.
+What a toolchain shares between its components — the configuration every one
+of them inherits — exists once, at the repository root, and is never copied
+into a component's folder. For .NET both are in
+[`layout/dotnet.md`](layout/dotnet.md): *One solution per component, none at
+the repository root* and *Config lives at the root only*.
 
 ## The toolkit's rules and the repository's
 
@@ -322,8 +243,8 @@ go in `AGENTS.md` outside the generated block, not in a local rules index —
 
 ## Creating a component
 
-The procedure — templates, the sample code each one emits that fails the
-ruleset, central-package-management fixes, test wiring, verification — is
+The procedure is the toolchain's: the templates, what they emit that the
+build refuses, the wiring of tests, the verification. For .NET it is
 [`coding/csharp/csharp-new-project.md`](coding/csharp/csharp-new-project.md),
 which also backs `/new`. The first component created at initialization
 follows it too.
@@ -370,11 +291,6 @@ like one; see `csharp-unit-tests-rules.md`.
 
 Recorded so they are not re-litigated per repository:
 
-**`test/`, not `tests/`.** Matches `dotnet/runtime`, `dotnet/aspnetcore` and
-`dotnet/roslyn`, and pairs symmetrically with `src/`. Both spellings are common
-in the wider ecosystem — this is a coin flip that has been flipped. Be
-consistent rather than right.
-
 **`agentics/` for the rules, `docs/` for people.** The rules and templates
 agents follow live in `agentics/`, named for their audience, and ship with
 every repository. `docs/` is kept for documentation written for people —
@@ -384,9 +300,6 @@ on the grounds that `docs/` is what GitHub Pages expects — which is a reason
 about human documentation, and the wrong one for a folder of agent rules.
 When `docs/` does exist, it is `docs/`, not `doc/`: what GitHub Pages expects
 and what the .NET repositories use.
-
-**`.slnx`, not `.sln`.** The SDK 10 default, XML, and reviewable in a diff —
-unlike the legacy format's GUID soup.
 
 **`ui/`, not `apps/`.** The categories are cut by *kind of deliverable*, and
 `ui/` names that axis for a front-end the way `jobs/` does for a scheduled
@@ -400,154 +313,69 @@ world will read `ui/` as the design system. The row above says which it is —
 deployed front-ends here, component libraries in `libraries/` — because the
 name alone cannot carry that.
 
-## Test projects
+`test/` and `.slnx` are choices of the .NET layout, and are with it.
 
-Everything a test project needs lives in `Tests.props` at the repository root.
-It is imported from `Directory.Build.targets` under one condition:
+## A toolchain's own layout
 
-    <Import Project="$(MSBuildThisFileDirectory)Tests.props"
-            Condition="($(MSBuildProjectName.EndsWith('.Tests')) or $(MSBuildProjectName.EndsWith('.Tests.Integration'))) and '$(ManagePackageVersionsCentrally)' != 'false'" />
+What a component is on disk, what is named besides the folders, and how its
+tests are set up belong to the toolchain that builds it:
 
-So any project named `*.Tests` or `*.Tests.Integration`, at any depth, picks
-up the whole stack and nothing else does. The second name is for tests that
-need a live dependency: `Tests.props` leaves such a project an ordinary
-executable, `IsTestingPlatformApplication=false`, unless the run passes
-`-p:RunIntegrationTests=true`, so a plain `dotnet test` builds it and runs
-none of it. Verified on a real repository: `IsTestProject=false` alone does
-not stop the platform's `dotnet test`, and xunit v3 refuses
-`OutputType=Library`; the platform flag is the one lever that skips the
-project while it still compiles. Verified: a `src/` project resolves 2 package references
-(the StyleCop and banned-API analyzers), a `.Tests` project resolves 13. The
-second half of the condition is the escape hatch: a test project that opts out
-of central package management in its own `.csproj` is left alone and carries
-its own stack — [`csharp-new-project.md`](coding/csharp/csharp-new-project.md),
-step 4.
+| Toolchain | File | Holds |
+|---|---|---|
+| `dotnet` | [`layout/dotnet.md`](layout/dotnet.md) | references between components as .NET spells them; the names of solutions, projects, namespaces and test projects, with the `.Core` exception; both trees with their build files; one solution per component; configuration at the root only; test projects, the test stack and keeping it current |
 
-**Why it is imported from the targets file**, not `Directory.Build.props`: the
-props file is evaluated before the project body, so a property the project
-sets is not visible there yet; the targets file comes after. Everything in
-`Tests.props` is consumed later than evaluation, so a project that does not
-opt out sees no difference.
+A section that was once in this document and is one toolchain's is in that
+file under the heading it had.
 
-**Why the condition lives in a root file** rather than a `Directory.Build.*`
-inside `test/`: a nested one would *replace* the root file for that subtree —
-first-found-wins, no merging — silently cutting test projects off from central
-package management, StyleCop and warnings-as-errors.
+**What a toolchain owns is listed.** `agentics/templates/<toolchain>/manifest`
+names its rules and its templates, and `root/` beside it holds the files it
+puts at the repository root, each at the path it has there. Every
+toolchain's files are under `agentics/`, listed in `repository.toolchains`
+or not; only a listed one has its files at the root and its rows in
+`AGENTS.md`.
 
-Test projects also get `IsPackable=false`, so they can never be published by
-accident.
+### Adopting a toolchain
 
-### What is included
+Applies when a repository starts to build with a toolchain it does not
+list: a first Go module in a repository of .NET components, say. It needs
+no toolkit at hand, since the files are already under `agentics/`, and it is
+a change of its own, from a clean tree.
 
-| Package | Role |
-|---|---|
-| `xunit.v3` | the framework, and with it Microsoft.Testing.Platform — every test project is an executable |
-| `coverlet.MTP` | coverage, cobertura out, asked for on the command line |
-| `FakeItEasy` | faking |
-| `FakeItEasy.Analyzer.CSharp` | catches FakeItEasy misuse at compile time |
-| `AutoFixture` | test data generation |
-| `Shouldly` | assertions |
-| `DeepEqual` | structural comparison |
+1. **The toolchain has a folder**, `agentics/templates/<toolchain>/`, with a
+   `manifest`. Where it has none, the toolkit this repository was last
+   synced to did not have the toolchain: sync first, as a change of its own,
+   and where the toolkit still has none, say that the toolchain is not
+   supported and stop.
+2. **Its root files**, never over one that is there:
 
-`FakeItEasy.Analyzer.CSharp` carries `PrivateAssets=all` plus the analyzer
-asset list — it is build-time tooling and must not flow anywhere. There is no
-test host package and no VSTest adapter: on .NET 10 SDK, xunit v3 runs on the
-platform and the SDK refuses the VSTest path, so `Tests.props` sets
-`OutputType=Exe` with the two platform properties, and `global.json` opts
-`dotnet test` in.
+       (cd agentics/templates/<toolchain>/root && find . -type f) | sed 's|^\./||' \
+         | while read -r f; do [ -e "$f" ] && echo "exists: $f" || echo "to copy: $f"; done
 
-Since test projects are never shipped, the bar for adding a package here is
-low: a redundant reference costs a restore entry and nothing else. Still confirm
-the convenience libraries (`AutoFixture`, `Shouldly`, `DeepEqual`) with the user
-at initialization rather than assuming.
+   Copy each that is to copy, to the same path under the root. One that
+   exists is the repository's: compare the two, take across what the
+   toolchain needs, and say what was done.
+3. **The list**: add the toolchain to `repository.toolchains` in
+   `.agentics.yaml`.
+4. **Its rows in `AGENTS.md`**: the rows of the block in
+   `agentics/templates/root-AGENTS.md` that link into a path the manifest
+   names, added to the block of `AGENTS.md` where the template has them. A
+   later sync writes the same rows.
+5. **Its parts in `AGENTS.md`**, outside the block. The template has a line
+   `toolchain: <name>` wherever a toolchain's text belongs, and the
+   toolchain's own `root-AGENTS.md` has the part of each name:
 
-### Enabled only when production code uses them
+       awk -v name=<name> '{ sub(/\r$/, "") }
+         /^<!-- ==== part: / { on = ($0 == "<!-- ==== part: " name " ==== -->"); next }
+         on' agentics/templates/<toolchain>/root-AGENTS.md
 
-Commented out in `Tests.props`; uncomment when the corresponding library is
-actually referenced by the application:
+   Put each part where the template's line stands between the text
+   `AGENTS.md` already has, after the part of a toolchain that is there, and
+   fill its placeholders.
+6. **The first component**, by the toolchain's procedure, *Creating a
+   component* above.
+7. **Verify**: the toolchain's build and tests, and a scrub, whose checks 6
+   and 13 compare the list with the code and with the root.
 
-- `FluentValidation` — validator test helpers
-- `Serilog.Sinks.TestCorrelator` — asserting on emitted log events
-
-### Do not bump these piecemeal
-
-`xunit.v3` pairs with `Xunit.Combinatorial` **2.x** (1.x is the xunit 2 line)
-and brings Microsoft.Testing.Platform with it, which is why the coverage
-collector is `coverlet.MTP` and not `coverlet.collector` — a VSTest data
-collector cannot run there, and the extension is built against one platform
-version, so it moves with `xunit.v3`. Taking "latest" for each package independently
-produces exactly those mismatches. Move the whole set together, and run
-`dotnet test` afterwards to confirm.
-
-## Keeping the test stack current
-
-The versions in `Directory.Packages.props` are a **known-good floor, not a
-ceiling**. They record a combination that was verified to restore, build and
-test together — nothing more. A repository initialized a year later should not
-inherit a year-old stack by default.
-
-So at initialization, **try to move the whole set forward**, then keep what
-survives verification.
-
-### Why not just take latest for each package
-
-Because these packages are not independent, and the failures are compile-time
-ambiguities rather than helpful version errors. Two real examples, both found by
-attempting exactly that:
-
-    xunit 2.9.3 + xunit.runner.visualstudio 4.0.0
-      -> runner 4.x targets xunit.v3; tests silently fail to discover
-
-    xunit 2.9.3 + Xunit.Combinatorial 2.1.41
-      -> error CS0433: 'TheoryAttribute' exists in both xunit.core
-         and xunit.v3.core
-
-    xunit.v3 4.0.1 + Microsoft.NET.Test.Sdk + coverlet.collector
-      -> "Testing with VSTest target is no longer supported by
-         Microsoft.Testing.Platform on .NET 10 SDK and later"; the
-         collector never runs
-
-"Latest of everything" is not a valid combination. **Latest mutually compatible**
-is the goal.
-
-### Procedure
-
-1. **Check the marker.** `Directory.Packages.props` carries
-   `agentics-verified: sdk=<version> date=<date>`. If it is recent and the
-   SDK matches, there is little to gain — proceed.
-
-2. **Look up current versions** for the test packages:
-
-       dotnet package search <id> --exact-match
-
-3. **Move families together, not package by package.** The couplings recorded
-   in `Directory.Packages.props` are the ones known to matter:
-   the xunit family, `Xunit.Combinatorial`, the coverage extension, and
-   `Mvc.Testing` against the TFM. Treat a major-version jump in `xunit.v3` as
-   a decision to discuss, not a bump — the 3.x to 4.x move changed the test
-   platform underneath, not just numbers.
-
-4. **Verify by running, not by reading.** A restore that succeeds proves
-   nothing:
-
-       dotnet build      # must be clean under warnings-as-errors
-       dotnet test       # must actually discover and pass tests
-
-   Discovery failures are the dangerous case: a mismatched runner produces
-   *zero tests* and a green exit code. Confirm the expected test count.
-
-5. **Keep or revert per family.** If a family fails, fall back to the pinned
-   versions for that family and keep the rest. Partial progress is fine.
-
-6. **Update the marker** — `sdk=` and `date=` — so the next initialization knows
-   when the set was last confirmed.
-
-### If a bump fails
-
-Bisect within the family rather than abandoning the attempt. `Xunit.Combinatorial`
-was pinned at `1.7.31` exactly this way: `2.1.41` and `2.0.24` both failed with
-CS0433, `1.7.31` passed, so `1.7.31` is the newest compatible version — not a
-guess, and not simply "whatever the template said".
-
-Record any newly discovered coupling in the comment block in
-`Directory.Packages.props`, so the next person does not rediscover it.
+Dropping a toolchain is the same in reverse and is never done in passing:
+its code first, then its root files, its rows, its parts and its place on
+the list, each named to the user before it goes.

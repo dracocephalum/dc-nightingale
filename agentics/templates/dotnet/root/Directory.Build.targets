@@ -1,0 +1,79 @@
+<Project>
+
+  <!--
+    Test-only packages and settings, applied to any project whose name ends in
+    `.Tests` regardless of how deep it sits - unless that project has opted out
+    of central package management, in which case it is left alone entirely and
+    carries its own stack (csharp-new-project.md, step 4).
+
+    Imported here, after the project body, rather than from Directory.Build.props,
+    because the condition reads ManagePackageVersionsCentrally as the project set
+    it - and a props-time import cannot see that. Everything in Tests.props is
+    consumed later than evaluation (restore, the compiler, pack), so the late
+    import changes nothing for a project that does not opt out. Keeping the
+    condition here rather than in a Directory.Build.* inside test/ matters: a
+    nested one would REPLACE the root file for that subtree, silently cutting
+    those projects off from every setting above.
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)Tests.props"
+          Condition="($(MSBuildProjectName.EndsWith('.Tests')) or $(MSBuildProjectName.EndsWith('.Tests.Integration'))) and '$(ManagePackageVersionsCentrally)' != 'false'" />
+
+  <!--
+    Stamp the informational version with the short commit hash and a dirty marker:
+    1.2.3+abcdef12 or 1.2.3+abcdef12-dirty.
+
+    The SDK's own git integration (Microsoft.Build.Tasks.Git, in the SDK since .NET 8)
+    already appends the full 40-character hash when SourceRevisionId is empty; this target
+    runs first and, when git answers, supplies the short form instead. It never fails the
+    build: no git on PATH, no repository, or a repository with no commits yet all leave
+    SourceRevisionId empty and the SDK default takes over.
+
+    The dirty flag on `git describe` only looks at TRACKED files, so on its own it stamps a
+    binary as clean while an untracked .cs file is being compiled into it - a stamp asserting
+    a commit that does not contain the code. The second Exec closes that, using `git status`
+    in porcelain form, which counts untracked files too. Same rule as the clean-tree
+    precondition in the toolkit's upgrade procedure.
+
+    (No double hyphen appears anywhere in this comment: XML forbids it, and MSBuild reports
+    it as MSB4024 "could not be loaded" against every project, not as a typo here.)
+
+    It is short-circuited on purpose: it runs only when describe did NOT already say dirty.
+    This target runs once per project, and during development describe almost always says
+    dirty already, so the second call is skipped. It costs a process spawn (~100 ms here,
+    against a multi-second build) only on a clean tree - which is CI, where a binary is
+    actually kept.
+  -->
+  <Target Name="SetSourceRevisionId"
+          BeforeTargets="InitializeSourceControlInformation"
+          Condition="'$(SourceRevisionId)' == '' and '$(DesignTimeBuild)' != 'true'">
+    <Exec Command="git describe --long --always --dirty --exclude=* --abbrev=8"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitDescribeOutput" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitDescribeExitCode" />
+    </Exec>
+    <PropertyGroup Condition="'$(_GitDescribeExitCode)' == '0' and '$(_GitDescribeOutput)' != ''">
+      <SourceRevisionId>$(_GitDescribeOutput)</SourceRevisionId>
+    </PropertyGroup>
+
+    <Exec Command="git status --porcelain"
+          Condition="'$(SourceRevisionId)' != '' and !$(SourceRevisionId.EndsWith('-dirty'))"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitStatusOutput" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitStatusExitCode" />
+    </Exec>
+    <PropertyGroup Condition="'$(_GitStatusExitCode)' == '0' and '$(_GitStatusOutput)' != ''">
+      <SourceRevisionId>$(SourceRevisionId)-dirty</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+
+</Project>

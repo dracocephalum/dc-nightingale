@@ -2,9 +2,9 @@
 
 Applies when shaping a boundary: deciding where a type lives, what an
 assembly may reference, how a generated or third-party API is wrapped, or how
-a second transport, backend or integration is added. Language-neutral; the C#
-coding rules carry the C#-specific half (*Design*, *gRPC contracts*) and link
-here rather than repeat it. The shape is ports and adapters: an application
+a second transport, backend or integration is added. Language-neutral; a
+language's coding rules carry its own half and link here rather than repeat
+it, *In each language* below. The shape is ports and adapters: an application
 core that knows no transport and no storage, with every outside thing an
 adapter that depends inward.
 
@@ -59,9 +59,8 @@ signature. The adapter owns the translation in both directions.
 | ours | the domain, singular unit nouns, no echo of any transport | `TenantManager`, `Tenant`, `NewCredential` |
 
 A domain name wins inside the product namespace; a wire type that mirrors a
-domain type gets a wire-specific name. The C#-specific spellings are in
-[`csharp/csharp-coding-rules.md`](csharp/csharp-coding-rules.md), *Naming* and
-*gRPC contracts*.
+domain type gets a wire-specific name. How a language spells them is in its coding rules, *In each language*
+below.
 
 ## Namespace first, assembly second
 
@@ -82,8 +81,15 @@ would be done, write the shape down — `PENDING.md` in a repository that keeps
 one, otherwise `DESIGN.md` — with the decisions and the reasons, so it is not
 re-derived, and leave room for it where leaving room is free (the sibling
 assembly name, the seam a second adapter would implement). Build it when it is
-asked for. The C# *Design* rule says the same of shared behaviour: extract on
-the third concrete use, not in advance.
+asked for. A language's design rule says the same of shared behaviour: extract
+on the third concrete use, not in advance.
+
+## In each language
+
+What this document leaves to the language of the code:
+
+- C# — [`csharp/csharp-coding-rules.md`](csharp/csharp-coding-rules.md):
+  *Design*, *Naming* and *gRPC contracts*.
 
 ## Review
 
