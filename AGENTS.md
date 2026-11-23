@@ -3,7 +3,7 @@
 A .NET gRPC server and client for the Polecat event-sourcing framework,
 following the client pattern of the reference event store.
 
-Primary framework: .NET. Namespace prefix: `Dracocephalum`.
+Toolchain: .NET. Namespace prefix: `Dracocephalum`.
 
 ## Repository layout
 
