@@ -143,7 +143,8 @@ protected.
 
 **Before a repository is made public**, for this or any other reason, and
 where it has a pipeline that publishes: its packages do not become public
-with it, and one check says so before and after.
+with it, but one it first publishes afterwards starts public, and one
+check says which, before and after.
 [`../delivery/github.md`](../delivery/github.md), *A package's visibility
 is its own*, has it.
 
