@@ -267,8 +267,9 @@ only never started for the file it does not name, and stays green from its
 last run.
 
     triggers() {
-      awk '/^ *paths:/ { if (seen) exit; seen = 1; next }
-           seen && /^ *#/ { next }
+      awk '{ sub(/\r$/, "") }
+           /^ *paths:/ { if (seen) exit; seen = 1; next }
+           seen && /^ *(#|$)/ { next }
            seen && /^ *- / { sub(/^ *- */, ""); gsub(/["\047]/, ""); print; next }
            seen { exit }' "$1"
     }
@@ -338,8 +339,8 @@ Skipped where `.agentics.yaml` says `delivery.pipeline: none`, where the
 repository has no remote, and where the stored login cannot read
 packages; say which. A pipeline's `ci` packages are meant to stay private
 ([`delivery/delivery.md`](delivery/delivery.md), *Two registries, one kind
-each*), and a package that has been made public cannot be made private
-again, so this is looked at while there is still nothing to regret.
+each*), and a public one can be restored by anyone signed in to the host
+until its owner makes it private, so this is looked at early.
 
     repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
     owner="${repo%%/*}"
@@ -350,8 +351,8 @@ again, so this is looked at while there is still nothing to regret.
 `nuget` is the host's name for .NET's packages; a toolchain that publishes
 no package to the host has nothing here to list. Every line is to end in
 `private`. A line that ends otherwise is a
-finding, and never one to fix: it is the user's to say whether the
-package was meant to be seen. A package the list has and no project of
+finding, and never one an agent fixes: it is the user's to say whether
+the package was meant to be seen, and the user's to change on its page. A package the list has and no project of
 the repository packs any more is a second finding, a name left behind by
 a rename, for the user to remove.
 

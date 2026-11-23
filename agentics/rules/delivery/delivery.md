@@ -80,7 +80,8 @@ toolkit; until it is, a repository publishes `ci` builds only.
 public too: it is what a pipeline leaves on its way, and whoever found it
 beside the code would take it for what the repository publishes. A
 repository that wants its `ci` packages seen says so. The host file has
-how a package's visibility is decided there and how it is checked.
+how a package's visibility is decided there, how it is checked, and what
+is the user's to do where a new package does not start private.
 
 ## A pipeline for each kind
 
