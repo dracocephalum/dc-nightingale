@@ -68,8 +68,9 @@ first, behaviour second — and open them as separate, dependent requests.
 
 Before opening:
 
-1. `dotnet build` and `dotnet test` green — the reviewer should never be the
-   one to discover a red build.
+1. The build and the tests green, by the commands under *Building and
+   testing* in `AGENTS.md` — the reviewer should never be the one to
+   discover a red build.
 2. The licence check passes (`agentics/rules/dependencies.md`) if any package
    changed.
 3. Read your own diff top to bottom as a reviewer would. Remove debug code,

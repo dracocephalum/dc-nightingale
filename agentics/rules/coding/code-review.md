@@ -34,10 +34,11 @@ Consequences:
 | **Naming and comments** | Do names say what things are? Do comments explain *why*, not *what*? Is a doc comment the contract, with the algorithm in the body and the design in its document? |
 | **Documentation** | Do docs, `AGENTS.md`, and rules change when behaviour does? Is a new paragraph already said somewhere else — one home, pointers elsewhere ([`where-facts-live.md`](where-facts-live.md))? |
 
-**Do not review formatting the build already enforces.** StyleCop,
-`.editorconfig`, and analyzers run at build time with warnings as errors; a
-comment about brace placement or naming style is noise that a green build has
-already answered. Review what tools cannot judge.
+**Do not review formatting the build already enforces.** A toolchain's
+formatter, linter and analyzers run with the build, with warnings as errors
+— for C#, StyleCop, `.editorconfig` and the analyzers; a comment about brace
+placement or naming style is noise that a green build has already answered.
+Review what tools cannot judge.
 
 ## How to write a comment
 

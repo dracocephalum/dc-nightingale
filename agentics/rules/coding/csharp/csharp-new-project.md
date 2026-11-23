@@ -162,7 +162,7 @@ everything shared is inherited from the root.
 
 **Referencing another component** — say the client and the server of one
 product, each its own component — is a `PackageReference`, per
-[`layout.md`](../../layout.md), *Components reference each other as packages*.
+[`layout/dotnet.md`](../../layout/dotnet.md), *References between components*.
 While no feed exists, the `ProjectReference` workaround there is permitted
 exactly as that section states it: the verbatim comment above the reference,
 and the `TODO.md` entry. A component that is never released, under `tools/`

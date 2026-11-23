@@ -1,0 +1,16 @@
+# Banned APIs - Microsoft.CodeAnalysis.BannedApiAnalyzers (diagnostic RS0030).
+# NO BLANK LINES IN THIS FILE: the parser reads an empty line as an empty
+# symbol id, and a second one is "listed multiple times" (RS0031, build error).
+# Every entry is live. Under warnings-as-errors each use of a banned symbol is
+#   a build error carrying the message. These enforce a rule the coding rules
+#   already state, so an agent following them never hits one; when one fires
+#   it is a real defect, not style, which is why there is no relaxed form.
+# Applies to non-test projects only - Directory.Build.props does not attach this
+#   file to *.Tests projects, where DateTimeOffset.UtcNow is allowed for test data.
+# Format: <documentation-comment id>;<message>   (P: property  M: method  T: type)
+# Time must come from TimeProvider so tests can drive it (csharp-coding-rules.md).
+P:System.DateTime.Now;Use TimeProvider.GetUtcNow()
+P:System.DateTime.UtcNow;Use TimeProvider.GetUtcNow()
+P:System.DateTime.Today;Use TimeProvider.GetUtcNow()
+P:System.DateTimeOffset.Now;Use TimeProvider.GetUtcNow()
+P:System.DateTimeOffset.UtcNow;Use TimeProvider.GetUtcNow()

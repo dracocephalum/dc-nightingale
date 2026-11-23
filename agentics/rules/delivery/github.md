@@ -18,7 +18,9 @@ repository that is public; an organization's repository.
 
 ## Adding the pipelines
 
-Three files go to `.github/workflows/`, from `agentics/templates/`:
+Three files go to `.github/workflows/`: `build.yml` from
+`agentics/templates/dotnet/`, the toolchain's, and the other two from
+`agentics/templates/`:
 
 | File | Is | Taken by |
 |---|---|---|
@@ -156,11 +158,9 @@ either way. It was tried both ways on a public repository, and the
 packages were as private with it on as with it off. Leave it as it is; no
 command changes it, and nothing here needs it changed.
 
-`ci` packages are meant to stay private: they are what a pipeline leaves
-on its way, removed after the newest few, and a visitor who found
-`0.1.0-ci.42` beside the code would take it for what the repository
-publishes. A repository that wants them seen says so, and the change is
-its owner's to make on each package's page.
+`ci` packages are meant to stay private, and [`delivery.md`](delivery.md),
+*Two registries, one kind each*, has why. A repository that wants them seen
+says so, and the change is its owner's to make on each package's page.
 
 **Check, when the repository's visibility is about to change and when a
 package has first been published:**

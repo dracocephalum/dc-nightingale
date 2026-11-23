@@ -1,0 +1,16 @@
+# What the dotnet toolchain owns in a repository. One path a line, relative
+# to the repository root; a path that ends in / is a folder and all it holds.
+# Read by an initialization, by the adoption of a toolchain and by a scrub;
+# agentics/rules/layout.md, "A toolchain's own layout".
+#
+# The files it puts at the repository root are not listed here: they are
+# everything under root/ beside this file, each copied to the same path
+# under the repository root.
+
+# rules
+agentics/rules/coding/csharp/
+agentics/rules/delivery/dotnet.md
+agentics/rules/layout/dotnet.md
+
+# templates
+agentics/templates/dotnet/
