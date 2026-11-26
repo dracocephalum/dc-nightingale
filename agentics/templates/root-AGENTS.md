@@ -96,6 +96,7 @@ makes it selectable from a plain-language request.
 | Writing, reviewing or refactoring C# in this repository | [`agentics/rules/coding/csharp/csharp-coding-rules.md`](agentics/rules/coding/csharp/csharp-coding-rules.md) |
 | Shaping a boundary — where a type lives, what an assembly may reference, wrapping a generated or third-party API, adding a transport or a backend | [`agentics/rules/coding/architecture.md`](agentics/rules/coding/architecture.md) — language-neutral |
 | Writing a comment or a document, or unsure whether something belongs in the code or in a document | [`agentics/rules/coding/where-facts-live.md`](agentics/rules/coding/where-facts-live.md) — one home per fact; language-neutral |
+| Naming or changing a tool's commands, options, settings keys, or the files and folders it reads and writes | [`agentics/rules/coding/command-line.md`](agentics/rules/coding/command-line.md) — language-neutral |
 | Touching an entity, a `DbContext`, or a migration | [`agentics/rules/coding/csharp/csharp-ef-core-rules.md`](agentics/rules/coding/csharp/csharp-ef-core-rules.md) |
 | Adding a project, component, or test project | [`agentics/rules/coding/csharp/csharp-new-project.md`](agentics/rules/coding/csharp/csharp-new-project.md) |
 | Asking where something goes, how it should be named, or what the other layout looks like | [`agentics/rules/layout.md`](agentics/rules/layout.md) — both modes; then the file it names for the toolchain |
