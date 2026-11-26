@@ -31,7 +31,7 @@ Consequences:
 | **Tests** | Do they exist, test behaviour rather than implementation, and would they fail if the code were wrong? |
 | **Security and data** | Secrets, PII in logs, injection, trust boundaries, machine-specific paths and personal data ([`../security-reminders.md`](../security-reminders.md)), new dependencies and their licences ([`../dependencies.md`](../dependencies.md)). |
 | **Complexity** | Can the next reader understand it? Over-engineering counts. |
-| **Naming and comments** | Do names say what things are? Do comments explain *why*, not *what*? Is a doc comment the contract, with the algorithm in the body and the design in its document? |
+| **Naming and comments** | Do names say what things are? A command, an option or a tool's file is judged by [`command-line.md`](command-line.md). Do comments explain *why*, not *what*? Is a doc comment the contract, with the algorithm in the body and the design in its document? |
 | **Documentation** | Do docs, `AGENTS.md`, and rules change when behaviour does? Is a new paragraph already said somewhere else — one home, pointers elsewhere ([`where-facts-live.md`](where-facts-live.md))? |
 
 **Do not review formatting the build already enforces.** A toolchain's

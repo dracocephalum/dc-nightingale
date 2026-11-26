@@ -152,19 +152,20 @@ Metrics and spans:
   `DbContext` and never `DBContext`. In camelCase the leading one is all
   lower case: `ioControl`, `xmlReader`, `dbContext`.
 - **A method name opens with a verb, or with `To`, `From`, `Is`, `Has`,
-  `Can` or `Try`; never with the noun it returns.** `GetLeaseName(id)`,
-  `ToInfo(summary)`, `ParseIds(text)`, `RequireGroupName(name)`, not
-  `LeaseName(id)`, `Info(summary)`, `Ids(text)`, `GroupName(name)`, and not
-  the suffix forms `OrdinalOf`, `OptionsFor`, `OwnerAt` either. A
-  delegate-typed parameter, field or property is a role noun: `callback`,
-  `factory`, `keySelector`, `keeper`. That split is what keeps `Foo(x)`
-  readable: a verb is a method being called, a noun is a stored delegate
-  being invoked. No analyzer checks it; review does. Two shapes are allowed
-  as they are: factories of results or errors under a class that supplies
-  the verb (`Results.NotFound()`, `Errors.GroupNotFound(stream, group)`),
-  test-data builders in test projects (`Record(stream, 3)`, `Event("paid")`),
-  and the accessor a `[GeneratedRegex]` generates, named for its pattern with
-  a `Regex` suffix as the BCL samples do (`CollationNameRegex()`).
+  `Can`, `Should` or `Try`; never with the noun it returns.**
+  `GetLeaseName(id)`, `ToInfo(summary)`, `ParseIds(text)`,
+  `RequireGroupName(name)`, not `LeaseName(id)`, `Info(summary)`,
+  `Ids(text)`, `GroupName(name)`, and not the suffix forms `OrdinalOf`,
+  `OptionsFor`, `OwnerAt` either. A delegate-typed parameter, field or
+  property is a role noun: `callback`, `factory`, `keySelector`, `keeper`.
+  That split is what keeps `Foo(x)` readable: a verb is a method being
+  called, a noun is a stored delegate being invoked. No analyzer checks it;
+  review does. Three shapes are allowed as they are: factories of results or
+  errors under a class that supplies the verb (`Results.NotFound()`,
+  `Errors.GroupNotFound(stream, group)`), test-data builders in test
+  projects (`Record(stream, 3)`, `Event("paid")`), and the accessor a
+  `[GeneratedRegex]` generates, named for its pattern with a `Regex` suffix
+  as the BCL samples do (`CollationNameRegex()`).
 - **A gRPC service implementation is named for its proto service plus
   `Service`, and overrides the rpc names as generated.**
   `TenantsService : Tenants.TenantsBase` with `override Task<TenantResponse> Create(...)`,
@@ -174,6 +175,159 @@ Metrics and spans:
   types behind the implementation keep (`TenantStore`, `Tenant`,
   `TenantManager`). Generated names are the generator's and are never wrapped
   or renamed for style.
+
+### Choosing a name
+
+The rules above say how a name is spelled; these say which name. They are
+applied before a name is settled, because a name is cheapest to change on
+its first day. A tool's commands, options, settings keys and files are
+named by [`../command-line.md`](../command-line.md).
+
+**1. Name a thing for what it is, by its term of art.** Describe it in one
+sentence: how it is allocated, divided, owned and released, or what it holds
+and who reads it. Then look for the established term whose definition is that
+sentence. A term of art brings its definition with it. A name built from the
+thing's purpose says only what it is for, which fits anything: memory to work
+in can be the stack, a pool or a `byte[]`.
+
+| Instead of | Write | Why |
+|---|---|---|
+| `WorkingMemory`: one native block per owner, carved into fixed places, freed whole | `BufferArena` | that sentence is the definition of an arena |
+| `ConnectionCache` that lends a connection and takes it back | `ConnectionPool` | a pool lends; a cache keeps copies |
+| `Priority`, the lowest run first | `Order` | the platform's word (`IOrderedFilter.Order`), and it carries its direction |
+
+- **The platform's own term first**, where it has one: `Order`, `Pool`,
+  `Options`, `Builder`, `Factory`.
+- **Look for a collision, in the platform's names and in ours.**
+  `WorkingSet` already means a process's resident memory
+  (`Process.WorkingSet64`). `Frame` means a stack frame. `BeginX`/`EndX`
+  mean the old asynchronous pattern. A method named as one of our own types,
+  `Constant(...)` beside the type `Constant`, is a second kind of clash.
+  A clash counts where the two names meet the same reader.
+- **The number matches the thing.** One object takes a singular noun, many a
+  plural or a collection noun (`Buffers`, `Inventory`): `WorkingBuffers` for
+  one arena reads as a collection.
+- **Every related name derives from the noun, its operations included.**
+  Copies of an arena stacked for nested calls are a stack, so
+  `Arena.Push()`, `Arena.Pop()` and `Arena.Depth`, not `EnterLevel()`,
+  `ExitLevel()` and a `-1` meaning "nothing open". A concept known by
+  several words is misnamed, or is two concepts: `WorkingMemory`, held as
+  `context.Working`, chosen by `WorkingBuffers.Block` and divided into
+  `BufferRegion`s, was one concept under four words.
+- **A generic word is scoped.** `Level`, `Mode`, `Kind`, `Data`, `Info` and
+  `Manager` say nothing alone: `CallbackDepth`, `BufferPlacement`,
+  `TenantManager`.
+- **A property drops the words its owner already says, never the word that
+  tells it from its siblings.** A context's one `BufferArena` is
+  `context.Arena`, and `Arena.Register()`, not `RegisterArena()`. In a
+  compound the last word is often the generic one: beside that arena, which
+  is memory too, the state's memory is `context.StateMemory`, not
+  `context.Memory`. Where nothing narrower fits, a property takes its type's
+  name, `public StateMemory StateMemory { get; }`, which C# resolves on
+  purpose (the *Color Color* rule of its specification).
+- **A vocabulary taken from a domain is kept whole.** Types that mirror a
+  language's keywords or a standard's terms keep them, even where an
+  analyzer objects: a SQL parser's `Clause.Select`, `Clause.Case` and
+  `Clause.End`, though CA1716 flags each as a Visual Basic keyword. The
+  value is the mapping, and one member renamed to please an analyzer breaks
+  it. Suppress the warning on the narrowest scope that holds the set, with
+  its reason. Where the compiler forces a change, change the whole set one
+  way, by an affix, never one name at a time.
+- **Test it on the `<summary>`.** If the first noun phrase of the type's
+  summary is not its name, the summary has found the better name.
+
+**2. Name a value for the question its reader asks of it.** Ask who reads the
+value and what they want to know when they do. The question's noun is the
+name, and the answers are its values.
+
+| Value | Its reader asks | Name |
+|---|---|---|
+| where a procedure takes its buffers on entry | where do I take them from, now? | `BufferSource { None, Arena, Stack }`, as `region.CurrentSource` |
+| a context's choice for its buffers | where should this context keep them? | `BufferPlacement { Default, Arena, Stack }` |
+| when a missing download is fetched | when do I fetch? | `FetchPolicy { Once, Never, Always }`, in place of an `Offline` bool and a separate `Restore()` |
+
+- **A yes-or-no answer is a bool whose first word says who answers.**
+
+  | First word | Who answers | Examples |
+  |---|---|---|
+  | `Use` | the caller, by choosing | `UseArena`, `UseShellExecute`, `UseCookies` |
+  | `Is`, `Has`, `Can` | the reader, by looking | `IsEmpty`, `HasValue`, `CanSeek` |
+  | `Should` | the code, by working it out; usually a method given what it decides on | `ShouldRetry(exception)`, `ShouldSerializeName()` |
+
+  A state name on an instruction misleads. `IsOnStack`, read on entry to
+  mean "take your buffers from the stack", reads as "are we on the
+  stack?". A `Should` property the caller sets is a setting that reads as
+  advice: `UseX`.
+- **A word that is both a verb and a noun never stands alone in a bool**:
+  `List`, `Record`, `Run`, `Order`, `Cache`, `Update`. An `if` reads its
+  condition as a sentence, and `if (options.ListOnly)` reads both as "list,
+  and only that" and as "only the list". `IsListing` reads one way.
+  Elsewhere its type settles it: `int Order` is a noun.
+- **A third answer makes an enum, never a second bool.** `IsOnStack` and
+  `IsOpen` side by side would allow four states where three exist.
+- **Two questions are two values**, even when their answers look alike.
+  `BufferPlacement` and `BufferSource` share `Stack` and `Arena`; the first
+  is the host's choice, read once by a context, the second an instruction,
+  read on every call and changed as calls nest.
+- **Zero is the value a reader gets without choosing**: `default(T)`, an
+  unset field, a new array, a property missing from the JSON. So it is the
+  one that is safe to get by accident.
+  - **`None` where that is "nothing yet"**: `BufferSource.None` sends a call
+    through the path that opens what is missing, rather than to an address
+    that does not exist.
+  - **The default answer itself otherwise**: `BufferPlacement.Default`, the
+    translation's choice; `FetchPolicy.Once`, what a caller who chose
+    nothing wants.
+  - **No `None` where "no answer" is not a real state**: it is one more
+    value every `switch` has to handle.
+  - **Where zero is taken already, `None` takes another number** rather
+    than renumbering a value stored or sent as a number; the member at zero
+    is then checked for being safe to get by accident.
+  - **A `[Flags]` enum's zero is always `None`**, as `FileShare.None`: no
+    flag set is zero by arithmetic.
+
+**3. Qualify a noun only where it has more than one reading, with the word
+that says which.** Every qualifier implies a counterpart; where the
+counterpart exists, the qualifier is information, and where it does not, it
+is noise.
+
+| Qualifier | Its counterpart | Example |
+|---|---|---|
+| `Current` | the values before and after | `region.CurrentSource`, switched as calls nest; `CultureInfo.CurrentCulture` |
+| `Embedded` | the same thing read from elsewhere | `ReadEmbeddedSummary()`, beside a summary file on disk |
+| `Local` | the shared one | `LocalVariables`, from a git-ignored file beside the shared settings |
+| `Default` | one that was chosen | `BufferPlacement.Default` |
+| `Requested`, `Effective` | each other | `RequestedPlacement` and `EffectivePlacement` |
+| `Expected`, `Actual` | each other | a test's two values |
+
+- **No qualifier without a counterpart**: `New`, `Real`, `Temp`, `My`,
+  `Actual` with no `Expected`, `Current` on a value that never changes.
+- **A relative qualifier names an owner the reader has to find**: `Own`,
+  `Self`, `Other`, `Parent`. It is used only where the enclosing scope names
+  exactly one owner: `OwnBytes` in one project's summary. A name that is
+  shared, imported or passed on says what it is instead: `ApiVersion`, not
+  `OwnMajorVersion`, in a file that several libraries import, where "own"
+  could be any of them.
+
+**4. A name derived from another adds one affix per role, the same
+everywhere.**
+
+- **The platform's word for the role, where it has one.** `XCore` for the
+  method that does the work behind a public `X` that checks first, as
+  `DisposeAsyncCore()` in the asynchronous dispose pattern; `XAsync`,
+  `TryX`, `XOptions`, `X.Tests`.
+- **One affix per role.** `Top_body` beside `Top_opens_arena` is two
+  conventions; `TopCore` and `TopWithArena` is one. Never an order or a
+  vague part: `Process2`, `ProcessInner`, `ProcessImpl`, `NewProcess`.
+- **Generated code follows the generator's own rules,** written down where
+  the generator is: what a source name becomes, and why no source name can
+  collide with what is derived from it. Safe beats idiomatic there:
+  `_TOP_core` keeps the source name `TOP` whole and starts with a character
+  no source name can, where `TOPCore` could be read as a name of its own.
+
+**5. A rename covers every use in the same change**: code, documents,
+settings, tests, the names of files. Before a first release no alias is kept
+for the old name.
 
 ## One type per file, and the feature file
 
@@ -293,7 +447,7 @@ other files to learn why this one exists.
   crash between the two over-reports rather than under-reports; the
   reconciler tolerates that direction.` is a comment.
 - **Every non-trivial type opens with its role**, in its `<summary>`: what it
-  is for, what calls it, what it relies on, what it must never do — enough to
+  is, what it is for, what calls it, what it relies on, what it must never do — enough to
   decide without reading the body.
 - **Rationale sits where the question arises.** A surprising line, a
   workaround, an ordering that matters, a lock, an arbitrary-looking literal:

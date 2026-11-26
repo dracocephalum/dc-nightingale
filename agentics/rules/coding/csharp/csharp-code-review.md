@@ -63,6 +63,14 @@ banned-API list. The authority for each item is
 | Comment narrating what the code plainly does | Comments | `nitpick` — improve the name instead |
 | Method named for the noun it returns (`LeaseName(id)`, `OptionsFor(x)`), or a delegate-typed member named as a verb; not a result/error factory under a class that supplies the verb | Naming | `suggestion` |
 | gRPC service implementation not named for its proto service plus `Service` (`TenantsService : Tenants.TenantsBase`), or a wire package referenced by the domain assembly rather than its `Protocols.<Stack>` sibling | Naming | `suggestion` |
+| A type named for its purpose where a term of art fits (`WorkingMemory` for an arena), a plural on one object, a name the platform already uses for something else (`WorkingSet`, `Frame`), one concept under several words, or a generic word (`Level`, `Mode`, `Data`, `Info`) left unscoped | Naming, *Choosing a name* 1 | `suggestion` |
+| A property shortened to its type's generic last word beside a sibling it shares (`context.Memory` beside an arena), or renamed only to avoid its type's name | Naming, *Choosing a name* 1 | `suggestion` |
+| One member of a domain's vocabulary renamed alone to please an analyzer, or the warning suppressed wider than the set | Naming, *Choosing a name* 1 | `suggestion` |
+| A bool whose first word does not say who answers, a state name on an instruction (`IsOnStack` meaning "take from the stack"), a verb-or-noun word standing alone (`ListOnly`), or a second bool for a third answer | Naming, *Choosing a name* 2 | `suggestion` |
+| An enum whose zero value is not safe to get by accident, or a `[Flags]` enum whose zero is not `None` | Naming, *Choosing a name* 2 | `issue` |
+| A qualifier with no counterpart (`New`, `Temp`, `Real`), or a relative one (`Own`, `Other`) on a name that is shared, imported or passed on | Naming, *Choosing a name* 3 | `suggestion` |
+| Derived names with two conventions for one role, a numbered or vague part (`Process2`, `ProcessImpl`), or an affix of our own where the platform has one (`XCore`, `XAsync`, `TryX`) | Naming, *Choosing a name* 4 | `suggestion` |
+| A rename that leaves a use, a file name or, before a first release, an alias behind | Naming, *Choosing a name* 5 | `suggestion` |
 | Commented-out code, change history, author tag, or task narration ("added per request") | Comments | `issue` |
 
 Tests:
