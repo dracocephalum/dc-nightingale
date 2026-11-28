@@ -134,6 +134,7 @@ layout repeats**:
           Contoso.MessageContracts.slnx
           src/
             Contoso.MessageContracts/
+              PACKAGE.md             the package's own page, once the project is packed
           test/
             Contoso.MessageContracts.Tests/
 

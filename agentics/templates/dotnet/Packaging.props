@@ -96,6 +96,19 @@
     </PropertyGroup>
   </Target>
 
+  <!--
+    A package's own page: PACKAGE.md beside the project file, packed as the
+    package's README.md. It is written for someone who has only the package,
+    so its links are whole addresses; the component's README.md is for
+    someone in the repository and is not packed.
+  -->
+  <PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)/PACKAGE.md')">
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/PACKAGE.md')">
+    <None Include="$(MSBuildProjectDirectory)/PACKAGE.md" Pack="true" PackagePath="README.md" Visible="false" />
+  </ItemGroup>
+
   <!-- A notice file, where the repository has one, travels with what is distributed. -->
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)NOTICE" Pack="true" PackagePath="" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)NOTICE')" />

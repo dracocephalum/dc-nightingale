@@ -305,6 +305,12 @@ listing directories. A component missing from it is invisible.
 In a standalone repository the root `README.md` *is* the component README;
 update it instead.
 
+A project that is packed owes a second page, `PACKAGE.md` beside its project
+file, before its first release and not before its first build: what someone
+sees who has only the package.
+[`../../delivery/dotnet.md`](../../delivery/dotnet.md), *What a package holds
+beside its assemblies*.
+
 ## Known failures
 
 | Symptom | Cause |

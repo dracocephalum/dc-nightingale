@@ -47,6 +47,10 @@ on:
       # No document is built. One that is packed, or read by a build, is
       # named after this line, which then no longer takes it away.
       - '!**/*.md'
+      # A package's own page, PACKAGE.md beside a project file, is packed.
+      # Its entry is added with the first one, and to dev.yml as well; until
+      # then it would match nothing, which the scrub reports.
+      # - '**/PACKAGE.md'
 
 # A run on the default branch is never cancelled, since it deploys.
 concurrency:

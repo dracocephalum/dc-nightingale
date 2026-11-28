@@ -133,6 +133,39 @@ builds. A scrub compares each with the tree, [`../scrub.md`](../scrub.md),
 A pipeline is given no stored secret where the host can do without one, and
 the host file says how.
 
+## What is not a package goes to the host's releases
+
+A program that stands alone, an archive of programs, a file a user
+downloads and runs: none is a package, and none goes to a registry. Each
+is attached to the release on the repository's host, which is where such
+files are looked for. The `release` pipeline is not written yet in this
+toolkit; this is what it is to do, and what a repository plans for until
+then.
+
+- **By the pipeline that releases the packages, from the same commit and
+  under the same version.** A file attached by hand, or built on a
+  machine, is a file nobody can make again.
+- **One for each system and processor it is built for**, named for the
+  program and the target, never for the build.
+- **It carries what a package carries:** the terms, the notice, and a
+  page that says what it is. Programs gathered into an archive have the
+  three inside it. A program attached as one file has them attached
+  beside it, once for the release.
+- **No package is made only to carry a program.** A tool's package gives
+  the commands its toolchain lets one package give, and the toolchain's
+  file says how many. A further program, a helper beside the main
+  command, is attached to the release; so is the command itself built to
+  run with nothing installed, under the command's own name. A second
+  package for either is a second thing to publish and keep in step.
+
+## A package of what is not the repository's own
+
+A translation or a port of another's code, another's data, files generated
+from another's sources: where their terms are not a permissive licence, or
+are not clear, a package of it is not released as the rest is.
+[`../derived-work.md`](../derived-work.md) has what is settled first, how
+the files are marked, and what such a package says of itself.
+
 ## A committed reference names a release
 
 A project refers to a package this organization builds by a released
