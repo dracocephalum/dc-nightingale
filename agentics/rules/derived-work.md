@@ -69,7 +69,8 @@ form, and the steps below are what answer for it.
 
 ## 4. Each file says whose it is
 
-One line among a file's opening comments, before any code:
+One line among a file's opening comments, before any code, in whatever
+language the file is written:
 
     SPDX-License-Identifier: <identifier>
 
@@ -83,7 +84,12 @@ One line among a file's opening comments, before any code:
   questions go to the repository it is kept in. Whatever notice or
   disclaimer the original file carried is kept as it stood.
 - **The tool that makes the file writes them**, so they are never
-  missing, and a test of the tool asserts it of every file it writes.
+  missing, and a test of the tool asserts it of every file it writes. The
+  tag is one constant of the tool's. A test never contains the whole tag
+  line: it builds that line from the constant, and it pins the constant's
+  value once on its own, so a constant that is wrong still fails. The
+  line then stands in no file but a derived one, and a scrub that reads
+  for it outside the component finds none.
 - **A mark that a file was generated says who wrote it, not whose terms
   apply.** A generated file is tagged like any other. Where a toolchain
   has such a mark and wants it first, the tag stands below it.
