@@ -455,7 +455,7 @@ under a licence that does not cover it.
            k == "path" { p = v } k == "terms" { t = v } k == "tag" { g = v } k == "tagged" { s = v }
            END { if (p != "") print p "|" t "|" g "|" s }' .agentics.yaml
     }
-    tags() { sed -n '1,40p' "$1" | tr -d '\r' | sed -n -E 's/^[^[:alnum:]"]*SPDX-License-Identifier: *([^ ]+).*/\1/p' | sort -u; }
+    tags() { sed -n '1,40p' "$1" | tr -d '\r' | sed -n -E 's/^([[:alpha:]]{1,3}[[:space:]]+)?[^[:alnum:]"]*SPDX-License-Identifier: *([^ ]+).*/\2/p' | sort -u; }
     own=$(awk '{ sub(/\r$/, "") } /^  licence:/ { gsub(/"/, ""); print $2; exit }' .agentics.yaml)
 
     set -f
@@ -477,15 +477,35 @@ under a licence that does not cover it.
       if [ -n "$projects" ] && ! echo "$projects" | tr '\n' '\0' | xargs -0 grep -l -F PackageLicenseFile > /dev/null; then
         echo "$path: no project names a licence file"
       fi
-      git grep --untracked -l -E "^[^[:alnum:]\"]*SPDX-License-Identifier: *$tag" -- . ":(exclude)$path" \
-        | sed "s|$|: tagged $tag, outside $path|"
+      # Outside the component: the same kinds of file, read the same way.
+      kinds=
+      for pattern in $tagged; do kinds="$kinds :(glob)**/$pattern"; done
+      git grep --untracked -l -F -e "SPDX-License-Identifier: $tag" -- $kinds ":(exclude)$path" \
+        | while read -r f; do
+            if tags "$f" | grep -q -x -F -- "$tag"; then echo "$f: tagged $tag, outside $path"; fi
+          done
     done
     set +f
+
 It reads every file git does not ignore, tracked or not, and the first 40
 lines of each. A file that is written as the project builds and is ignored
 is not read here: the test of the tool that writes it holds it, and the
 day such files are committed this check reads them with nothing changed.
 The line that looks for a project's licence file is .NET's.
+
+**The line is found behind any comment mark**, and the kinds of file are
+whatever the declaration names, of any language: marks made of signs, as
+`//`, `#`, `--` or `<!--` are, and a mark that is one short word at the
+start of the line, as `C` or `REM` is. A text file with no comments
+carries the line bare.
+
+**Outside a component it reads only the kinds the declaration names.** A
+document that quotes the tag, the terms file's own sentence or a line of
+`DESIGN.md`, is no derived file and is not read. A line is all it reads,
+though, and it cannot tell one quoted in code from a file's own: a test
+that holds the tool to its header never contains the whole tag line. It
+builds that line from the tool's constant, and it pins the constant's
+value once on its own ([`derived-work.md`](derived-work.md), step 4).
 
 It prints nothing when the marks stand. What it prints is one of five:
 
@@ -495,7 +515,7 @@ It prints nothing when the marks stand. What it prints is one of five:
 | `does not name the tag` | the files point at terms the terms file never mentions |
 | `no tag`, or `tagged <other>` | a file of a kind the declaration names, and nobody can tell from it whose terms apply. The repository's own file takes the repository's identifier; a derived one is the tool's to mend, not the file's |
 | `no project names a licence file` | a package built from the component would carry the licence identifier every package gets |
-| `tagged <tag>, outside <path>` | a derived file has left its component, or a component was added and not declared |
+| `tagged <tag>, outside <path>` | a derived file has left its component, or a component was added and not declared. Where the file is a test that spells the tag out, the test is mended to take it from the tool |
 
 Not checked here, and read in a review: that what was settled is
 recorded, that the original is fetched by a hash and held nowhere, and
