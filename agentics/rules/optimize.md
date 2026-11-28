@@ -33,7 +33,7 @@ one of three groups:
 |---|---|---|
 | always loaded | `AGENTS.md`; the name and description of every skill shim | every session |
 | loaded on a trigger | each document under `agentics/rules/` | when a task touches its subject |
-| loaded when asked | `README.md`, `DESIGN.md`, `TODO.md`, `PENDING.md`, `VARIANCES.md`, component READMEs, `docs/` | when a task needs that knowledge |
+| loaded when asked | `README.md`, `DESIGN.md`, `TODO.md`, `PENDING.md`, `VARIANCES.md`, `ROADMAP.md`, component READMEs, `docs/` | when a task needs that knowledge |
 
 The report is a table of group, document, bytes and approximate tokens, with
 each group's total, and the trend where history shows one:
@@ -95,7 +95,7 @@ and has to merge them by hand when they are not. Compacting them here turns
 every later upgrade into that merge. They are compacted in the toolkit and
 arrive by upgrade. What this repository compacts is its own: the rows and
 sections it added to `AGENTS.md`, its READMEs, `DESIGN.md`, `TODO.md`,
-`PENDING.md`, `VARIANCES.md`, and `docs/`.
+`PENDING.md`, `VARIANCES.md`, `ROADMAP.md`, and `docs/`.
 
 ## 3. Defaults
 

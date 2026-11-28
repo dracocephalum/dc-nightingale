@@ -111,7 +111,10 @@ A workflow starts for a change to a path on its list, `paths:` under
   a reader to tell what is left out on purpose from what was forgotten.
 - **Order matters.** The last entry, `'!**/*.md'`, takes every markdown file
   away again, a component's `README.md` among them. An entry after it puts
-  one back: a readme that is packed is named there.
+  one back: a readme that is packed is named there. `**/PACKAGE.md`, a
+  package's own page, goes on both lists with the first one a repository
+  writes, so that a change to one alone is built and then publishes the
+  package that holds it. Both templates have the line, commented out.
 - **A pull request that touches nothing on the list has no run and shows no
   check.** That is the point of it, and it is why `dev` cannot be a
   required status check as it stands: such a pull request would wait for a

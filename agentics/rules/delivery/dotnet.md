@@ -68,6 +68,69 @@ repository building:
 The files the rule's third step adds to the list of root build files in
 `AGENTS.md` are `Packaging.props` and `Version.props`.
 
+## What a package holds beside its assemblies
+
+`Packaging.props` packs these wherever they are, so no project file names
+them:
+
+| File | Packed as | For |
+|---|---|---|
+| `NOTICE` at the repository root | `NOTICE` | whoever redistributes the package |
+| `PACKAGE.md` beside a project file | `README.md`, named as the package's readme | whoever sees the package on a registry |
+
+- **A package's page is not the component's `README.md`.** That one is
+  for someone in the repository, with links that hold only there.
+  `PACKAGE.md` is for someone who has only the package: what it is, the
+  few lines that use it, what it does not do yet, and whole addresses for
+  the rest.
+- **Every packed project has one before its first release**, started
+  from `agentics/templates/dotnet/package-page.md`. A package without it
+  shows a description of one line.
+- **A package under terms that are not the repository's alone** names a
+  licence file in place of the expression `Packaging.props` gives every
+  package: an empty `PackageLicenseExpression` and a `PackageLicenseFile`
+  in its project file, with the files packed beside it.
+  [`../derived-work.md`](../derived-work.md) has what the file says, and
+  which package is such a one.
+- **A tool's package gives one command**, its `ToolCommandName`. A second
+  program is not a second package: `delivery.md`, *What is not a package
+  goes to the host's releases*.
+
+## A version that is derived
+
+A `Version.props` nearer a project than the root's need not hold a number.
+Where a component's version is kept in a file something else writes, a
+build step or a tool, its `Version.props` imports that file, and the
+project files import nothing: `Packaging.props` finds the nearest
+`Version.props` for every project beneath it.
+
+A release that refers to a package with a label is refused by the packing
+itself, `NU5104`: a version with no label cannot depend on one that has
+one. It is a warning, and the root `Directory.Build.props` makes every
+warning an error. That is the rule of `delivery.md`, *A committed reference names a
+release*, kept by the tool, and is not to be silenced.
+
+## Trying a package before it is published
+
+A change to a package is tried in the repository that uses it before it is
+merged, from a folder and never from a registry:
+
+1. Pack the changed repository as `dev`, the default, to a folder outside
+   both repositories.
+2. Restore the using repository with a configuration, also outside it,
+   that adds the folder as a source, and with the version overridden to
+   the `-dev` one as `delivery.md`, *A committed reference names a
+   release*, says: from a file git ignores or from the environment.
+   Where the repository's own configuration maps each package to a
+   source, this one maps the package to the folder, or the folder is
+   never asked.
+3. Remove that version from the machine's package cache before each
+   restore. A `dev` build is made again under the same number, and the
+   cache would hand back the one before.
+
+Nothing of this is committed: no source, no version, no lock file written
+against the folder.
+
 ## The steps a pipeline shares
 
 `agentics/templates/dotnet/build.yml` is what the rule calls the shared

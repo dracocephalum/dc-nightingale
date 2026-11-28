@@ -5,7 +5,7 @@
 
 toolkit:
   url: https://github.com/dracocephalum/dc-agentics
-  commit: "88e2529e5314"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
+  commit: "1831c23aa4dd"               # the dc-agentics commit, never this repository's: 12-char hash, "-dirty" if that tree was not clean; what an update diffs from
   payload-path: "repo/payload"         # where the payload lived AT that commit - the toolkit restructures, and an upgrade diffing the wrong root sees every file as new. Fixed value, not a placeholder
   initialized: "2026-09-14"            # yyyy-mm-dd
   by: "Claude Code / claude-fable-5-1" # e.g. Claude Code / claude-fable-5-1
@@ -77,3 +77,13 @@ delivery:
   pipeline: none                      # github | none - none means nothing builds the repository but its developers
   packages-token-variable: "GITHUB_PACKAGES_TOKEN"   # the environment variable a developer's machine keeps its token for
                                       # reading packages in; a name, never a token; confirmed with the user at adoption
+
+derived-work:
+  # What is made from another's code or data under terms that are not a permissive licence -
+  # agentics/rules/derived-work.md. Empty in a repository that holds none. One entry for each
+  # component that holds such files, and a scrub reads it:
+  #   - path: libraries/kit                  the component's folder
+  #     terms: libraries/kit/LICENSE.md      its terms file, which is the package's licence
+  #     tag: LicenseRef-Contoso-Rules        the SPDX-License-Identifier of a derived file
+  #     tagged: "*.cs"                       the files that carry a tag, as patterns with a space between
+  components: []

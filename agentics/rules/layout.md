@@ -178,7 +178,7 @@ repository's own keeps a name no toolkit shim has.
 
 A row with no rule behind it is not a rule and does not open the folder: one
 that only sends the reader to a document of the repository's own —
-`VARIANCES.md`, `PENDING.md`, a folder's README — goes in the root `AGENTS.md`
+`VARIANCES.md`, `PENDING.md`, `ROADMAP.md`, a folder's README — goes in the root `AGENTS.md`
 outside the block, a second table in the same columns right after it, which no
 sync touches. The index is for rules; its links resolve only once its rows are
 in the block, so an index that holds nothing else is a broken file wherever it
@@ -240,6 +240,45 @@ the deliberate differences and `PENDING.md` for features deferred with their
 approach decided; both leave `TODO.md` for what is owed soon, and their rows
 go in `AGENTS.md` outside the generated block, not in a local rules index —
 *The toolkit's rules and the repository's* above.
+
+### A roadmap, where the plan has outgrown its file
+
+`ROADMAP.md` is optional, and most repositories never need one. It is
+added when the horizon is long and `PENDING.md` no longer shows it: the
+order of the work is spread over several sections, finished steps are
+still listed among the open ones, and nobody can say from the file what
+comes next or what waits for what. Until then the order is a list in
+`PENDING.md` or `TODO.md`, and a roadmap would only say it twice.
+
+Where a repository has one:
+
+- **It holds the order, and the other documents the detail.** Stages in
+  the order they are to be reached, each a paragraph: what it is for, what
+  it needs first, roughly what it takes, and the sections of `PENDING.md`
+  or `TODO.md` that hold its parts. An ordered list of steps that lived in
+  one of those moves here, and the file it left points here.
+- **It may hold what nothing else does.** A stage far off, a direction, an
+  idea worth keeping in view, needs no section in `PENDING.md`, no entry
+  in `TODO.md` and no plan behind it. It is a paragraph here until it
+  comes near, and is worked out then. The roadmap is the least exact of
+  the root documents on purpose.
+- **A stage is named for what it ends with, and not numbered** in its
+  heading: a reference to it from another document is its name, and a
+  number in the heading is a name that changes when a stage is put in
+  front of it. The order is the order of the headings.
+- **What follows no stage has a place of its own**, after the stages:
+  work that can be taken whenever it is wanted, each item saying what it
+  needs.
+- **Done is a line.** A stage whose parts are built, with their reasoning
+  in `DESIGN.md`, is cut down to a line under a first heading that says
+  what is behind.
+- **It is changed first.** When the order changes, the roadmap changes in
+  that change and the other documents follow; a roadmap that trails the
+  work is worse than none.
+
+Its row goes in `AGENTS.md` beside the others of the repository's own:
+read it when asked what comes next, in what order, or what a piece of
+work waits for.
 
 ## Creating a component
 

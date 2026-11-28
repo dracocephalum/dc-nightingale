@@ -151,6 +151,7 @@ silently, because nothing enforces it:
 | `toolchains` | the actual tree: every toolchain listed has code here, and no code is of one that is not. `dotnet` is known by a `.csproj`, `go` by a `go.mod`, and the folder that holds one says which its component is. A file that still says `framework` is from before the list; the next sync renames the key |
 | `layout` | the actual tree: `standalone` has its one component at the root, for .NET a solution there; `monorepo` has category folders and no component at the root |
 | `delivery.pipeline` | the pipeline files git tracks: `none` has none, a host's name has that host's |
+| `derived-work.components` | the tree: each folder it names is there. What the folders hold is check 14 |
 
 ### 7. `AGENTS.md` index is complete in both directions
 
@@ -243,6 +244,45 @@ rather than deleting them — closing an item is the user's call.
 
 The same reading applies to `PENDING.md` where the repository has one: an
 entry that describes what has since shipped, or an approach since dropped.
+A plan is read against the code and not against memory, section by
+section, each put in one of four: built, built in part, still open, or
+said otherwise than the code now has it. Four things are looked for by
+name:
+
+- **An ordered list with finished steps still in it**, or with a step
+  marked as next that was done.
+- **A list of what is not handled yet that the code has outgrown in the
+  other direction:** what the code refuses and the list does not name.
+  The code's own messages are the list to compare with.
+- **One fact said differently in several files**, a test's failure, a
+  count, an option's name, each as it was when that file was last
+  touched.
+- **A question the plan asks that has since been answered**, a
+  measurement to make that was made among them. It leaves the plan, and
+  [`coding/measuring-speed.md`](coding/measuring-speed.md), *What is
+  written down*, has where its answer goes.
+
+A comment in a project file or a settings file that names a section of a
+document goes stale as a document does, and is read with it.
+
+Where the plan is long, the reading may be given to an agent that changes
+nothing: it is told what to check each claim against, asked for the file
+and the name it found as evidence, and asked to mark what it read apart
+from what it inferred. What it reports is checked against the code before
+anything is changed on its word.
+
+Where the order of the work has itself become what cannot be found, that
+is the sign for a roadmap: [`layout.md`](layout.md), *A roadmap, where the
+plan has outgrown its file*. A `ROADMAP.md` that is there is read as the
+plan is, and for two things of its own: a stage that is done and still
+stands among those to come, and an order the other documents no longer
+follow.
+
+**A decision that later work has overtaken is a finding, and so is a
+plan that quietly took the new answer.** Where something built since
+makes an earlier decision wrong, the plan is to say what was decided,
+what changed, and what the answers now are, with the choice in `TODO.md`
+until it is made.
 
 **A reversed decision is the cheap moment.** When a change abandons an
 approach that the documents had named — a design replaced, a planned slice
@@ -394,3 +434,69 @@ It prints nothing when they agree. What it prints is one of two:
 
 A root file that differs from its template is not a finding: the file is
 the repository's, and the template is what it started from.
+
+### 14. Derived work is marked
+
+Skipped where `derived-work.components` in `.agentics.yaml` is empty. A
+component that holds what was made from another's work declares itself
+there, and each of its files says whose it is in a line among its opening
+comments ([`derived-work.md`](derived-work.md), steps 3 to 5). Nothing
+fails when a file loses the line: it is then read as the repository's own,
+under a licence that does not cover it.
+
+    declared() {
+      awk '{ sub(/\r$/, "") }
+           /^derived-work:/ { on = 1; next }
+           on && /^[^ #]/ { on = 0 }
+           !on || /^ *#/ { next }
+           { k = $0; sub(/^[ -]*/, "", k); v = k; sub(/:.*/, "", k)
+             sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+#.*$/, "", v); gsub(/["\047]/, "", v) }
+           /^ *- / { if (p != "") print p "|" t "|" g "|" s; p = t = g = s = "" }
+           k == "path" { p = v } k == "terms" { t = v } k == "tag" { g = v } k == "tagged" { s = v }
+           END { if (p != "") print p "|" t "|" g "|" s }' .agentics.yaml
+    }
+    tags() { sed -n '1,40p' "$1" | tr -d '\r' | sed -n -E 's/^[^[:alnum:]"]*SPDX-License-Identifier: *([^ ]+).*/\1/p' | sort -u; }
+    own=$(awk '{ sub(/\r$/, "") } /^  licence:/ { gsub(/"/, ""); print $2; exit }' .agentics.yaml)
+
+    set -f
+    declared | while IFS='|' read -r path terms tag tagged; do
+      if [ ! -f "$terms" ]; then echo "$path: no terms file at $terms"
+      elif ! grep -q -F -- "$tag" "$terms"; then echo "$terms: does not name the tag $tag"; fi
+      for pattern in $tagged; do
+        git ls-files -co --exclude-standard -- ":(glob)$path/**/$pattern"
+      done | sort -u | while read -r f; do
+        found=$(tags "$f")
+        case "$found" in
+          '') echo "$f: no tag" ;;
+          "$own" | "$tag") ;;
+          *) echo "$f: tagged $(echo $found), and not $own or $tag" ;;
+        esac
+      done
+      # .NET: a package of the component names the terms file as its licence.
+      projects=$(git ls-files -co --exclude-standard -- ":(glob)$path/**/*.csproj")
+      if [ -n "$projects" ] && ! echo "$projects" | tr '\n' '\0' | xargs -0 grep -l -F PackageLicenseFile > /dev/null; then
+        echo "$path: no project names a licence file"
+      fi
+      git grep --untracked -l -E "^[^[:alnum:]\"]*SPDX-License-Identifier: *$tag" -- . ":(exclude)$path" \
+        | sed "s|$|: tagged $tag, outside $path|"
+    done
+    set +f
+It reads every file git does not ignore, tracked or not, and the first 40
+lines of each. A file that is written as the project builds and is ignored
+is not read here: the test of the tool that writes it holds it, and the
+day such files are committed this check reads them with nothing changed.
+The line that looks for a project's licence file is .NET's.
+
+It prints nothing when the marks stand. What it prints is one of five:
+
+| Line | Means |
+|---|---|
+| `no terms file` | the component has no file that says which terms cover what, so a package of it goes out under the repository's licence |
+| `does not name the tag` | the files point at terms the terms file never mentions |
+| `no tag`, or `tagged <other>` | a file of a kind the declaration names, and nobody can tell from it whose terms apply. The repository's own file takes the repository's identifier; a derived one is the tool's to mend, not the file's |
+| `no project names a licence file` | a package built from the component would carry the licence identifier every package gets |
+| `tagged <tag>, outside <path>` | a derived file has left its component, or a component was added and not declared |
+
+Not checked here, and read in a review: that what was settled is
+recorded, that the original is fetched by a hash and held nowhere, and
+that the package says it is unofficial.

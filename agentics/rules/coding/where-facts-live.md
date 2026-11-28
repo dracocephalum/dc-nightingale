@@ -20,6 +20,8 @@ full twice drifts, and the reader cannot tell which copy is right.
 | What is owed, blocked or undecided | `TODO.md` | as [`../layout.md`](../layout.md), *Root documents*, says |
 | How does it differ from the reference product | `VARIANCES.md`, where the repository has one | what the reference does, what this does, why |
 | What is deferred, or declined | `PENDING.md`, `UNSUPPORTED.md`, where the repository has them | the approach decided; the reason it was set aside |
+| What comes next, in what order, and what waits for what | `ROADMAP.md`, where the repository has one; otherwise a list in `PENDING.md` or `TODO.md` | a stage a paragraph, naming where its detail is; it may hold what no other document does yet. [`../layout.md`](../layout.md), *A roadmap, where the plan has outgrown its file* |
+| What may be published of another's work, and under which terms | the plan until the package is built, then `DESIGN.md` | what was settled, in the repository's own words, with the other party's published rules as its source. [`../derived-work.md`](../derived-work.md) |
 | What does this word mean | the glossary, where the repository has one | one line |
 
 The split in the first three rows is the one the language communities agree
